@@ -63,6 +63,8 @@ Thread-safe by construction - the receive callback does the minimum, everything 
 
 - This is the **same execution context `handle_midi_message` already uses** (main loop, per `src/engine/iengine.h:92`). So terminal-injected stimulus reaches the engine exactly where MIDI does, and inherits MIDI's concurrency contract with the audio ISR - no new hazard. Determinism (keeping physical input from racing the injected stimulus) is handled by test mode below.
 
+The layer-[1] byte pipe - RX interrupt callback, the SPSC ring, non-blocking TX, and Logger coexistence on the one shared CDC device - is specified in detail in [`terminal-transport.md`](terminal-transport.md).
+
 ## Stimulus and observation
 
 ### Stimulus - drive the full IEngine input surface (target A)
@@ -127,22 +129,23 @@ The plan is a **built-in test-signal source** enabled in test mode - `stim signa
 
 **Line-ASCII is the floor and the default** - lightest, works with a dumb terminal, and text is trivial to assert on from a pytest harness. OSC is a drop-in *alternate codec behind the same dispatcher* for wiring the device into a Max/Pd/TouchOSC rig; it decodes into the identical internal `Command`. Raw OSC over serial has no length prefix, so it needs SLIP framing - the real cost beyond the parser.
 
-### Line grammar (sketch)
+The codec grammar, verb catalog, `IEngine` binding, `mode test` consult points, and reply grammar are specified in full in [`terminal-dispatch.md`](terminal-dispatch.md). Params/config are addressed **by name** in phase 1 (names survive enum reorders and are the point of a typable channel); the flat id<->name table is cheap enough to live in the base `SPK_TERMINAL` flag.
 
-```
-line      := verb SP arg* NL
-verb      := "set" | "get" | "query" | "measure" | "cv" | "gate" | "midi" | "pad" | "mode" | "help" | "describe" | <engine-verb>
-arg       := token                      ; whitespace-separated, no quoting in v1
-deck      := "A" | "B"
-value     := float | int | "<n>v" | hex ; codec coerces; dispatcher validates against ParamId range
-reply     := "ok" [SP result] NL | "err" SP reason NL
-```
+## Device self-description (`describe`) - phase 1
 
-## Device self-description (`describe`)
+`describe` is the introspection endpoint: the device reports its own control surface so a host configures itself instead of hardcoding per-engine knowledge. It emits the engine name, the `version.h` banner, and a **structured descriptor**: per parameter, its name, deck-scope, and range; per config, its enum labels; the query vocabulary; and the capability mask. A host harness consumes this to enumerate what a build exposes and run a **generic test sweep across all engine builds** without per-engine test code - the same leverage `IEngine` gives the platform, now given to the host. It also drives REPL autocompletion.
 
-`describe` emits the engine name, the `version.h` banner, and the param/config/query tables (id, name, deck-scope, range). A host harness consumes this to enumerate what a build exposes and run a **generic test sweep across all engine builds** without per-engine test code - the same leverage `IEngine` gives the platform, now given to the host. It also drives REPL autocompletion.
+Ownership of the metadata is split so the per-engine burden is near zero:
 
-This costs flash: `ParamId`/`ConfigId` are numeric today and need string name tables. Gate it behind a sub-flag `SPK_TERMINAL_REFLECT` so a flash-tight build (e.g. reverb) can ship the channel without the tables.
+- **Platform-owned (static tables).** Names (the flat id<->name table already in base), deck-scope (global vs per-deck is a property of the `ParamId`/`ConfigId`, implied by the enum), range conventions (most params are normalized 0..1; the few that are not - `Tempo`, `KeyInterval` - are fixed special-cases), and the `ConfigId` enum labels.
+
+- **Engine-owned (one masks pair).** A liveness mask so the descriptor lists only what the engine actually implements - without it `describe` over-reports and a generic round-trip sweep gets false failures on ignored params. Two one-line constants per engine, default "all live":
+  ```cpp
+  virtual ParamMask  live_params()  const { return ~0u; }   // bitset over ParamId (24 < 32)
+  virtual ConfigMask live_configs() const { return ~0u; }   // bitset over ConfigId
+  ```
+
+The `SPK_TERMINAL_REFLECT` flag remains only as an opt-**out** for a flash-tight build (e.g. reverb) that wants the named channel without the descriptor tables; it defaults **on** whenever `SPK_TERMINAL` is set. The descriptor format and streaming are specified in [`terminal-dispatch.md`](terminal-dispatch.md).
 
 ## Host tooling
 
@@ -150,35 +153,37 @@ This costs flash: `ParamId`/`ConfigId` are numeric today and need string name ta
 
 - **Dumb terminal / REPL.** `tio /dev/tty.usbmodem*` for interactive poking; a small pyserial REPL (`tools/skterm.py`) with history and `describe`-driven completion for hand-testing.
 
+The `skdev` client library, the pytest harness (`make test-hw`), and `skterm.py` are specified in full in [`terminal-tools.md`](terminal-tools.md).
+
 ## Compile-flag matrix and footprint
 
 Everything under `#if SPK_TERMINAL`, following the `SPK_USE_STREAM` / `METER` pattern - **zero cost when off.** Proposed location `src/terminal/`, parallel to `src/transport/` (a platform service, not an engine).
 
 | Flag | Adds |
 |------|------|
-| `SPK_TERMINAL` | channel + SPSC ring + line-ASCII codec + target A stimulus/get + target B hook + L0/L1 + `mode test` input isolation |
+| `SPK_TERMINAL` | channel + SPSC ring + line-ASCII codec + flat id<->name table + target A stimulus/get + target B hook + L0/L1 + `mode test` input isolation + `describe` introspection |
 | `SPK_TERMINAL_MEASURE` | L2 audio-property analyzer + `measure` verb |
 | `SPK_TERMINAL_STIM` | built-in test-signal source (`stim signal ...`) for through-processing engines |
 | `SPK_TERMINAL_OSC` | OSC + SLIP codec (behind the same dispatcher) |
-| `SPK_TERMINAL_REFLECT` | `describe` + `ParamId`/`ConfigId`/query name tables (flash cost) |
+| `SPK_TERMINAL_REFLECT` | opt-**out**: defaults on with `SPK_TERMINAL`; unset it to drop the `describe` descriptor tables on a flash-tight build |
 
 ## Phasing
 
-- **Phase 1 (day-one, `SPK_TERMINAL`).** Transport + ring + line codec + target A stimulus + L0/L1 observation + target B hook + `mode test`. Lands deterministic control-and-state engine tests fast, on self-generating and through-processing engines alike (control/state need no audio).
+- **Phase 1 (day-one, `SPK_TERMINAL`).** Transport + ring + line codec + flat names + target A stimulus + L0/L1 observation + target B hook + `mode test` + **`describe` introspection** (platform descriptor tables + per-engine liveness masks). Lands deterministic control-and-state engine tests fast, on self-generating and through-processing engines alike (control/state need no audio), and enables generic cross-engine sweeps from day one.
 
 - **Phase 2 (`SPK_TERMINAL_MEASURE`).** L2 audio-property tap. Enables output assertions for self-generating engines.
 
 - **Phase 3 (`SPK_TERMINAL_STIM`).** Test-signal injection, extending L2 to through-processing engines.
 
-- **Later.** `SPK_TERMINAL_REFLECT` (generic cross-engine sweeps), `SPK_TERMINAL_OSC` (music-rig codec).
+- **Later.** `SPK_TERMINAL_OSC` (music-rig codec).
 
 ## Open decisions
 
 1. **Test depth for phase 1.** Confirmed default: L0/L1 (control + state, no audio). `measure` (L2) and `stim` (signal injection) are phased behind sub-flags. Revisit if audio assertions are wanted sooner.
 
-2. **Log routing.** Route `Log`/`LOG_TAGGED` through the terminal CDC (unified console - recommended, keeps the boot trace) or set `LOGGER_NONE` under `SPK_TERMINAL` (simpler transport, no boot trace)?
+2. **Log routing.** Resolved to a compile flag by the transport spec: log routing *is* the existing `INFS_LOG`. `INFS_LOG=1` gives a unified console (the Logger brings up the CDC and boot-trace lines share the stream - recommended); `INFS_LOG=0` makes the terminal own bring-up and the port carries replies only. No libDaisy edits either way. Default recommendation: `SPK_TERMINAL` implies `INFS_LOG=1`.
 
-3. **Reflection timing.** Ship `describe` + name tables in phase 1 to unlock generic cross-engine sweeps (adds flash), or defer and hand-write per-engine tests first?
+3. **Reflection timing.** Resolved: `describe` is **in phase 1**. Named addressing plus the structured descriptor both ship day-one, so generic cross-engine sweeps work immediately. The residual per-engine work is the `live_params()`/`live_configs()` masks (two constants each); until an engine supplies them it defaults to "all live" (describe over-reports and sweeps must tolerate ignored params). `SPK_TERMINAL_REFLECT` survives only as a flash-tight opt-out.
 
 ## Alternative framing: USB-MIDI
 
