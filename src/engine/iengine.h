@@ -12,6 +12,9 @@
 #include "engine/engine_params.h" // ParamId, FxKind, Capabilities
 #include "engine/display_model.h" // DisplayModel
 #include "engine/engine_leds.h"   // FxLeds/PlayLeds/AltLeds/TransportLeds/DeckLeds/RingGeometry
+#if SPK_TERMINAL
+#include "engine/terminal_io.h"   // CommandView/TextSink for the terminal channel (phase-1 test surface)
+#endif
 
 namespace spotykach {
 
@@ -154,6 +157,26 @@ public:
     //     Default draws nothing; the granular engine still drives LEDs via the queries above until
     //     item 3 moves it to render(DisplayModel&). ---
     virtual void render(DisplayModel&) {}
+
+#if SPK_TERMINAL
+    // --- Terminal channel (SPK_TERMINAL, docs/dev/terminal-*.md) ------------------------------
+    // Engine-specific verbs and L1 `query` state the platform dispatcher does not know. Returns true
+    // iff the verb was RECOGNIZED (including when replying with an error via `reply`); false only if
+    // it is not this engine's verb at all (the dispatcher then emits "err unknown-verb"). Default
+    // no-op: engines using only the platform-reflective surface need nothing. An engine that
+    // implements any should set CapTerminal in capabilities().
+    virtual bool handle_command(const CommandView& /*cmd*/, TextSink& /*reply*/) { return false; }
+
+    // Liveness masks for `describe`: a bitset over ParamId/ConfigId marking what this engine actually
+    // implements, so the descriptor lists only real params (a generic round-trip sweep would else get
+    // false failures on ignored params). Default "all live" - describe over-reports and the host sweep
+    // must tolerate ignored params until an engine narrows these. (ParamId has 24 values < 32,
+    // ConfigId has 6 < 8, so uint32_t/uint8_t suffice.)
+    using ParamMask  = uint32_t;
+    using ConfigMask = uint8_t;
+    virtual ParamMask  live_params()  const { return ~ParamMask{0}; }
+    virtual ConfigMask live_configs() const { return static_cast<ConfigMask>(~ConfigMask{0}); }
+#endif
 };
 
 };

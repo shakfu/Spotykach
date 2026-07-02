@@ -10,6 +10,22 @@ ifeq ($(LOFI_INT16), 1)
 C_DEFS += -DLOFI_INT16=1
 endif
 
+# On-target terminal test channel (docs/dev/terminal-*.md). `make ... TERMINAL=1` enables a
+# bidirectional text/command channel over the USB-C CDC port for scripted engine testing + runtime
+# control. Zero cost when off (every terminal body is under #if SPK_TERMINAL; app.cpp/core.ui.cpp only
+# reference it under the flag). NOTE: SPK_TERMINAL adds virtuals to IEngine, so toggling it changes the
+# engine vtable - build clean when switching TERMINAL (the engine-* one-shot targets already `make
+# clean`; pass TERMINAL=1 to them, e.g. `make engine-delay TERMINAL=1`).
+#
+# Footprint: enabling the channel links the USB-device CDC stack + ~6 KB of terminal code (~19-25 KB of
+# SRAM_EXEC total, since a normal build never brings USB up). Lean engines (passthrough, delay ~94%) fit
+# at -O2; QSPI-execute engines (mosc/csound/chuck) have unlimited room. A near-full -O2 engine may need
+# -Os to fit (e.g. `make ENGINE=tape TERMINAL=1 OPT=-Os` -> ~98%); the tightest engines (granular, reso)
+# only host it from a QSPI-execute build. The linker reports `region SRAM_EXEC overflowed` if it won't fit.
+ifeq ($(TERMINAL), 1)
+C_DEFS += -DSPK_TERMINAL=1
+endif
+
 # Swappable DSP engine selected at build time (item 3b). Default = the granular looper.
 # `make ENGINE=passthrough` builds the minimal passthrough variant. The define drives
 # src/engine/engine_select.h (-> ActiveEngine); ENGINE_SOURCES compiles only the chosen engine.
@@ -356,6 +372,7 @@ CPP_SOURCES = \
 	src/engine/color.cpp \
 	src/engine/led.ring.cpp \
 	$(wildcard src/transport/*.cpp) \
+	$(wildcard src/terminal/*.cpp) \
 	$(wildcard src/dsp/*.cpp) \
 	$(wildcard src/hw/*.cpp) \
 	$(wildcard src/ui/*.cpp) \
@@ -382,8 +399,7 @@ build/stream_deck.o build/fat_file.o build/buffer.sdram.o: build/.engine-stamp
 # NOTE: after `scripts/gen_engine.py --remove`, run `make clean` once - the removed engine's stale
 # build/_ext_daisy.d still names its now-deleted source, which make rejects before any recipe runs.
 build/_ext_daisy.o build/genlib_arena.o: build/.engine-stamp
-build/.engine-stamp: FORCE
-	@mkdir -p build
+build/.engine-stamp: FORCE | $(BUILD_DIR)
 	@echo '$(ENGINE)' | cmp -s - $@ 2>/dev/null || echo '$(ENGINE)' > $@
 
 # Same trick for the baked-in version string: -DSPK_VERSION_STR is invisible to make's dependency
@@ -391,9 +407,19 @@ build/.engine-stamp: FORCE
 # binary. version.o holds the banner literal; app.o logs it at boot - both recompile when the
 # stamp's content changes (i.e. when SPK_VERSION changes), and nothing else does.
 build/version.o build/app.o: build/.version-stamp
-build/.version-stamp: FORCE
-	@mkdir -p build
+build/.version-stamp: FORCE | $(BUILD_DIR)
 	@echo '$(SPK_VERSION)' | cmp -s - $@ 2>/dev/null || echo '$(SPK_VERSION)' > $@
+
+# -DSPK_TERMINAL is invisible to make's dependency graph, so without this a `make TERMINAL=1` over a
+# stale non-terminal build would leave the platform TUs (app/core.ui, which reference the terminal only
+# under the flag) and the terminal service TUs (whose bodies are entirely under #if SPK_TERMINAL)
+# compiled the old way. Stamp them on the TERMINAL value so exactly those objects rebuild on a toggle.
+# (The engine objects also see the flag via the IEngine vtable; switching engines already `make clean`s,
+# and toggling TERMINAL is a clean build per the note above, so they are covered there.)
+build/app.o build/core.ui.o \
+build/terminal.o build/dispatch.o build/fmt.o build/names.o build/text_sink.o: build/.terminal-stamp
+build/.terminal-stamp: FORCE | $(BUILD_DIR)
+	@echo '$(TERMINAL)' | cmp -s - $@ 2>/dev/null || echo '$(TERMINAL)' > $@
 .PHONY: FORCE
 FORCE:
 
@@ -413,6 +439,13 @@ check-boundary:
 	@echo "boundary OK: hw/ui/memory include no engine/granular/ headers"
 
 all: check-boundary
+
+# On-target test harness (docs/dev/terminal-tools.md): drives a flashed, TERMINAL=1 device over the
+# USB-C CDC port via tools/skdev. Distinct from `test` (off-target host/ unit tests) - it needs real
+# hardware, and no-ops (pytest.skip) when no device is attached, so it is safe in a hardware-free CI.
+.PHONY: test-hw
+test-hw:
+	cd tools && python3 -m pytest -q
 
 # One-shot variant flash: clean -> build -> flash over DFU. Put the device in DFU mode first
 # (hold Reset ~3s until the bottom pad LEDs breathe white), then `make granular` / `make passthrough`.

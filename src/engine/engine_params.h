@@ -90,6 +90,8 @@ enum Capability : uint32_t {
     CapPitchPickup   = 1u << 9,  // route PITCH (ParamId::Speed) through the pickup-gated path instead of
                                  // the raw pot, so an engine that snaps speed (shuttle's Play->unity) can
                                  // hold the snap via take_param_reseed until the pot is swept across it
+    CapTerminal      = 1u << 10, // engine implements custom SPK_TERMINAL verbs / query names via
+                                 // handle_command(); advertised so `caps`/`describe`/`help` can note it
 };
 using Capabilities = uint32_t;
 

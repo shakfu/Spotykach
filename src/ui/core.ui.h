@@ -55,6 +55,13 @@ public:
 
     void process_gate_in();
 
+#if SPK_TERMINAL
+    // `mode test` input isolation: when set, the platform stops feeding physical input (knobs/CV/gate)
+    // to the engine so terminal-injected stimulus is the only driver (determinism). Outputs (LEDs/DAC/
+    // audio) keep rendering. app.cpp pushes the Terminal's test_mode() here each main-loop iteration.
+    void set_input_frozen(bool f) { _input_frozen = f; }
+#endif
+
 private:
     NOCOPY(CoreUI)
 
@@ -156,6 +163,9 @@ private:
     bool _aux_select = false;          // engine claims Alt+PITCH as a selector (CapAux -> ParamId::Aux)
     bool _alt_pos = false;             // engine claims the Alt+POS knob layer (CapAltPos -> ParamId::AltPos)
     bool _pitch_pickup = false;        // route PITCH through the pickup-gated path (CapPitchPickup, e.g. shuttle)
+#if SPK_TERMINAL
+    bool _input_frozen = false;        // `mode test`: freeze physical input -> engine (terminal.h)
+#endif
     Settings& _settings;
     Storage& _storage;
     Calibrator _calibrator;
