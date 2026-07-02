@@ -1,36 +1,22 @@
 # Indicator usage across engines — a comparison
 
-Companion to [`indicator-grammar.md`](indicator-grammar.md), which reverse-engineers the full
-indicator vocabulary from the reference `granular` engine. This document asks the follow-up
-question: **do the other engines actually use that vocabulary, or are they leaving capability on the
-table?**
+Companion to [`indicator-grammar.md`](indicator-grammar.md), which reverse-engineers the full indicator vocabulary from the reference `granular` engine. This document asks the follow-up question: **do the other engines actually use that vocabulary, or are they leaving capability on the table?**
 
-Short answer: **most engines use a small fraction of what the panel can express.** The rich grammar
-(mode-hued arcs, position/grain dots, red pickup-deviation overlays, breathe, clock-locked blink, the
-eight named per-deck indicators, storage rings) is almost entirely a `granular` phenomenon. Own-display
-engines converge on a common minimal dialect — *level arc + pitch/position dot + play dot + mode
-LEDs* — and a couple (`softcut`, `shuttle`, `chuck`) go further but **re-implement** platform
-features rather than reuse them.
+Short answer: **most engines use a small fraction of what the panel can express.** The rich grammar (mode-hued arcs, position/grain dots, red pickup-deviation overlays, breathe, clock-locked blink, the eight named per-deck indicators, storage rings) is almost entirely a `granular` phenomenon. Own-display engines converge on a common minimal dialect — *level arc + pitch/position dot + play dot + mode LEDs* — and a couple (`softcut`, `shuttle`, `chuck`) go further but **re-implement** platform features rather than reuse them.
 
 ---
 
 ## 1. Two rendering paths (why usage splits the way it does)
 
-There are two ways an engine's indicators reach the LEDs (`src/ui/core.ui.leds.cpp`,
-`src/engine/iengine.h`):
+There are two ways an engine's indicators reach the LEDs (`src/ui/core.ui.leds.cpp`, `src/engine/iengine.h`):
 
-- **Co-authored (granular only, plus its clone `graincloud`).** `capabilities()` does *not* set
-  `CapOwnDisplay`. The engine reports *semantics* (`deck_leds/fx_leds/play_leds/alt_leds/mix/route`
-  + `render_ring()`); the **platform** owns the palette, breathe/blink timers, the knob-value
-  "deviation" pickup overlays (`_show_value`), storage rings, and all eight named indicators. This
-  path is where the full grammar lives.
-- **Own-display (every other engine).** `capabilities()` sets `CapOwnDisplay`. The engine fills a
-  `DisplayModel` in `render()` and the platform **blits it verbatim** (`_blit_display()`), doing *no*
-  palette/blink/value interpretation. The engine gets a blank canvas and must draw everything itself.
+- **Co-authored (granular only, plus its clone `graincloud`).** `capabilities()` does *not* set `CapOwnDisplay`. The engine reports *semantics* (`deck_leds/fx_leds/play_leds/alt_leds/mix/route`
 
-The consequence is structural, not incidental: **an own-display engine that wants breathe, blink,
-value-pickup feedback, or storage animation has to re-code it**, because those live in the platform's
-granular path. Most don't bother — hence the thin dialect below.
+  + `render_ring()`); the **platform** owns the palette, breathe/blink timers, the knob-value "deviation" pickup overlays (`_show_value`), storage rings, and all eight named indicators. This path is where the full grammar lives.
+
+- **Own-display (every other engine).** `capabilities()` sets `CapOwnDisplay`. The engine fills a `DisplayModel` in `render()` and the platform **blits it verbatim** (`_blit_display()`), doing *no* palette/blink/value interpretation. The engine gets a blank canvas and must draw everything itself.
+
+The consequence is structural, not incidental: **an own-display engine that wants breathe, blink, value-pickup feedback, or storage animation has to re-code it**, because those live in the platform's granular path. Most don't bother — hence the thin dialect below.
 
 ---
 
@@ -52,9 +38,7 @@ granular path. Most don't bother — hence the thin dialect below.
 
 ## 3. Usage matrix
 
-Counts are raw references to each `DisplayModel` field / `LEDRing` primitive in an engine's
-`render()` (a proxy for "does it use this at all", not a quality score). Faust engines
-(`chorus/filter/voice` and others) inherit render from `faust/faust_chain.h` / `faust_fx.h`.
+Counts are raw references to each `DisplayModel` field / `LEDRing` primitive in an engine's `render()` (a proxy for "does it use this at all", not a quality score). Faust engines (`chorus/filter/voice` and others) inherit render from `faust/faust_chain.h` / `faust_fx.h`.
 
 ```
 ENGINE      | RING: seg pnt setpt bri | play rev | modeLCR | breathe/blink | named LEDs used
@@ -82,16 +66,11 @@ filter      |    (faust: level arc + play, if Traits::meter)               | pla
 voice       |    (faust: level arc + play, if Traits::meter)               | play
 ```
 
-`†` = migrated onto the shared toolkit (`indicators.h`): ring pictures via `ring::` helpers, breathe/blink
-from `motion::` (`yes (tk)`), plus the named FX/fader LEDs and knob-value overlays — the enhancement phase,
-not the pre-migration minimal dialect the rest of this matrix snapshots.
+`†` = migrated onto the shared toolkit (`indicators.h`): ring pictures via `ring::` helpers, breathe/blink from `motion::` (`yes (tk)`), plus the named FX/fader LEDs and knob-value overlays — the enhancement phase, not the pre-migration minimal dialect the rest of this matrix snapshots.
 
-`*` = co-authored path (query structs, not `render()`; breathe/blink/value overlays supplied by the
-platform).
+`*` = co-authored path (query structs, not `render()`; breathe/blink/value overlays supplied by the platform).
 
-**The columns that are all-zero across every own-display engine tell the story:**
-`grit`, `flux`, `gate_in`, `cycle`, `alt`, `fader`, `clock_in`, `spot` — **eight of the panel's
-indicators are used by *no* own-display engine.** `rev` is used by exactly one (`edrums`).
+**The columns that are all-zero across every own-display engine tell the story:** `grit`, `flux`, `gate_in`, `cycle`, `alt`, `fader`, `clock_in`, `spot` — **eight of the panel's indicators are used by *no* own-display engine.** `rev` is used by exactly one (`edrums`).
 
 ---
 
@@ -99,139 +78,74 @@ indicators are used by *no* own-display engine.** `rev` is used by exactly one (
 
 ### reso (the requested engine)
 `render()` at `src/engine/reso/reso_engine.cpp:289`. Draws, per deck:
-- **arc** = envelope level meter (`level·1.5` clamped), in a local 3-color mode palette
-  (`0xffcc00 / 0x00aaff / 0xaa00ff` — note these are *re-declared constants*, close to but not equal
-  to the platform's `kReelColor/kSliceColor/kDriftColor`);
-- **one white dot** = pitch position, or, while Alt+PITCH is held, **5 evenly-spaced dots** = the
-  resonator-model selector with the active model bright;
+- **arc** = envelope level meter (`level·1.5` clamped), in a local 3-color mode palette (`0xffcc00 / 0x00aaff / 0xaa00ff` — note these are *re-declared constants*, close to but not equal to the platform's `kReelColor/kSliceColor/kDriftColor`);
+
+- **one white dot** = pitch position, or, while Alt+PITCH is held, **5 evenly-spaced dots** = the resonator-model selector with the active model bright;
+
 - **play** indicator = mode color, flashed on trigger via a manual `flash` down-counter;
+
 - **mode L/C/R** = the three model/mode colors, active one bright.
 
-It's a clean, representative member of the minimal dialect. What it does **not** do, though the panel
-supports it: no breathe on idle, no value feedback when you turn Size/Structure/Brightness/Damping
-(you turn a knob and the ring shows nothing), no clock indicator despite `CapTransport`, and it hand-
-rolls a mode palette instead of sharing one.
+It's a clean, representative member of the minimal dialect. What it does **not** do, though the panel supports it: no breathe on idle, no value feedback when you turn Size/Structure/Brightness/Damping (you turn a knob and the ring shows nothing), no clock indicator despite `CapTransport`, and it hand- rolls a mode palette instead of sharing one.
 
 ### mosc, delay, qdelay, tape, reverb, glitch, pstretch, radio, csound
-All variations on *level/activity arc + a dot or two + play + mode LEDs*. `radio` and `glitch` and
-`pstretch` add expressive dots (spectral/scan/grain positions). `csound`/`chuck` add an Alt-held
-**patch selector** ring (dots per program) — the same idiom `reso` uses for models and
-`softcut/shuttle` use for tape slots, each **implemented independently**.
+All variations on *level/activity arc + a dot or two + play + mode LEDs*. `radio` and `glitch` and `pstretch` add expressive dots (spectral/scan/grain positions). `csound`/`chuck` add an Alt-held **patch selector** ring (dots per program) — the same idiom `reso` uses for models and `softcut/shuttle` use for tape slots, each **implemented independently**.
 
 ### chuck
-The richest `render()` (most primitive calls): patch-selector ring, running/stopped play color,
-per-deck arcs and dots. Still confined to ring + play + mode; no breathe/blink/named-LED use.
+The richest `render()` (most primitive calls): patch-selector ring, running/stopped play color, per-deck arcs and dots. Still confined to ring + play + mode; no breathe/blink/named-LED use.
 
 ### softcut & shuttle (the "reinventors")
 These go furthest — and in doing so **duplicate platform capability**:
-- **Own breathe**: a raised-cosine `0.35+0.25·…` over `now_ms()%2400` (`softcut_engine.cpp`,
-  `shuttle_engine.cpp`) — a hand-rolled copy of the platform's `_breathe_led()`.
-- **Own storage-slot ring**: an Alt-held tape-slot selector (selected bright / used mid / empty dim)
-  — a hand-rolled copy of the platform's `_show_slots()` / storage progress ring.
-- **Direction-coded transport color** (record red / fwd green / rev cyan / frozen white) packed into
-  the play dot + ring, instead of the dedicated `rev` LED that exists for exactly this.
+- **Own breathe**: a raised-cosine `0.35+0.25·…` over `now_ms()%2400` (`softcut_engine.cpp`, `shuttle_engine.cpp`) — a hand-rolled copy of the platform's `_breathe_led()`.
 
-They are the *best-looking* non-granular engines precisely because they re-created features the
-platform already has — evidence the capability is desirable and the reuse path is missing.
+- **Own storage-slot ring**: an Alt-held tape-slot selector (selected bright / used mid / empty dim) — a hand-rolled copy of the platform's `_show_slots()` / storage progress ring.
+
+- **Direction-coded transport color** (record red / fwd green / rev cyan / frozen white) packed into the play dot + ring, instead of the dedicated `rev` LED that exists for exactly this.
+
+They are the *best-looking* non-granular engines precisely because they re-created features the platform already has — evidence the capability is desirable and the reuse path is missing.
 
 ### edrums
-The only own-display engine to light a second named LED (`rev`), used as a second trigger/deck
-indicator. No mode LEDs. Shows the named indicators *can* be driven from `render()` — nobody else does.
+The only own-display engine to light a second named LED (`rev`), used as a second trigger/deck indicator. No mode LEDs. Shows the named indicators *can* be driven from `render()` — nobody else does.
 
 ### chorus, filter, voice (and other Faust engines)
-Inherit `render()` from `faust/faust_chain.h:122` / `faust_fx.h:153`: a level-meter arc + play dot,
-**compile-time gated by `Traits::meter`**. If a Faust engine's manifest doesn't set `meter`, its
-panel is entirely dark. This is the floor of the spectrum.
+Inherit `render()` from `faust/faust_chain.h:122` / `faust_fx.h:153`: a level-meter arc + play dot, **compile-time gated by `Traits::meter`**. If a Faust engine's manifest doesn't set `meter`, its panel is entirely dark. This is the floor of the spectrum.
 
 ---
 
 ## 5. Findings — where capability is left on the table
 
-1. **Eight indicators are dead for every engine but granular.** `grit`, `flux`, `gate_in`, `cycle`,
-   `alt`, `fader`, `clock_in`, `spot` are never set outside the granular path. Some are granular-
-   specific by label (grit/flux), but `cycle` (an LFO/mod indicator), `fader` (A/B balance),
-   `clock_in` (sync source), and `alt` (modifier feedback) are **generic** and would be meaningful on
-   many engines — e.g. `reso/softcut` have `CapTransport` but show no clock, `mosc/reso` have LFO-ish
-   params but no `cycle` glow. *(Partly resolved: the `tape` enhancement lights `grit` (the filter its
-   pad drives), `flux` (saturation), `cycle` (wow/flutter), and `fader` (crossfade) via new `led::grit`/`led::flux`/
-   `led::cycle`/`led::fader_balance` — the first own-display engine to drive them. `gate_in`/`alt`/`spot`/
-   `clock_in` remain unused off the granular path.)*
+1. **Eight indicators are dead for every engine but granular.** `grit`, `flux`, `gate_in`, `cycle`, `alt`, `fader`, `clock_in`, `spot` are never set outside the granular path. Some are granular- specific by label (grit/flux), but `cycle` (an LFO/mod indicator), `fader` (A/B balance), `clock_in` (sync source), and `alt` (modifier feedback) are **generic** and would be meaningful on many engines — e.g. `reso/softcut` have `CapTransport` but show no clock, `mosc/reso` have LFO-ish params but no `cycle` glow. *(Partly resolved: the `tape` enhancement lights `grit` (the filter its pad drives), `flux` (saturation), `cycle` (wow/flutter), and `fader` (crossfade) via new `led::grit`/`led::flux`/ `led::cycle`/`led::fader_balance` — the first own-display engine to drive them. `gate_in`/`alt`/`spot`/ `clock_in` remain unused off the granular path.)*
 
-2. **No knob-value feedback off the granular path.** The platform's `_show_value` pickup overlay (the
-   red deviation arc + target dot that makes granular's knobs legible, and the whole tracking/pickup
-   UX) is keyed off `MValue`/`ParamId` inside the platform's `_draw_ring`. Own-display engines get
-   **none of it**: turning a knob on reso/mosc/etc. produces no visual response at all. This is
-   the single biggest expressive gap. *(`shuttle` and now `tape` close it engine-side via `ring::value`
-   + param-aware overlays — tape shows a value bar for scalars, a `ring::selector` for the ENV loop-mode,
-   and markers for PITCH/pan; the same pattern is ready for the other engines.)*
+2. **No knob-value feedback off the granular path.** The platform's `_show_value` pickup overlay (the red deviation arc + target dot that makes granular's knobs legible, and the whole tracking/pickup UX) is keyed off `MValue`/`ParamId` inside the platform's `_draw_ring`. Own-display engines get **none of it**: turning a knob on reso/mosc/etc. produces no visual response at all. This is the single biggest expressive gap. *(`shuttle` and now `tape` close it engine-side via `ring::value`
 
-3. **Breathe / blink must be re-coded.** Only `softcut` and `shuttle` bother, by copying the math.
-   Everyone else has a static (often black-when-idle) panel. "Idle but ready" vs "off" is
-   indistinguishable on most engines.
+   + param-aware overlays — tape shows a value bar for scalars, a `ring::selector` for the ENV loop-mode, and markers for PITCH/pan; the same pattern is ready for the other engines.)*
 
-4. **Palette duplication.** Mode colors are re-declared per engine (`reso`'s `0xffcc00…` vs the
-   platform's `kReelColor 0xf7941d…`), so hues drift between engines and none share the tape/clock
-   palettes. The grammar's "hue = identity" only holds *within* an engine.
+3. **Breathe / blink must be re-coded.** Only `softcut` and `shuttle` bother, by copying the math. Everyone else has a static (often black-when-idle) panel. "Idle but ready" vs "off" is indistinguishable on most engines.
 
-5. **Selector-ring idiom reinvented 5×.** The Alt-held "dots around the ring, active one bright"
-   pattern appears independently in reso (models), chuck/csound (patches), softcut/shuttle (slots).
-   It's clearly a common need with no shared helper.
+4. **Palette duplication.** Mode colors are re-declared per engine (`reso`'s `0xffcc00…` vs the platform's `kReelColor 0xf7941d…`), so hues drift between engines and none share the tape/clock palettes. The grammar's "hue = identity" only holds *within* an engine.
 
-6. **The floor is dark.** Faust engines with `meter=false` show nothing; `passthrough` shows only a
-   level arc + play. Nothing signals mode, activity, or readiness.
+5. **Selector-ring idiom reinvented 5×.** The Alt-held "dots around the ring, active one bright" pattern appears independently in reso (models), chuck/csound (patches), softcut/shuttle (slots). It's clearly a common need with no shared helper.
 
-7. **The routing-switch block is reinvented 6×.** Every engine whose L/C/R LEDs show the channel
-   `Route` (tape/shuttle/softcut/radio/glitch/pstretch) ships a byte-for-byte copy of
-   `if DoubleMono → mode_left / Stereo → mode_center / else → mode_right`, white 0.8. Promoted to
-   `led::route_leds(m, route)` during the tape migration — the mode-LED analog of `led::mode_leds`.
+6. **The floor is dark.** Faust engines with `meter=false` show nothing; `passthrough` shows only a level arc + play. Nothing signals mode, activity, or readiness.
+
+7. **The routing-switch block is reinvented 6×.** Every engine whose L/C/R LEDs show the channel `Route` (tape/shuttle/softcut/radio/glitch/pstretch) ships a byte-for-byte copy of `if DoubleMono → mode_left / Stereo → mode_center / else → mode_right`, white 0.8. Promoted to `led::route_leds(m, route)` during the tape migration — the mode-LED analog of `led::mode_leds`.
 
 ---
 
 ## 6. Recommendations
 
-> **Status:** recommendations 1–3 are now implemented in **`src/engine/indicators.h`** — a shared,
-> hardware-free helper toolkit any engine's `render()` can call (value-pickup overlay, breathe/blink,
-> selector/slot/progress/level rings, the direction-coded transport color, and the canonical
-> palette). API + a best-use example are in [`indicator-grammar.md` §8](indicator-grammar.md#8-shared-helper-api-engineindicatorsh).
-> **`shuttle` is the first engine migrated onto it** (`src/engine/shuttle/shuttle_engine.cpp`): its
-> hand-rolled breathe/transport-color/slot code was replaced by the helpers (behavior-preserving),
-> then enhanced with A/B fader LEDs, a loop-window arc, a wow/flutter cycle glow, and knob-turn value
-> bars — see [`indicator-grammar.md` §8 "First adopter"](indicator-grammar.md#first-adopter-shuttle).
-> **`tape` is the second** (`src/engine/tape/tape_engine.cpp`), in two phases like shuttle. **(1)** a
-> behavior-preserving swap: transport-color ladder → `transport_view`/`led::transport`, amber strobe →
-> `motion::blink`, slot loop → `ring::slots`, solid ring → `ring::level`, routing block → the new
-> `led::route_leds`. **(2)** then *enhancements that speak more of the grammar*: a record-level meter
-> (peak follower + `ring::level`, scoped to recording — playback stays a calm solid ring), a varispeed
-> marker (`ring::playhead` — tape's ±2-octave PITCH was shown nowhere), an idle standby breathe,
-> param-aware knob-value overlays (MIX/FX bars, ENV as a 4-way
-> `ring::selector`, PITCH/pan markers), and four of the "dead" named LEDs — `led::grit` (the filter the grit
-> pad drives), `led::flux` (saturation), `led::cycle` (wow/flutter), `led::fader_balance` (crossfade). See
-> [`indicator-grammar.md` §8 "Second adopter"](indicator-grammar.md#second-adopter-tape). Migrating tape
-> added **`led::route_leds`/`led::grit`/`led::flux`** to the toolkit (see finding 7 and finding 1). `softcut`
-> (shuttle's twin) is deferred until its functionality settles. What remains is migrating the other engines'
-> `render()` onto the toolkit and lifting `core.ui.leds.cpp`'s constants onto `pal::`.
+> **Status:** recommendations 1–3 are now implemented in **`src/engine/indicators.h`** — a shared, > hardware-free helper toolkit any engine's `render()` can call (value-pickup overlay, breathe/blink, > selector/slot/progress/level rings, the direction-coded transport color, and the canonical > palette). API + a best-use example are in [`indicator-grammar.md` §8](indicator-grammar.md#8-shared-helper-api-engineindicatorsh). > **`shuttle` is the first engine migrated onto it** (`src/engine/shuttle/shuttle_engine.cpp`): its > hand-rolled breathe/transport-color/slot code was replaced by the helpers (behavior-preserving), > then enhanced with A/B fader LEDs, a loop-window arc, a wow/flutter cycle glow, and knob-turn value > bars — see [`indicator-grammar.md` §8 "First adopter"](indicator-grammar.md#first-adopter-shuttle). > **`tape` is the second** (`src/engine/tape/tape_engine.cpp`), in two phases like shuttle. **(1)** a > behavior-preserving swap: transport-color ladder → `transport_view`/`led::transport`, amber strobe → > `motion::blink`, slot loop → `ring::slots`, solid ring → `ring::level`, routing block → the new > `led::route_leds`. **(2)** then *enhancements that speak more of the grammar*: a record-level meter > (peak follower + `ring::level`, scoped to recording — playback stays a calm solid ring), a varispeed > marker (`ring::playhead` — tape's ±2-octave PITCH was shown nowhere), an idle standby breathe, > param-aware knob-value overlays (MIX/FX bars, ENV as a 4-way > `ring::selector`, PITCH/pan markers), and four of the "dead" named LEDs — `led::grit` (the filter the grit > pad drives), `led::flux` (saturation), `led::cycle` (wow/flutter), `led::fader_balance` (crossfade). See > [`indicator-grammar.md` §8 "Second adopter"](indicator-grammar.md#second-adopter-tape). Migrating tape > added **`led::route_leds`/`led::grit`/`led::flux`** to the toolkit (see finding 7 and finding 1). `softcut` > (shuttle's twin) is deferred until its functionality settles. What remains is migrating the other engines' > `render()` onto the toolkit and lifting `core.ui.leds.cpp`'s constants onto `pal::`.
 
 Ordered by leverage:
 
-1. **Lift the value-pickup overlay into a shared, engine-callable helper.** The `_show_value`
-   deviation/pickup rendering is the highest-value missing feature for own-display engines. Expose it
-   as a `DisplayModel`/`LEDRing` utility (e.g. `draw_value(ring, value, in_value, color)`) that any
-   `render()` can call, so knob turns become legible everywhere — not just granular.
+1. **Lift the value-pickup overlay into a shared, engine-callable helper.** The `_show_value` deviation/pickup rendering is the highest-value missing feature for own-display engines. Expose it as a `DisplayModel`/`LEDRing` utility (e.g. `draw_value(ring, value, in_value, color)`) that any `render()` can call, so knob turns become legible everywhere — not just granular.
 
-2. **Provide shared platform helpers for breathe, the selector-ring, and progress/storage rings.**
-   `softcut`/`shuttle` prove the demand and the shape; promote their (and the platform's) copies to
-   one reusable set so engines stop hand-rolling `now_ms()` cosines and slot loops.
+2. **Provide shared platform helpers for breathe, the selector-ring, and progress/storage rings.** `softcut`/`shuttle` prove the demand and the shape; promote their (and the platform's) copies to one reusable set so engines stop hand-rolling `now_ms()` cosines and slot loops.
 
-3. **Publish the canonical palette** (`kReelColor`, mode/clock/tape hues) in a shared header engines
-   include, replacing per-engine constants — restores "hue = identity" across the whole instrument.
+3. **Publish the canonical palette** (`kReelColor`, mode/clock/tape hues) in a shared header engines include, replacing per-engine constants — restores "hue = identity" across the whole instrument.
 
-4. **Wire the generic named indicators from `render()`.** At minimum drive `clock_in` for
-   `CapTransport` engines and `fader` for `CapDualDeck` engines with a balance; consider `cycle` for
-   engines with an LFO. `edrums` already shows named LEDs are reachable from `render()`.
+4. **Wire the generic named indicators from `render()`.** At minimum drive `clock_in` for `CapTransport` engines and `fader` for `CapDualDeck` engines with a balance; consider `cycle` for engines with an LFO. `edrums` already shows named LEDs are reachable from `render()`.
 
-5. **Give Faust engines a non-blank default.** Even without `meter`, a mode-hued idle breathe + play
-   dot would lift the floor.
+5. **Give Faust engines a non-blank default.** Even without `meter`, a mode-hued idle breathe + play dot would lift the floor.
 
-The theme: the grammar is rich but **trapped in the platform's granular path**. Turning its key
-pieces (value feedback, breathe, selector/progress rings, palette) into shared helpers callable from
-`render()` would let every own-display engine speak the full language instead of the current pidgin.
+The theme: the grammar is rich but **trapped in the platform's granular path**. Turning its key pieces (value feedback, breathe, selector/progress rings, palette) into shared helpers callable from `render()` would let every own-display engine speak the full language instead of the current pidgin.

@@ -37,5 +37,7 @@ GPLv3, not MIT like the rest of the repo. `src/dsp/diffuser.h` is a derivative o
 ## Notes / possible improvements
 
 - Diffuse only smears the feedback; a pre/post diffusion option (qdelay exposes both) would need a control the panel doesn't have.
+
 - Duck depth/sensitivity (`kDuckAmt`/`kDuckFloor`) and the diffuser smear (`set_smear`, fixed at qdelay's 0.75) are compile-time constants; none of them has a free knob on the surface.
+
 - The diffuser is a single stereo instance keyed off deck A's SIZE; a fully independent per-deck diffuser in DoubleMono would double the buffer budget for little musical gain.

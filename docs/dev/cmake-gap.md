@@ -11,7 +11,9 @@ After the CMake build was brought to full engine parity, every CMake binary link
 Binary diffing, not guessing:
 
 1. `arm-none-eabi-size -A` on both ELFs to localize the delta to sections (`.text` / `.data`).
+
 2. `arm-none-eabi-nm --print-size --size-sort` on both, joined by symbol name, to find symbols **only in** one build or **larger in** one build.
+
 3. The GNU `ld` map's "Archive member included to satisfy reference by file (symbol)" section to trace **why** an object was pulled into the link.
 
 This isolated three independent causes.
@@ -65,6 +67,7 @@ Both builds pass `--specs=nano.specs --specs=nosys.specs`, both link `libstdc++_
 The trigger is `crt0.o`, which references `exit`. Both builds link the same `crt0.o`, and `crt0.o` is processed **before** any `-l` library, so its `exit` (and the reentrancy pointer it needs) bind to whichever `libc` the linker reaches first:
 
 - **Make** lists the standard libraries explicitly — `LIBS += -ldaisy -lc -lm -lnosys` (libDaisy `core/Makefile`) — and with `nano.specs` rewriting the *implicit* `-lc` to `-lc_nano`, the ordering makes the nano library the primary resolver. Full `exit` is never pulled; `exit` resolves to nano's 40-byte stub and the small reent.
+
 - **CMake** has `CMAKE_CXX_IMPLICIT_LINK_LIBRARIES` set empty by the toolchain file, so the standard libraries come only from the spec-injected group. `crt0.o`'s pending `exit` falls through to the linker's default-search **full `libc.a`**, which pulls full `exit` → `__call_exitprocs` → `__call_atexit` → the 968 B `impure_data`.
 
 This is purely a link-time symbol-resolution-order difference; the compiled objects are identical.
@@ -72,8 +75,11 @@ This is purely a link-time symbol-resolution-order difference; the compiled obje
 ### What was tried (and why each failed)
 
 - **Append `-lc_nano`** after the groups — no effect. Once `ld` has bound `_global_impure_ptr` to `libc.a`, a later library cannot rebind it.
+
 - **Insert `-lc_nano -lm -lnosys` right after `libdaisy.a`** (mirroring Make's order) — no effect. `crt0.o` is upstream of *every* `-l` flag, so its references are resolved before any added library is reached.
+
 - **`-nostartfiles`** to drop the redundant `crt0.o` — breaks the link (`__dso_handle`, provided by `crtbegin.o`, goes undefined; the firmware needs the crt files, and the Make build keeps them too).
+
 - Ruled out as suspects: implicit C++ libs (empty in both), the `libstdc++` variant (nano in both), and `-lg`/debug-libc (no `-g` on either link line).
 
 A robust build-system fix would require replicating the Makefile's exact newlib library ordering inside CMake (or excluding full `libc.a` from the default search) — fragile, with real risk of breaking the link or boot, for 0.5 % of a struct that is never used on bare metal.
@@ -98,7 +104,9 @@ extern "C" int __cxa_atexit(void (*)(void*), void*, void*) { return 0; }
 ### Why it is not done
 
 - It is a **firmware source change to compensate for a build-system difference**. The firmware is correct as written; the discrepancy lives entirely in how CMake orders the newlib libraries at link time. Patching the program to hide a linker-ordering quirk is the wrong layer.
+
 - It affects **both** build systems. The Make build already avoids the full `impure_data`, so the stub buys it nothing; it only adds firmware that exists to satisfy the opt-in build.
+
 - The payoff is ~968 B of `SRAM_EXEC`, and only on the CMake build — below the bar for changing shipping firmware behaviour (overriding `exit`/`__cxa_atexit` is a real semantic change, even if dead on this target).
 
 If the CMake build is ever promoted to canonical (the deferred option noted in `Makefile.cmake`), revisit this: at that point a firmware `exit` stub — or, better, aligning the CMake link's library list/order with the Makefile so nano resolves first — becomes worth doing, and the stub above is the quick lever.
@@ -106,5 +114,7 @@ If the CMake build is ever promoted to canonical (the deferred option noted in `
 ## Files
 
 - `CMakeLists.txt` — the two applied fixes (`DSY_DISABLE_USB_HOST` on the `daisy` target; `${APP_OPT}` on the `FatFs` target), in the fork-gap / size-parity block after `include(DaisyProject)`.
+
 - `lib/libDaisy/Makefile` (line ~307) — where the fork sets `-DDSY_DISABLE_USB_HOST` for the Make build; the CMake fix mirrors it.
+
 - `lib/libDaisy/src/sys/fatfs.cpp` — the `#ifndef DSY_DISABLE_USB_HOST` guard around `USBH_Driver`.

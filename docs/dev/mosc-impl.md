@@ -31,7 +31,9 @@ Plaits renders at 48 kHz in **`kBlockSize = 12`**-sample chunks; the platform's 
 **Dual-deck routing.** `process()` renders **both** voices for each 12-sample chunk *before* mixing, so the cross-deck routes have both signals on hand:
 
 - `Route::Stereo` — `L = A.out`, `R = B.out`.
+
 - `Route::DoubleMono` — `L = R = (A.out + B.out) * 0.5`.
+
 - `Route::GenerativeStereo` — `L = (A.out + B.aux) * 0.5`, `R = (B.out + A.aux) * 0.5`. This is the only place Plaits' **aux** output is used (otherwise discarded); summed modes are ×0.5 to avoid clipping. Per-deck level metering is taken from each voice's own `out` (not the mixed channel) so the rings stay per-deck.
 
 **Triggers.** A trigger (Play pad / gate-in / MIDI note / Seq) holds `modulations.trigger` high for a few render blocks so `Voice` sees a clean rising-then-falling edge (its `trigger_delay_` is a per-block shift register). Gate mode sets `trigger_patched = true` (the LPG/decay envelope fires on trigger); Drone mode sets it `false` (LPG bypassed, engine runs open). V/Oct CV is **additive** (`cv_semis`, summed into the note via `base_note()`), never an override — the same fix reso applies so the PITCH knob is not clobbered by an unpatched jack.
