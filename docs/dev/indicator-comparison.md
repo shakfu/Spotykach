@@ -71,7 +71,7 @@ glitch      |       2   2    0    0   |   1   0  |   yes   |      no       | pla
 pstretch    |       1   2    0    0   |   1   0  |   yes   |      no       | play, mode
 reso        |       1   0    2    0   |   1   0  |   yes   |      no       | play, mode
 mosc        |       1   0    2    0   |   1   0  |   yes   |      no       | play, mode
-tape        |       2   0    1    0   |   1   0  |   yes   |      no       | play, mode
+tape †      |   (via toolkit helpers) |   1   0  |   yes   |  yes (tk)     | play, mode, grit, flux, cycle, fader
 reverb      |       2   0    0    2   |   1   0  |   yes   |      no       | play, mode
 edrums      |       0   0    2    0   |   1   1  |   no    |      no       | play, REV
 delay       |       1   0    0    0   |   1   0  |   yes   |      no       | play, mode
@@ -81,6 +81,10 @@ chorus      |    (faust: level arc + play, if Traits::meter)               | pla
 filter      |    (faust: level arc + play, if Traits::meter)               | play
 voice       |    (faust: level arc + play, if Traits::meter)               | play
 ```
+
+`†` = migrated onto the shared toolkit (`indicators.h`): ring pictures via `ring::` helpers, breathe/blink
+from `motion::` (`yes (tk)`), plus the named FX/fader LEDs and knob-value overlays — the enhancement phase,
+not the pre-migration minimal dialect the rest of this matrix snapshots.
 
 `*` = co-authored path (query structs, not `render()`; breathe/blink/value overlays supplied by the
 platform).
@@ -148,13 +152,18 @@ panel is entirely dark. This is the floor of the spectrum.
    specific by label (grit/flux), but `cycle` (an LFO/mod indicator), `fader` (A/B balance),
    `clock_in` (sync source), and `alt` (modifier feedback) are **generic** and would be meaningful on
    many engines — e.g. `reso/softcut` have `CapTransport` but show no clock, `mosc/reso` have LFO-ish
-   params but no `cycle` glow.
+   params but no `cycle` glow. *(Partly resolved: the `tape` enhancement lights `grit` (the filter its
+   pad drives), `flux` (saturation), `cycle` (wow/flutter), and `fader` (crossfade) via new `led::grit`/`led::flux`/
+   `led::cycle`/`led::fader_balance` — the first own-display engine to drive them. `gate_in`/`alt`/`spot`/
+   `clock_in` remain unused off the granular path.)*
 
 2. **No knob-value feedback off the granular path.** The platform's `_show_value` pickup overlay (the
    red deviation arc + target dot that makes granular's knobs legible, and the whole tracking/pickup
    UX) is keyed off `MValue`/`ParamId` inside the platform's `_draw_ring`. Own-display engines get
-   **none of it**: turning a knob on reso/mosc/tape/etc. produces no visual response at all. This is
-   the single biggest expressive gap.
+   **none of it**: turning a knob on reso/mosc/etc. produces no visual response at all. This is
+   the single biggest expressive gap. *(`shuttle` and now `tape` close it engine-side via `ring::value`
+   + param-aware overlays — tape shows a value bar for scalars, a `ring::selector` for the ENV loop-mode,
+   and markers for PITCH/pan; the same pattern is ready for the other engines.)*
 
 3. **Breathe / blink must be re-coded.** Only `softcut` and `shuttle` bother, by copying the math.
    Everyone else has a static (often black-when-idle) panel. "Idle but ready" vs "off" is
@@ -171,6 +180,11 @@ panel is entirely dark. This is the floor of the spectrum.
 6. **The floor is dark.** Faust engines with `meter=false` show nothing; `passthrough` shows only a
    level arc + play. Nothing signals mode, activity, or readiness.
 
+7. **The routing-switch block is reinvented 6×.** Every engine whose L/C/R LEDs show the channel
+   `Route` (tape/shuttle/softcut/radio/glitch/pstretch) ships a byte-for-byte copy of
+   `if DoubleMono → mode_left / Stereo → mode_center / else → mode_right`, white 0.8. Promoted to
+   `led::route_leds(m, route)` during the tape migration — the mode-LED analog of `led::mode_leds`.
+
 ---
 
 ## 6. Recommendations
@@ -183,8 +197,19 @@ panel is entirely dark. This is the floor of the spectrum.
 > hand-rolled breathe/transport-color/slot code was replaced by the helpers (behavior-preserving),
 > then enhanced with A/B fader LEDs, a loop-window arc, a wow/flutter cycle glow, and knob-turn value
 > bars — see [`indicator-grammar.md` §8 "First adopter"](indicator-grammar.md#first-adopter-shuttle).
-> What remains is migrating the other engines' `render()` onto it (`softcut` next — it's shuttle's
-> twin) and lifting the platform's `core.ui.leds.cpp` constants onto `pal::`.
+> **`tape` is the second** (`src/engine/tape/tape_engine.cpp`), in two phases like shuttle. **(1)** a
+> behavior-preserving swap: transport-color ladder → `transport_view`/`led::transport`, amber strobe →
+> `motion::blink`, slot loop → `ring::slots`, solid ring → `ring::level`, routing block → the new
+> `led::route_leds`. **(2)** then *enhancements that speak more of the grammar*: a record-level meter
+> (peak follower + `ring::level`, scoped to recording — playback stays a calm solid ring), a varispeed
+> marker (`ring::playhead` — tape's ±2-octave PITCH was shown nowhere), an idle standby breathe,
+> param-aware knob-value overlays (MIX/FX bars, ENV as a 4-way
+> `ring::selector`, PITCH/pan markers), and four of the "dead" named LEDs — `led::grit` (the filter the grit
+> pad drives), `led::flux` (saturation), `led::cycle` (wow/flutter), `led::fader_balance` (crossfade). See
+> [`indicator-grammar.md` §8 "Second adopter"](indicator-grammar.md#second-adopter-tape). Migrating tape
+> added **`led::route_leds`/`led::grit`/`led::flux`** to the toolkit (see finding 7 and finding 1). `softcut`
+> (shuttle's twin) is deferred until its functionality settles. What remains is migrating the other engines'
+> `render()` onto the toolkit and lifting `core.ui.leds.cpp`'s constants onto `pal::`.
 
 Ordered by leverage:
 

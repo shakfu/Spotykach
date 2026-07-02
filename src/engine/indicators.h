@@ -227,6 +227,19 @@ namespace led {
         m.mode_right  = { pal::kDrift, active == Mode::Drift ? on : off };
     }
 
+    // Routing-switch position on the SAME three L/C/R LEDs, lit white: DoubleMono=left, Stereo=center,
+    // GenerativeStereo=right. Engines whose L/C/R switch selects a channel Route (not a Reel/Slice/Drift
+    // Mode) hand-roll this identical three-way block — tape/shuttle/softcut/radio/glitch/pstretch all
+    // ship a byte-for-byte copy. This is the one call; an engine drives route_leds() OR mode_leds(),
+    // never both (they own the same LEDs). clear() has already turned the other two off.
+    inline void route_leds(DisplayModel& m, Route route, float on = 0.8f) {
+        switch (route) {
+            case Route::DoubleMono:       m.mode_left   = { pal::kWhite, on }; break;
+            case Route::Stereo:           m.mode_center = { pal::kWhite, on }; break;
+            case Route::GenerativeStereo: m.mode_right  = { pal::kWhite, on }; break;
+        }
+    }
+
     // Clock source indicator — source-colored, white on the key beat. For CapTransport engines
     // that today show no clock at all.
     inline void clock(DisplayModel& m, ClockSource::Source src, bool on_beat = false, bool is_key_beat = false) {
@@ -242,6 +255,19 @@ namespace led {
     // LFO / modulation "cycle" glow — brightness tracks the modulator phase/depth.
     inline void cycle(DisplayModel& m, int deck, float phase01, uint32_t hue = pal::kWhite) {
         m.cycle[deck] = { hue, std::clamp(phase01, 0.f, 1.f) };
+    }
+
+    // GRIT FX indicator — the drive/saturation/decimation LED (granular's yellow-soft / orange-harsh).
+    // Brightness = how hard the FX is driven; `off` is the always-lit floor (0.5 = granular's "lit but
+    // idle" convention, 0 = dark when neutral). An FX engine wires its saturation amount here.
+    inline void grit(DisplayModel& m, int deck, float amount01, GritMode g = GritMode::Drive, float off = 0.5f) {
+        m.grit[deck] = { pal::grit(g), off + (1.f - off) * std::clamp(amount01, 0.f, 1.f) };
+    }
+
+    // FLUX FX indicator — the coral tape-delay/filter LED. Same always-lit convention as grit(); use it
+    // for any second per-deck FX (delay, resonant filter, …).
+    inline void flux(DisplayModel& m, int deck, float amount01, float off = 0.5f) {
+        m.flux[deck] = { pal::kFlux, off + (1.f - off) * std::clamp(amount01, 0.f, 1.f) };
     }
 } // namespace led
 

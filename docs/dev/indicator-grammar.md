@@ -284,9 +284,12 @@ Wire the panel LEDs own-display engines almost never set, one line each:
 
 ```cpp
 led::mode_leds(m, active_mode);        // Reel/Slice/Drift center/left/right, active bright
+led::route_leds(m, route);             // route on the SAME L/C/R LEDs (the mode_leds alternative)
 led::clock(m, src, on_beat, is_key);   // clock_in for CapTransport engines
 led::fader_balance(m, mix01);          // fader[A]/fader[B] for CapDualDeck balance
 led::cycle(m, deck, phase01, hue);     // LFO/mod glow on the cycle LED
+led::grit(m, deck, amount01, gmode);   // grit/drive/saturation FX LED (yellow/orange)
+led::flux(m, deck, amount01);          // flux FX LED (coral) — delay/filter/etc.
 led::transport(m, deck, tv);           // play pad from a TransportView
 ```
 
@@ -346,6 +349,56 @@ because shuttle applies knob values immediately). It is the worked example of th
 state expressed as a short list of intent. One lesson from it: a value *bar* fits a scalar (level,
 speed) but is wrong for a *geometric* param — POS/SIZE describe a region, so they must be drawn as
 one (an arc + marker), not a 0..value bar.
+
+### Second adopter: `tape`
+
+`src/engine/tape/tape_engine.cpp` is the second engine on the toolkit, and the one that exercises the
+**on/off transport path** (shuttle validated the idle standby-breathe path; tape validates a real
+record state). Its `render()` hand-rolled exactly the pieces the toolkit exists to replace, and — unlike
+`reso` — every hue was an *exact* `pal::` match, so the swap is behavior-preserving: the direction-coded
+color ladder (`playing→green / recording→red / err→amber / off`) became `transport_view` + `led::transport`;
+the `(now/110)&1` amber strobe became `motion::blink(now, 220)`; the slot-selector loop became `ring::slots`;
+the solid ring became `ring::level`; and the local `kErrColor`/`kRingLeds` constants were deleted. Two
+facts made it exact: tape's play/record states are mutually exclusive (so `transport_view`'s
+recording-first ordering matches the old playing-first ladder), and a cleared `LEDRing` keeps
+`_segment_brightness = 1.0`, which is what `ring::level`/`ring::slots` set — so the backdrop brightness is
+unchanged. `render()` shrank from ~35 lines of open-coded `set_*` calls to a short list of intent.
+
+Tape also motivated the one structural **toolkit addition** this migration needed: `led::route_leds(m, route)`.
+Six engines (tape/shuttle/softcut/radio/glitch/pstretch) ship a byte-for-byte copy of the same routing-switch
+block (`DoubleMono→left / Stereo→center / GenerativeStereo→right`, white 0.8). It lives beside
+`led::mode_leds` because it drives the same three L/C/R LEDs — an engine calls one or the other depending
+on whether that switch selects a channel `Route` or a Reel/Slice/Drift `Mode`.
+
+**Then the enhancement phase** — the point of the exercise is not just to refactor but to make each engine
+*speak more of the grammar*. Tape's panel was a flat solid-color ring + play + route; it now uses:
+
+- **a record-level meter** (`ring::level` fed by a per-deck peak follower added to `process()`) — while
+  *recording*, the ring is a VU of the incoming signal. During *playback* the ring is instead a single
+  steady-color fill: a moving level arc reads as too volatile to watch under a loop, so metering is scoped
+  to recording (where a VU earns its keep) and playback stays calm;
+- **a varispeed marker** — a `ring::playhead` dot at the PITCH position, drawn *inside the steady ring*
+  (playback and idle) so tape's signature ±2-octave varispeed (previously shown *nowhere*) is always
+  visible; turning PITCH just moves that marker. Note: PITCH deliberately gets **no** separate knob
+  overlay — an overlay would replace the bright steady ring with a dim backdrop and read as "the ring
+  goes dark while I turn," so params already visible in the steady ring are excluded from the overlay set;
+- **an idle standby breathe** (`motion::breathe_standby`) on a stopped deck *whose slot is loaded*, so
+  "ready" reads distinctly from both "off" and an empty/unloaded deck (which stays dark). Making that gate
+  reliable required a **boot slot scan** in `prepare()`: the `_slot_used` cache is otherwise filled only
+  when the Alt+PITCH selector opens (too late for a fresh boot), so `prepare()` re-probes the card until it
+  mounts, and a successful play/record also marks its slot used;
+- **param-aware knob-value overlays** (`_show_value` idiom): turning any knob flashes a picture for ~700 ms
+  — MIX/drive/char/cutoff/reso/wow-rate/crossfade as a `ring::value` bar, **ENV as a 4-way `ring::selector`**
+  (None/Plain/Faded/Fripp), PITCH and pan as markers vs their references — where before a knob turn showed
+  nothing at all;
+- **four of the "dead" named LEDs** (grammar §4): `led::grit` = the resonant filter the grit pad drives
+  (yellow — the LED tracks its own pad), `led::flux` = tape saturation (coral), `led::cycle` = wow/flutter
+  glow, `led::fader_balance` = the A/B crossfade.
+
+This added `led::grit`/`led::flux` to the toolkit (the drive/saturation and second-FX LEDs, the granular
+always-lit convention generalized). Net: tape went from the comparison doc's "minimal dialect" to nearly the
+full vocabulary, and the additions are reusable by the next engines. The lesson repeats shuttle's: a value
+*bar* fits a scalar, but a *geometric* control (PITCH, pan, loop-mode) must be drawn as a marker/selector.
 
 ### What stays in the platform (not in the helper)
 

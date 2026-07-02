@@ -68,6 +68,8 @@ private:
     void _render_deck(DeckRef::Ref d, const float* const* in, int ch, float* mono, size_t n);
     // Toggle play (record=false) or record (record=true) on deck `d` (play XOR record; debounced).
     void _toggle(DeckRef::Ref d, bool record);
+    // Draw the transient knob-turn overlay for deck `i` (param-aware: value bar / selector / marker).
+    void _render_edit(LEDRing& r, int i, uint32_t hue);
     float _pull(DeckRef::Ref d);          // one mono source frame from a deck's play ring (0 on underrun)
     void  _roll_random_pans();            // fresh random equal-power pans (GenerativeStereo routing)
     static float _fade_env(uint32_t pos, uint32_t L);  // faded-loop seam envelope
@@ -75,7 +77,6 @@ private:
     void  _scan_slots(DeckRef::Ref d);    // f_stat each slot file -> _slot_used (recorded vs empty)
 
     static constexpr size_t   kMaxFrames  = 128;        // platform block is 96
-    static constexpr uint32_t kErrColor   = 0xff6000;   // amber: a start_play/record was rejected
     static constexpr uint32_t kErrFlashMs = 1200;       // how long the amber rejection flash lasts
     static constexpr uint32_t kDebounceMs = 300;        // ignore a same-deck retrigger within this
     static constexpr float    kHalfPi     = 1.57079632679f;
@@ -84,7 +85,9 @@ private:
     static constexpr float    kFrippDecay = 0.6f;       // per-pass gain multiplier (Frippertronics)
     static constexpr float    kFrippFloor = 0.02f;      // below this the loop has faded out -> stop
     static constexpr int      kSlots      = 8;          // tape slots per deck (single digit = 8.3-safe name)
-    static constexpr int      kRingLeds   = 32;         // LEDs per ring (slot-selector dot spacing)
+    static constexpr uint32_t kEditShowMs = 700;        // how long a knob-turn value overlay lingers on the ring
+    static constexpr float    kMeterDecay = 0.92f;      // per-block release of the output-level peak meter
+    static constexpr uint32_t kBootScanMs = 4000;       // give the SD card this long to mount for the boot slot scan
 
     IStreamDeck*       _stream = nullptr;
     const ITimeSource* _time   = nullptr;
@@ -122,11 +125,20 @@ private:
     bool _aux_held[2] = { false, false };  // Alt held -> show the slot selector on that deck's ring
     bool _slot_used[2][kSlots] = {};       // cache: each slot's file exists (recorded vs empty dot)
     bool _rescan[2]   = { false, false };  // selector just opened -> re-probe slots in prepare()
+    bool _boot_scan   = true;              // re-probe all slots each prepare() until the card mounts (then rely on the cache)
     char _pbuf[20];                        // scratch for the current slot's path (built in _path)
 
     uint32_t _err_until[2]    = { 0, 0 };  // now_ms() deadline of each ring's error flash (0 = none)
     bool     _err_fmt[2]      = { false, false };  // that flash is a wrong-format reject (strobe), not a miss
     uint32_t _last_trig_ms[2] = { 0, 0 };  // now_ms() of each deck's last accepted toggle (debounce)
+
+    // Display-only state, all read in render(). _peak is written in process() (audio ISR) - a benign
+    // cross-thread scalar read for metering, like _read/_speed; the _edit_* trio is written in
+    // set_param/set_mod_speed (same main-loop thread as render).
+    float    _peak[2]       = { 0.f, 0.f };  // per-deck output-level peak meter (fed each audio block)
+    uint32_t _edit_until[2] = { 0, 0 };      // now_ms() deadline of each deck's knob-turn value overlay
+    float    _edit_val[2]   = { 0.f, 0.f };  // the 0..1 value that overlay shows (for the value-bar params)
+    ParamId  _edit_param[2] = { ParamId::Speed, ParamId::Speed };  // which param the overlay is currently for
 
     // Per-deck tape FX (Faust kernel: wow/flutter + Jiles-Atherton hysteresis + post-FX resonant
     // low-pass), placement-new'd in the SDRAM arena at init(); only applied to the playback signal.

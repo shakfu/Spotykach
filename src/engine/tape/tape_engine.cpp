@@ -1,5 +1,6 @@
 #include "engine/tape/tape_engine.h"
 #include "engine/arena.h"
+#include "engine/indicators.h" // shared indicator toolkit (docs/dev/indicator-grammar.md §8)
 #include "engine/tape/tapefx.h" // shared TapeFx wrapper around the cyfaust-generated tfx_tapefx::mydsp
 
 #include <algorithm>
@@ -29,6 +30,21 @@ void TapeEngine::init(const EngineContext& ctx) {
 // here, not in the audio ISR that set the flag).
 void TapeEngine::prepare() {
     if (!_stream) return;
+
+    // Boot slot scan: render() gates a deck's idle "breathing" ring on whether its current slot has a
+    // file (so an unloaded deck reads dark). That cache (_slot_used) is normally filled only when the
+    // Alt+PITCH selector opens - too late for a freshly-booted deck. The SD card mounts a few loops in,
+    // so re-probe every pass until a file turns up (card up -> cache good) or a deadline passes (no card
+    // / empty card -> every slot reads empty, which is the correct "dark" state). Selector-open rescans
+    // and play/record successes keep the cache current afterwards.
+    if (_boot_scan) {
+        _scan_slots(DeckRef::A); _scan_slots(DeckRef::B);
+        bool any = false;
+        for (int i = 0; i < 2; i++) for (int s = 0; s < kSlots; s++) any |= _slot_used[i][s];
+        const uint32_t now = _time ? _time->now_ms() : 0;
+        if (any || (_time && now > kBootScanMs)) _boot_scan = false;
+    }
+
     for (DeckRef::Ref d : { DeckRef::A, DeckRef::B }) {
         const int i = (d == DeckRef::A) ? 0 : 1;
         _stream->set_loop(d, _loop_mode[i] != Loop::None);
@@ -50,6 +66,17 @@ void TapeEngine::process(const float* const* in, float** out, size_t size) {
     // whose wow/flutter delay would add monitoring latency.
     if (_fx[0] && _stream->is_playing(DeckRef::A)) _fx[0]->process(monoA, static_cast<int>(n));
     if (_fx[1] && _stream->is_playing(DeckRef::B)) _fx[1]->process(monoB, static_cast<int>(n));
+
+    // Per-deck output-level meter (drives the ring arc in render). Peak-hold with a per-block release,
+    // taken on each deck's own signal (playback, or the record monitor while recording) BEFORE the
+    // pan/mix gains, so the ring shows deck activity - including the incoming level while recording.
+    float pkA = 0.f, pkB = 0.f;
+    for (size_t i = 0; i < n; i++) {
+        const float a = std::fabs(monoA[i]); if (a > pkA) pkA = a;
+        const float b = std::fabs(monoB[i]); if (b > pkB) pkB = b;
+    }
+    _peak[0] = pkA > _peak[0] ? pkA : _peak[0] * kMeterDecay;
+    _peak[1] = pkB > _peak[1] ? pkB : _peak[1] * kMeterDecay;
 
     // Per-block output gains: per-deck pan (selected by the routing switch) scaled by the mix-fader A/B
     // blend. Pan/blend gains are precomputed on knob change, so the ISR loop is just multiplies.
@@ -79,29 +106,39 @@ void TapeEngine::process(const float* const* in, float** out, size_t size) {
 // Bare POS (`Pos`) is reserved for a future loop-start control - ignored for now.
 void TapeEngine::set_param(ParamId id, DeckRef::Ref d, float v) {
     const int i = (d == DeckRef::A) ? 0 : 1;
-    if (id == ParamId::Speed) { _speed_n[i] = v; _speed[i] = std::exp2f((v - 0.5f) * 2.f); }
-    else if (id == ParamId::AltPos) { _pan[i] = v; _panL[i] = std::cos(v * kHalfPi); _panR[i] = std::sin(v * kHalfPi); }
-    else if (id == ParamId::Crossfade) { _xfade = v; _gA = v <= 0.5f ? 1.f : 2.f * (1.f - v);
-                                                      _gB = v >= 0.5f ? 1.f : 2.f * v; }
-    else if (id == ParamId::Mix) { _gain[i] = v; }
-    else if (id == ParamId::Env) { _env_n[i] = v;
+    // Flag a knob-turn value overlay when a display param ACTUALLY moves (the platform re-sends the
+    // current value every loop, so gate on a real change). render() shows it until _edit_until. Aux
+    // (slot select) is excluded - it has its own selector picture.
+    const uint32_t now = _time ? _time->now_ms() : 0;
+    auto edit = [&](float cur) {
+        if (_time && std::fabs(v - cur) > 1e-4f) { _edit_val[i] = v; _edit_param[i] = id; _edit_until[i] = now + kEditShowMs; }
+    };
+    if (id == ParamId::Speed) { _speed_n[i] = v; _speed[i] = std::exp2f((v - 0.5f) * 2.f); }  // no overlay: the varispeed marker already lives in the steady ring, so PITCH just moves it (no dim takeover)
+    else if (id == ParamId::AltPos) { edit(_pan[i]); _pan[i] = v; _panL[i] = std::cos(v * kHalfPi); _panR[i] = std::sin(v * kHalfPi); }
+    else if (id == ParamId::Crossfade) { edit(_xfade); _xfade = v; _gA = v <= 0.5f ? 1.f : 2.f * (1.f - v);
+                                                                   _gB = v >= 0.5f ? 1.f : 2.f * v; }
+    else if (id == ParamId::Mix) { edit(_gain[i]); _gain[i] = v; }
+    else if (id == ParamId::Env) { edit(_env_n[i]); _env_n[i] = v;
         _loop_mode[i] = v < 0.25f ? Loop::None  : v < 0.5f ? Loop::Plain
                       : v < 0.75f ? Loop::Faded : Loop::Fripp; }
     else if (id == ParamId::Aux) { const int s = static_cast<int>(v * kSlots);
                                    _slot[i] = s < 0 ? 0 : (s >= kSlots ? kSlots - 1 : s); }
     // Tape FX: POS=drive, SIZE=character, MOD_AMT=wow/flutter depth (rate is MODFREQ, set_mod_speed).
-    else if (id == ParamId::Pos)    { _fx_n[i][0] = v; if (_fx[i]) _fx[i]->set(0, v); }
-    else if (id == ParamId::Size)   { _fx_n[i][1] = v; if (_fx[i]) _fx[i]->set(1, v); }
-    else if (id == ParamId::ModAmp) { _fx_n[i][2] = v; if (_fx[i]) _fx[i]->set(2, v); }
+    else if (id == ParamId::Pos)    { edit(_fx_n[i][0]); _fx_n[i][0] = v; if (_fx[i]) _fx[i]->set(0, v); }
+    else if (id == ParamId::Size)   { edit(_fx_n[i][1]); _fx_n[i][1] = v; if (_fx[i]) _fx[i]->set(1, v); }
+    else if (id == ParamId::ModAmp) { edit(_fx_n[i][2]); _fx_n[i][2] = v; if (_fx[i]) _fx[i]->set(2, v); }
     // Post-FX low-pass filter: held grit + PITCH = cutoff, held grit + MIX = resonance. The platform
     // already routes the grit-modifier knobs to these ParamIds (it sends them for any engine), so the
     // tape engine just reinterprets `GritIntensity`/`GritMix` as the filter knobs - no platform change.
-    else if (id == ParamId::GritIntensity) { _fx_n[i][4] = v; if (_fx[i]) _fx[i]->set(4, v); } // cutoff
-    else if (id == ParamId::GritMix)       { _fx_n[i][5] = v; if (_fx[i]) _fx[i]->set(5, v); } // resonance
+    else if (id == ParamId::GritIntensity) { edit(_fx_n[i][4]); _fx_n[i][4] = v; if (_fx[i]) _fx[i]->set(4, v); } // cutoff
+    else if (id == ParamId::GritMix)       { edit(_fx_n[i][5]); _fx_n[i][5] = v; if (_fx[i]) _fx[i]->set(5, v); } // resonance
 }
 
 void TapeEngine::set_mod_speed(DeckRef::Ref d, float v, bool /*sync*/) {
     const int i = (d == DeckRef::A) ? 0 : 1;
+    if (_time && std::fabs(v - _fx_n[i][3]) > 1e-4f) {   // wow/flutter rate moved -> flash its value bar
+        _edit_val[i] = v; _edit_param[i] = ParamId::ModSpeed; _edit_until[i] = _time->now_ms() + kEditShowMs;
+    }
     _fx_n[i][3] = v; if (_fx[i]) _fx[i]->set(3, v);   // MODFREQ -> wow/flutter rate
 }
 
@@ -147,42 +184,106 @@ bool TapeEngine::set_config(ConfigId id, DeckRef::Ref, int value) {
 bool TapeEngine::on_play_pad(DeckRef::Ref d, bool reverse)   { if (!reverse) _toggle(d, /*record=*/false); return false; }
 void TapeEngine::on_record_pad(DeckRef::Ref d, bool reverse) { if (!reverse) _toggle(d, /*record=*/true); }
 
+// Per-deck idle/ready hue: the ring's breathing standby glow + the pitch-marker backdrop when a deck is
+// loaded but stopped. Distinct per deck so A vs B is obvious at a glance, and picked clear of the
+// transport colors (green fwd / red rec / amber err) so an idle glow is never read as a transport state.
+static constexpr uint32_t kDeckHue[2] = {
+    0x30c0a0,   // deck A: teal
+    0xc060ff,   // deck B: violet
+};
+
+// A knob is being turned -> a param-aware overlay (the grammar's value-pickup feedback, no-deviation
+// form because tape applies knob values immediately). Only params NOT already visible in the steady ring
+// get an overlay - PITCH is excluded, since its varispeed marker is drawn in the steady ring and an
+// overlay would just dim it. ENV -> a 4-way loop-mode selector; pan -> a bright marker vs a centre tick;
+// every scalar (MIX / drive / char / cutoff / reso / wow-rate / crossfade) -> a value bar.
+void TapeEngine::_render_edit(LEDRing& r, int i, uint32_t hue) {
+    switch (_edit_param[i]) {
+        case ParamId::Env:                                    // loop mode: None/Plain/Faded/Fripp
+            ring::selector(r, 4, static_cast<int>(_loop_mode[i]), hue);
+            break;
+        case ParamId::AltPos:                                 // pan: a bright marker vs a centre tick
+            ring::level(r, 0.999f, hue, 0.20f);               // dim context ring
+            r.set_brightness(0.45f); ring::playhead(r, 0.5f, 1.f);       // centre reference
+            r.set_brightness(0.90f); ring::playhead(r, _pan[i], 1.f);    // pan marker (lifted above the ring)
+            break;
+        default:                                              // scalar params -> a value bar
+            ring::value(r, _edit_val[i], hue);
+            break;
+    }
+}
+
 void TapeEngine::render(DisplayModel& m) {
     m.clear();
-    const uint32_t now = _time ? _time->now_ms() : 0;
+    const uint32_t now     = _time ? _time->now_ms() : 0;
+    const float    breathe = motion::breathe_standby(now);   // slow "loaded & ready" pulse
     for (DeckRef::Ref dk : { DeckRef::A, DeckRef::B }) {
         const int  i         = (dk == DeckRef::A) ? 0 : 1;
         const bool playing   = _stream && _stream->is_playing(dk);
         const bool recording = _stream && _stream->is_recording(dk);
         const bool err       = _time && now < _err_until[i];   // failed start still flashing
-        // Idle off, playing bright green, recording bright red, rejected start amber - an unambiguous
-        // off->on per deck. Feedback rides the Play-pad LED (the pad you pressed). A wrong-format reject
-        // STROBES the amber (~4.5 Hz) to read distinctly from the steady amber of a missing/empty slot.
-        const bool err_lit   = err && (!_err_fmt[i] || ((now / 110u) & 1u) == 0u);
-        const uint32_t c = err_lit   ? kErrColor
-                         : playing    ? 0x00ff00
-                         : recording  ? 0xff0000
-                         :              0x000000;
-        m.play[i] = { c, (playing || recording || err_lit) ? 1.f : 0.f };
+        const bool loaded    = _slot_used[i][_slot[i]];        // current slot has a file (reliable from boot via the prepare() scan)
+        const uint32_t hue   = kDeckHue[i];
+        // Direction-coded transport on the Play pad (the pad you pressed): playing green, recording red,
+        // rejected start amber. A wrong-format reject STROBES the amber (~4.5 Hz via motion::blink) to
+        // read distinctly from the steady amber of a missing/empty slot. Play and record are mutually
+        // exclusive here (see _toggle), so transport_view's recording-first ordering matches the old
+        // playing-first ladder. An idle deck BREATHES the deck hue on the pad when its slot is loaded
+        // ("ready" != "off"), or stays dark when unloaded. tape has no reverse/frozen state, so speed is +1.
+        const bool err_lit = err && (!_err_fmt[i] || motion::blink(now, 220));
+        const auto tv = transport_view(playing, recording, /*speed=*/1.f, err_lit,
+                                       loaded ? hue : pal::kBlack, loaded ? breathe * 0.4f : 0.f);
+        led::transport(m, i, tv);
+
         if (_aux_held[i]) {
-            // Alt+PITCH held: show the tape-slot selector - kSlots dots evenly around the ring (selected
-            // bright, recorded mid, empty dim) over a faint base. (Play/record stays on the LED.)
-            m.ring[i].set_hex_color(0x202020); m.ring[i].set_segment(0.f, 0.999f);
-            m.ring[i].set_point_hex_color(0xffffff);
-            for (int s = 0; s < kSlots; s++) {
-                // selected slot bright, recorded slots mid, empty slots dim
-                const float b = (s == _slot[i]) ? 1.f : (_slot_used[i][s] ? 0.45f : 0.12f);
-                m.ring[i].set_point(static_cast<uint8_t>(s * (kRingLeds / kSlots)), b);
-            }
-        } else {
-            m.ring[i].set_hex_color(c); m.ring[i].set_segment(0.f, 0.999f);
-        }
+            // Alt+PITCH held: the tape-slot selector - kSlots dots (selected bright, recorded mid, empty
+            // dim) over a faint base.
+            uint32_t used = 0;
+            for (int s = 0; s < kSlots; s++) if (_slot_used[i][s]) used |= (1u << s);
+            ring::slots(m.ring[i], kSlots, _slot[i], used);
+        } else if (_time && now < _edit_until[i]) {
+            _render_edit(m.ring[i], i, hue);                   // knob-turn value overlay
+        } else if (recording) {
+            // Recording: an OUTPUT-LEVEL meter (red) over a faint backdrop, so you watch the incoming
+            // level - the volatile-but-informative record VU (metering earns its keep here).
+            ring::level(m.ring[i], 0.999f, tv.rgb, 0.10f);     // dim full-ring baseline
+            ring::level(m.ring[i], _peak[i] * 1.5f, tv.rgb);   // bright arc = input level (headroom-scaled)
+        } else if (playing) {
+            // Playing: a SINGLE steady-color ring - a level meter reads as too volatile during playback,
+            // so the ring is a solid fill, with the varispeed marker + unity reference so PITCH stays
+            // visible at a glance (the marker only moves when you turn PITCH, so it never flickers).
+            ring::level(m.ring[i], 0.999f, tv.rgb);            // solid ring, full brightness
+            ring::playhead(m.ring[i], 0.5f, 0.30f);            // unity (1x) reference
+            ring::playhead(m.ring[i], _speed_n[i], 1.f);       // varispeed marker
+        } else if (err_lit) {
+            // Rejected start: strobe the ring amber in step with the Play pad.
+            ring::level(m.ring[i], 0.999f, tv.rgb);
+        } else if (loaded) {
+            // Loaded but stopped: a dim BREATHING "ready" ring + a brighter pitch marker (preview the
+            // varispeed before you hit Play), so a deck with a file reads "on, ready" rather than off.
+            // (loaded is reliable from boot now - see the prepare() slot scan.)
+            ring::level(m.ring[i], 0.999f, hue, breathe);
+            m.ring[i].set_brightness(0.7f);                    // lift the marker above the breathing ring
+            ring::playhead(m.ring[i], _speed_n[i], 1.f);
+        } // else: unloaded slot -> ring stays dark.
         m.ring[i].set_updated();
+
+        // FX on the dedicated per-deck named LEDs (grammar §4 - unused by every own-display engine but
+        // granular). The grit LED tracks what the grit PAD itself does: the resonant low-pass FILTER
+        // (grit-pad + PITCH = cutoff, + MIX = reso), yellow. flux = tape SATURATION (POS drive / SIZE
+        // character), coral. cycle = wow/flutter, glowing at the MODFREQ rate scaled by depth. Each is
+        // dark when neutral and brightens as the FX is dialled in.
+        led::grit(m, i, std::max(1.f - _fx_n[i][4], _fx_n[i][5]), GritMode::Drive, /*off=*/0.f);
+        led::flux(m, i, std::max(_fx_n[i][0], _fx_n[i][1]),                         /*off=*/0.f);
+        const float depth = _fx_n[i][2];
+        if (depth > 1e-3f) {
+            const uint32_t period = static_cast<uint32_t>(2000.f - 1850.f * _fx_n[i][3]); // ~2 s..150 ms
+            led::cycle(m, i, depth * motion::breathe(now, 0.f, 1.f, period), hue);
+        }
     }
-    // Routing-switch position on the mode L/C/R indicators (clear() already turned the others off).
-    if (_route == Route::DoubleMono)       m.mode_left   = { 0xffffff, 0.8f };
-    else if (_route == Route::Stereo)      m.mode_center = { 0xffffff, 0.8f };
-    else                                   m.mode_right  = { 0xffffff, 0.8f };
+    // A/B crossfade balance on the fader LEDs, and the routing switch on the mode L/C/R LEDs.
+    led::fader_balance(m, _xfade);
+    led::route_leds(m, _route);
 }
 
 void TapeEngine::_render_deck(DeckRef::Ref d, const float* const* in, int ch, float* mono, size_t n) {
@@ -251,6 +352,8 @@ void TapeEngine::_toggle(DeckRef::Ref d, bool record) {
             if (!_stream->start_play(d, _path(d, _slot[i]))) {
                 _err_until[i] = now + kErrFlashMs;
                 _err_fmt[i]   = _stream->exists(_path(d, _slot[i]));  // file present but refused = bad format
+            } else {
+                _slot_used[i][_slot[i]] = true;   // it plays -> the slot is definitely loaded (keeps the cache honest)
             }
         }
     }
