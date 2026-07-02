@@ -1,30 +1,48 @@
 # Terminal control channel (USB-C)
 
-Status: **design sketch, unbuilt.** No code exists yet. This documents a proposed general capability - a bidirectional text/command channel over the Daisy Seed's USB-C port - usable across all engines for runtime control and, equally, for observing and driving the hardware from a host script. Everything is gated behind a compile-time flag and costs nothing when off.
+Status: **design sketch, unbuilt.** No code exists yet. This documents a proposed general capability - a bidirectional text/command channel over the Daisy Seed's USB-C port - usable across all engines for runtime control and, primarily, for **testing engine features and properties from a host script**. Everything is gated behind a compile-time flag and costs nothing when off.
+
+Scope note: this is about testing **engines**, not the physical board. The hardware is assumed working; the goal is to recreate QA software that exercises an engine's control surface, state, and (optionally) its audio output - deterministically, without knobs, patch cables, or MIDI gear.
 
 ## Why
 
-Two motivations, the second arguably stronger than the first:
+- **On-target engine testing.** Today `make test` is entirely off-target (`host/` unit tests compiled for the host). Some engine behaviour only exists on the device (real sample rate, SDRAM buffers, the actual audio ISR, QSPI persistence). A terminal is the missing on-target complement: a host script drives an engine into a known state, exercises a feature, reads back a property, and asserts - over USB-C, reproducibly.
 
-- **Runtime control.** A host can set parameters, flip config, trigger pads/transport on the device without a knob or a MIDI controller - scriptable, human-typable, engine-agnostic.
+- **Runtime control.** The same channel lets a host set parameters, flip config, and trigger pads/transport without hardware - scriptable and human-typable. Testing is the strong motivation; control is the same mechanism used interactively.
 
-- **Hardware testing.** The channel turns the board into something a host script can *observe and drive*. Today `make test` is entirely off-target (`host/` unit tests); a terminal is the missing on-target complement - it reads raw ADC/CV/touch/gate state and drives DAC/gate/LED outputs so a host can assert on real electrical behaviour. It also replaces two existing workarounds: the one-way `Expose` print pipe (`src/expose.h`) and the `CHUCK_BRINGUP` LED-blink boot markers (`src/app.cpp:71-82`), which exist only because the panel is unobservable during `Init()`.
+- It also retires two one-way workarounds: the `Expose` print pipe (`src/expose.h`) becomes an on-demand `query` instead of throttled spew, and the `CHUCK_BRINGUP` LED-blink boot markers (`src/app.cpp:71-82`) become a text boot trace.
+
+## The key realization: `IEngine` is already a hardware-independent test surface
+
+Engine testing needs almost nothing from the HAL. The entire `IEngine` input surface is already deck-addressable and hardware-free - the platform merely drives it from knobs/jacks today. A terminal that invokes `IEngine` methods by name gives a host script **complete deterministic control of an engine with no physical input**:
+
+- `set_param(ParamId, deck, float)`, `set_config(ConfigId, deck, int)`, `set_mod_speed` (`src/engine/iengine.h:52-75`)
+
+- `cv_voct / cv_mix / cv_size_pos / cv_crossfade` - inject CV *values* directly, no jack (`iengine.h:112-115`)
+
+- `on_gate_trigger` - inject a gate, no jack (`iengine.h:118`)
+
+- `handle_midi_note / handle_midi_message / handle_midi_transport` - inject MIDI, no cable (`iengine.h:88-93`)
+
+- `on_record_pad / on_play_pad / on_seq_trigger / clear_buffer` - drive pads (`iengine.h:99-109`)
+
+So "stimulus" is the reflective dispatcher generalized from params to the whole input surface. There is no separate HAL probe/actuate target; the engine's own contract is the seam.
 
 ## The one hard constraint: the Logger already owns USB-C
 
-The USB-C connector is the STM32H750 USB OTG FS **internal** peripheral (`FS_INTERNAL`). The Daisy Logger already owns it TX-only (`src/common.h:37` `INFS_LOG_TARGET = LOGGER_INTERNAL`, started at `src/app.cpp:213`). Two `UsbHandle::Init(FS_INTERNAL)` calls on the same peripheral collide, so the terminal service must **own the internal CDC bidirectionally** and log output must flow through it. That is a feature, not a fight: one CDC stream becomes both console output and command input - exactly what a terminal is. When `SPK_TERMINAL` is off, nothing changes and the Logger keeps the port.
+The USB-C connector is the STM32H750 USB OTG FS **internal** peripheral (`FS_INTERNAL`). The Daisy Logger already owns it TX-only (`src/common.h:37` `INFS_LOG_TARGET = LOGGER_INTERNAL`, started at `src/app.cpp:213`). Two `UsbHandle::Init(FS_INTERNAL)` calls on the same peripheral collide, so the terminal service must **own the internal CDC bidirectionally** and log output must flow through it. That is a feature: one CDC stream becomes both console output and command input. When `SPK_TERMINAL` is off, nothing changes and the Logger keeps the port.
 
-(The `METER` build's CDC writer is a separate concern - it uses `FS_EXTERNAL` (GPIO31/32, which also collide with the gate outputs) and is debug-only. Only one of these can be the console; they do not share the internal port.)
+(The `METER` build's CDC writer uses `FS_EXTERNAL` (GPIO31/32, which also collide with the gate outputs) and is debug-only. Only one of these can be the console; they do not share the internal port.)
 
 ## Layering
 
 Four layers; only the bottom two touch hardware. The command model is deliberately **codec-agnostic**, so line-ASCII vs OSC is a compile flag, not a rewrite.
 
 ```
-  host tooling        dumb terminal | python REPL | web-serial GUI
+  host tooling        pytest harness | dumb terminal | python REPL
   ----------------------------------------------------- USB-C CDC ------
-  [4] targets         (A) platform-reflective  (B) engine verbs  (C) HAL probe/actuate
-  [3] dispatch        Command{ target, verb, argv[] }  ->  one of the three targets
+  [4] targets         (A) IEngine stimulus/query   (B) engine-specific verbs
+  [3] dispatch        Command{ verb, argv[] }  ->  IEngine method or engine handler
   [2] codec/framing   line-ASCII (default)  |  OSC + SLIP (opt-in)
   [1] transport       UsbHandle CDC on FS_INTERNAL  +  SPSC ring buffer
 ```
@@ -43,25 +61,34 @@ Thread-safe by construction - the receive callback does the minimum, everything 
 
 - Assembly, decode, and dispatch run in `Loop()` (`src/app.cpp:243`), beside `_ui.process()` and `_stream.process()`. One added `terminal.process()` call, guarded by `#if SPK_TERMINAL`.
 
-- This is the **same execution context `handle_midi_message` already uses** (main loop, per `src/engine/iengine.h:92`). So terminal writes inherit MIDI's exact concurrency contract with the audio ISR - no new hazard on the *control* path. The *actuation* path is different and is the subject of the test-mode section below.
+- This is the **same execution context `handle_midi_message` already uses** (main loop, per `src/engine/iengine.h:92`). So terminal-injected stimulus reaches the engine exactly where MIDI does, and inherits MIDI's concurrency contract with the audio ISR - no new hazard. Determinism (keeping physical input from racing the injected stimulus) is handled by test mode below.
 
-## Three command targets
+## Stimulus and observation
 
-The dispatcher routes a decoded `Command` to one of three targets. The first two are the control sketch; the third is what hardware testing adds.
+### Stimulus - drive the full IEngine input surface (target A)
 
-### A. Platform-reflective - free for every engine
-
-`IEngine` already exposes a generic control surface: `set_param(ParamId, deck, float)`, `param()`, `set_config(ConfigId, deck, int)`, `set_fx`, transport (`src/engine/iengine.h:52-97`). The dispatcher handles these centrally against `IEngine`, so commands like
+The dispatcher maps a verb to an `IEngine` method against the active engine. Because the whole input surface is hardware-free, this works for every engine:
 
 ```
-set param filter A 0.7
-get param mix
-config mode A 2
+set param size A 0.5        -> IEngine::set_param(ParamId::Size, A, 0.5)
+set config mode A 2         -> IEngine::set_config(ConfigId::Mode, A, 2)
+cv voct A 1.0               -> IEngine::cv_voct(A, 1.0)
+gate A                      -> IEngine::on_gate_trigger(A)
+midi note 1 60             -> IEngine::handle_midi_note(1, 60)
+pad play A                  -> IEngine::on_play_pad(A, false)
 ```
 
-work on **all engines with zero per-engine code**. This is the general capability - it lands the moment the channel exists.
+### Observation - read engine properties, three levels
 
-### B. Engine-specific verbs - opt-in
+Stimulus is easy; observation is the design question. Three levels, increasing in scope:
+
+- **L0 - param round-trip.** `get param <id> <deck>` -> `param(id, deck)`. Verifies clamping, mode-dependent mapping, and `take_param_reseed`. Zero new engine code. Tests *properties*.
+
+- **L1 - engine state introspection.** `query <name> <deck>` reports derived state: deck empty/generating, loop length, active mode, tempo, `gate_out_triggered`, `route()`, `mix()`. Some already exist on `IEngine`; the rest go through the engine-specific handler (target B). Tests *features / behavioural state*.
+
+- **L2 - audio-property tap.** Raw audio cannot stream over CDC cheaply, so an on-device analyzer (a signal sibling of the CPU `Meter`) computes RMS / peak / DC / NaN-Inf / zero-crossing over N blocks at a probe point and reports text: `measure rms 100 -> 0.187`. Tests silence, level, blow-ups, crude pitch. This is the only way to assert actual audio behaviour.
+
+### Engine-specific verbs (target B)
 
 One new virtual on `IEngine`, consistent with the interface-lift philosophy ("an engine overrides only what it supports", `src/engine/iengine.h:24`):
 
@@ -70,134 +97,89 @@ One new virtual on `IEngine`, consistent with the interface-lift philosophy ("an
 virtual bool handle_command(const CommandView& cmd, TextSink& reply) { return false; }
 ```
 
-`CommandView` is a span over the already-tokenized argv (verb + args), so the engine never touches the codec. Returning `false` -> dispatcher reports "unknown command". A `CapTerminal` bit in the existing `Capabilities` bitmask advertises that an engine has custom verbs (used by `help`/`describe`).
+`CommandView` is a span over the already-tokenized argv, so the engine never touches the codec. It is the home for L1 `query` state an engine wants to expose and for any engine-unique test verb. Returning `false` -> "unknown command". A `CapTerminal` bit in the existing `Capabilities` bitmask advertises that an engine has custom verbs.
 
-### C. HAL probe/actuate - the hardware-test target
+## Test mode - input isolation for determinism
 
-This target sits **below the engine**, against `Hardware` (`src/hw/hardware.h`). The probes you want already exist as dead code inside `logDebugInfo` (`src/app.cpp:310-313`):
+The hazard for engine testing is not output pins; it is that physical knobs, CV jacks, pads, and gate-in are sampled every block (`_ui.tick()` / `read_cv()` in the audio ISR at `src/app.cpp:296-297`; `process_gate_in` in `T5Callback` at `src/app.cpp:121-128`) and would **race or overwrite the injected stimulus**, destroying reproducibility.
 
-```cpp
-hw.GetAnalogControlValue(Hardware::CTRL_PITCH_A);   // ADC / pots
-hw.GetControlVoltageValue(Hardware::CV_V_OCT_A);    // CV inputs
-hw.GetMpr121TouchStates();                          // touch pads
-```
+`mode test` therefore **freezes the physical input path**: the UI stops feeding knob/CV/pad/gate reads into the engine, so the engine sees only terminal-injected stimulus. Outputs (LEDs, DAC, audio) keep rendering - useful for watching state. `mode run` restores normal operation.
 
-Those, plus gate in/out, the 74HC165 shift registers, WS2812 rings, and DAC CV out, form a probe/actuate vocabulary that is engine-independent:
+- Implementation: a single `terminal_test_mode` flag that `_ui.tick()` / `read_cv()` / `process_gate_in` consult and skip their engine-facing writes when set. Small and local; no output-path changes.
 
-- **Probe (read).** Safe from the main loop, benign:
-  ```
-  probe adc pitch_a          -> 0.734
-  probe cv voct_a            -> +1.02v
-  probe touch                -> 0b0000100100
-  probe gate_in a            -> 1
-  probe shift 0              -> 0xA3
-  probe expose               -> P1=.. P3=..   (replaces the throttled Expose spew)
-  ```
+- This is deliberately narrower than an output-arbitration scheme. Engine testing wants a clean, quiet input path, not the ability to drive individual pins.
 
-- **Actuate (drive).** Drives an output directly to verify the electrical/optical path, decoupled from the engine. **Not safe without arbitration** (next section):
-  ```
-  set dac 0 2.5v
-  pulse gate_out a 5ms
-  led ring_a 3 ff0000
-  ```
+## Audio input injection (deferred - needed for L2 on through-processing engines)
 
-Probe/actuate subsumes `Expose` (on-demand instead of throttled) and the `CHUCK_BRINGUP` blink markers (a text boot trace - `[boot] fmc ok / sdram ok / engine.init ok` - beats counting LED flashes).
+Self-generating engines (mosc, reso self-oscillation, edrums) can be exercised immediately: stimulus in, `measure` out. But through-processing engines (delay, tape, granular, glitch, pstretch) need an *input signal*, and a host cannot feasibly stream audio in over CDC.
 
-## Test-mode arbitration - the real hazard
-
-Probes are read-only and safe. **Actuation is not**, because the outputs are already owned by the running system:
-
-- LEDs are rendered by `T5Callback` -> `render_leds()` every ~4th tick (`src/app.cpp:121-128`); a terminal `led ...` write is overwritten on the next render.
-
-- The DAC is filled every block by `DACCallback` -> `_engine.process_cv()` (`src/app.cpp:145-148`).
-
-- Gate out is driven by the engine's `gate_out_triggered()` (`src/engine/iengine.h:119`).
-
-So direct actuation fights the renderer/engine for the same pins. Two resolutions, chosen by which use-case dominates:
-
-### Option 1 - explicit test mode (recommended for QA / bring-up)
-
-A `mode test` command suspends `render_leds()`, the DAC engine call, and gate-out, handing those outputs to the terminal until `mode run`. Clean electrical isolation: the device stops being an instrument while under test, and every actuation command has unambiguous ownership.
-
-- Simplest to reason about; matches manufacturing-QA and bring-up, where you *want* the engine out of the way.
-
-- Implementation: a global `terminal_test_mode` flag the three output sites consult and early-return from, plus the terminal driving the raw HAL writes directly.
-
-### Option 2 - override latch (for a live-instrument console)
-
-A small "forced value + TTL" layer the renderer/DAC/gate paths consult, so a terminal write wins for N ms then decays back to engine control. Outputs stay live; you can poke a playing instrument.
-
-- More code: every output path (LED composite, `process_cv`, gate-out) must honour the latch.
-
-- Better for debugging a running patch, worse for a clean pass/fail electrical test.
-
-The two pull the arbitration layer in opposite directions - this is the decision the testing use-case forces that pure control did not. **Recommendation:** ship Option 1 first (it is a single flag and serves bring-up immediately); add the latch later only if a live console is wanted.
-
-## Timing caveat
-
-USB CDC round-trip is ~1 ms with host-scheduler jitter. Terminal-driven tests are **functional** ("does the gate fire", "does the CV read back ~2.5 V", "does pad 4 register") - not **timing-accurate** ("gate-to-audio latency is 1.3 ms"). Anything sub-millisecond must be measured on-device and *reported* over the terminal, never clocked from the host. Do not write host-side timing assertions; they measure USB jitter, not the device.
+The plan is a **built-in test-signal source** enabled in test mode - `stim signal impulse | noise <amp> | sine <hz>` - that replaces the codec input with a deterministic generator. This is a real subsystem, so it is a later phase, not day-one. Until it exists, L2 covers self-generating engines only.
 
 ## Codec: line-ASCII default, OSC opt-in
 
 | | line-ASCII (`SPK_TERMINAL`) | OSC + SLIP (`SPK_TERMINAL_OSC`) |
 |---|---|---|
 | Framing | `\n`-delimited | SLIP (RFC 1055) over the byte stream |
-| Wire | `set param filter A 0.7\n` | `/set/param ,sf "filterA" 0.7` + type tags, 4-byte aligned |
+| Wire | `set param size A 0.5\n` | `/set/param ,sf "sizeA" 0.5` + type tags, 4-byte aligned |
 | Flash cost | tokenizer + dispatch table (tiny) | + OSC parser + SLIP + type coercion |
-| Host tooling | any serial terminal, `echo >`, pyserial | liblo, TouchOSC, Max/Pd, `[oscparse]` |
-| Human-typable | yes | no (binary) |
-| Test-scriptable | trivial (text diff) | worse (binary asserts) |
+| Host tooling | pyserial, any serial terminal, `echo >` | liblo, TouchOSC, Max/Pd, `[oscparse]` |
+| Test-scriptable | trivial (text diff / assert) | worse (binary asserts) |
 
-**Line-ASCII is the floor and the default.** It is the lightest possible thing, works with a dumb terminal today, is trivially scriptable, and text is easy to assert on in host tests. OSC is a drop-in *alternate codec behind the same dispatcher* for wiring the device into a Max/Pd/TouchOSC rig - it decodes OSC messages into the identical internal `Command`. Note that raw OSC over serial has no length prefix, so it needs a framing layer; SLIP is the convention and is the real cost beyond the parser.
+**Line-ASCII is the floor and the default** - lightest, works with a dumb terminal, and text is trivial to assert on from a pytest harness. OSC is a drop-in *alternate codec behind the same dispatcher* for wiring the device into a Max/Pd/TouchOSC rig; it decodes into the identical internal `Command`. Raw OSC over serial has no length prefix, so it needs SLIP framing - the real cost beyond the parser.
 
 ### Line grammar (sketch)
 
 ```
 line      := verb SP arg* NL
-verb      := "get" | "set" | "config" | "probe" | "pulse" | "led" | "mode" | "help" | "describe" | <engine-verb>
+verb      := "set" | "get" | "query" | "measure" | "cv" | "gate" | "midi" | "pad" | "mode" | "help" | "describe" | <engine-verb>
 arg       := token                      ; whitespace-separated, no quoting in v1
 deck      := "A" | "B"
 value     := float | int | "<n>v" | hex ; codec coerces; dispatcher validates against ParamId range
 reply     := "ok" [SP result] NL | "err" SP reason NL
 ```
 
-## Device self-description (`describe`) - what enables the GUI terminal
+## Device self-description (`describe`)
 
-For the "sophisticated / GUI terminal that loads context for the specific device", the device must describe itself. `describe` emits the engine name, the `version.h` banner, and the param/config/probe tables (id, name, deck-scope, range). A host GUI/REPL consumes this to build autocompletion, macros, and value sliders **without hardcoding per-engine knowledge** - point a new firmware at the same tool and it reconfigures itself.
+`describe` emits the engine name, the `version.h` banner, and the param/config/query tables (id, name, deck-scope, range). A host harness consumes this to enumerate what a build exposes and run a **generic test sweep across all engine builds** without per-engine test code - the same leverage `IEngine` gives the platform, now given to the host. It also drives REPL autocompletion.
 
-This costs flash: the `ParamId`/`ConfigId` enums are numeric today and need string name tables. Gate it behind a **sub-flag** `SPK_TERMINAL_REFLECT` so a flash-tight build (e.g. reverb) can ship the channel without the name tables.
+This costs flash: `ParamId`/`ConfigId` are numeric today and need string name tables. Gate it behind a sub-flag `SPK_TERMINAL_REFLECT` so a flash-tight build (e.g. reverb) can ship the channel without the tables.
 
-There is a symmetry worth noting: `IEngine` lets the *platform* test-drive any engine through one contract; a terminal plus `describe` lets a *host* test-drive any firmware build through one protocol. The board becomes scriptable at the same seam, and one host test-runner can sweep all engine builds.
+## Host tooling
 
-## Host tooling tiers (all speak the same line protocol)
+- **pytest harness (the point).** A `tools/` helper opens the serial port, sends line commands, and asserts on replies. Per-engine on-target tests plus, with `describe`, a generic cross-engine sweep. This is the on-target counterpart to `host/` and the natural target of `make test-hw` (or similar).
 
-- **Tier 0 - dumb terminal, zero code.** `tio /dev/tty.usbmodem*` or `screen ... 115200`. Works the instant line-ASCII ships.
-
-- **Tier 1 - `tools/skterm.py` (pyserial + readline).** History, pretty-printed replies, tab-completion and macros driven by `describe`. ~150 lines, cross-platform. This is also the natural home for on-target hardware tests (pytest driving probes/actuators and asserting on replies).
-
-- **Tier 2 - GUI.** A Textual TUI or a **Web Serial** page (browser, zero install) that loads the `describe` descriptor and renders forms/macros. Web Serial is the most portable "GUI terminal that loads device context" with no toolchain.
+- **Dumb terminal / REPL.** `tio /dev/tty.usbmodem*` for interactive poking; a small pyserial REPL (`tools/skterm.py`) with history and `describe`-driven completion for hand-testing.
 
 ## Compile-flag matrix and footprint
 
-Everything under `#if SPK_TERMINAL`, following the `SPK_USE_STREAM` / `METER` pattern - **zero cost when off.** Proposed location `src/terminal/`, parallel to `src/transport/` (it is a platform service, not an engine).
+Everything under `#if SPK_TERMINAL`, following the `SPK_USE_STREAM` / `METER` pattern - **zero cost when off.** Proposed location `src/terminal/`, parallel to `src/transport/` (a platform service, not an engine).
 
 | Flag | Adds |
 |------|------|
-| `SPK_TERMINAL` | the channel + SPSC ring + line-ASCII codec + targets A and C(probe) + `mode test` isolation |
-| `SPK_TERMINAL_OSC` | OSC + SLIP codec (swaps/adds behind the same dispatcher) |
-| `SPK_TERMINAL_REFLECT` | `describe` + `ParamId`/`ConfigId`/probe name tables (flash cost) |
+| `SPK_TERMINAL` | channel + SPSC ring + line-ASCII codec + target A stimulus/get + target B hook + L0/L1 + `mode test` input isolation |
+| `SPK_TERMINAL_MEASURE` | L2 audio-property analyzer + `measure` verb |
+| `SPK_TERMINAL_STIM` | built-in test-signal source (`stim signal ...`) for through-processing engines |
+| `SPK_TERMINAL_OSC` | OSC + SLIP codec (behind the same dispatcher) |
+| `SPK_TERMINAL_REFLECT` | `describe` + `ParamId`/`ConfigId`/query name tables (flash cost) |
 
-Line codec + ring + dispatch is small. OSC and the reflect tables are the two heavier, separately-gated add-ons. Actuation-latch (arbitration Option 2) is deferred and not represented here.
+## Phasing
+
+- **Phase 1 (day-one, `SPK_TERMINAL`).** Transport + ring + line codec + target A stimulus + L0/L1 observation + target B hook + `mode test`. Lands deterministic control-and-state engine tests fast, on self-generating and through-processing engines alike (control/state need no audio).
+
+- **Phase 2 (`SPK_TERMINAL_MEASURE`).** L2 audio-property tap. Enables output assertions for self-generating engines.
+
+- **Phase 3 (`SPK_TERMINAL_STIM`).** Test-signal injection, extending L2 to through-processing engines.
+
+- **Later.** `SPK_TERMINAL_REFLECT` (generic cross-engine sweeps), `SPK_TERMINAL_OSC` (music-rig codec).
 
 ## Open decisions
 
-1. **Primary use-case: QA/bring-up vs live console.** Decides the arbitration layer - Option 1 (test mode) vs Option 2 (override latch). They share transport and codec but pull in opposite directions. Recommendation: Option 1 first.
+1. **Test depth for phase 1.** Confirmed default: L0/L1 (control + state, no audio). `measure` (L2) and `stim` (signal injection) are phased behind sub-flags. Revisit if audio assertions are wanted sooner.
 
-2. **Log routing.** Route `Log`/`LOG_TAGGED` through the terminal CDC (unified console - recommended) or set `LOGGER_NONE` and keep the terminal reply-only (simpler, but loses the boot trace)?
+2. **Log routing.** Route `Log`/`LOG_TAGGED` through the terminal CDC (unified console - recommended, keeps the boot trace) or set `LOGGER_NONE` under `SPK_TERMINAL` (simpler transport, no boot trace)?
 
-3. **Reflection day-one?** Ship `describe` + name tables immediately (enables the GUI terminal and generic cross-engine test sweeps, adds flash) or start with a hand-written command list?
+3. **Reflection timing.** Ship `describe` + name tables in phase 1 to unlock generic cross-engine sweeps (adds flash), or defer and hand-write per-engine tests first?
 
 ## Alternative framing: USB-MIDI
 
-Instead of a text/OSC channel, expose control as a **USB-MIDI class device** and reuse `handle_midi_message` almost verbatim - near-zero new parser, first-class DAW tooling. But it is not human-typable, awkward for string/reflective commands, and unusable for the HAL probe/actuate and `describe` reflection that make hardware testing work. Text wins for scripting, testing, and self-description; MIDI wins for musical/automation control. They can coexist later as a composite USB device; pick text as the primary for this capability.
-```
+Control could instead be a **USB-MIDI class device** reusing `handle_midi_message` almost verbatim - near-zero parser, first-class DAW tooling. But it is not human-typable, awkward for `get`/`query`/`measure` readback, and unusable for the text assertions a test harness needs. Text wins for testing and self-description; MIDI wins for musical automation. They can coexist later as a composite USB device; text is the primary here.
