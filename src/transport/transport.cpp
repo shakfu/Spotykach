@@ -73,15 +73,44 @@ void Transport::toggle_source()
             break;
         }
     }
+    // Arm the dropout timer so switching into an external source doesn't immediately
+    // read as "clock gone" before the first tick arrives (matches upstream toggle_source).
+    _reset_us = _time ? _time->now_us() : 0;
     _clock.Run();
 }
 
 void Transport::tick(const bool external_tick)
 {
-    _clock.Tick(external_tick);
+    if (external_tick) {
+        // An external clock edge. If we stopped the clock after a dropout, restart it -
+        // in external mode Run() only arms (_is_about_to_run); this edge kicks it off and
+        // re-aligns the timeline to the downbeat. Re-arm the dropout timer.
+        if (!_clock.IsRunning()) _clock.Run();
+        _reset_us = _time ? _time->now_us() : 0;
+        _clock.Tick(true);
+        return;
+    }
 
-    if (_clock.ExternalClock()) return;
-    _clock.SetTempo(_tempo.bpm());
+    // No external edge this block. In external mode, if no tick has arrived for over 1s
+    // (> the ~750ms max interval at 20bpm / 4PPQN) treat the clock as gone: stop the
+    // timeline and force a divider realign once, so playback resumes cleanly and aligned
+    // when the clock returns rather than freezing on SynClock's _hold. The IsRunning()
+    // guard makes this fire once per dropout instead of every block.
+    if (_clock.ExternalClock()) {
+        uint32_t elapsed_us = _time ? (_time->now_us() - _reset_us) : 0u;
+        if (elapsed_us >= 1000000u /*1s*/) {
+            if (_clock.IsRunning()) {
+                _clock.Stop();
+                _divider_reset_counts(true);
+            }
+            return;
+        }
+    }
+
+    _clock.Tick(false);
+    // Manual-tempo tracking only applies to the internal clock; SynClock::SetTempo has
+    // side effects (toggles run state + Reset) in external mode, so keep the guard.
+    if (!_clock.ExternalClock()) _clock.SetTempo(_tempo.bpm());
 };
 
 void Transport::_emit(const bool tick, const bool is_quarter, const float tempo, const bool reset)

@@ -496,7 +496,10 @@ void CoreUI::_process_ui_queue()
 
                 case Hardware::CTRL_PITCH_A: {
                     if (_storage.of(DeckRef::A).state() == DeckStorage::State::selecting) {
-                        _storage.of(DeckRef::A).select_slot_at(val * kStorageSlotCount);
+                        // round(val * (N-1)): map the full 0..1 knob range across all N slots. The
+                        // old val*N only reached the last slot in a razor-thin band near val==1
+                        // (select_slot_at rejects idx>=N). Matches upstream v1.1.0's fix.
+                        _storage.of(DeckRef::A).select_slot_at(std::round(val * (kStorageSlotCount - 1)));
                         break;
                     }
 
@@ -580,7 +583,8 @@ void CoreUI::_process_ui_queue()
                 
                 case Hardware::CTRL_PITCH_B: {                    
                     if (_storage.of(DeckRef::B).state() == DeckStorage::State::selecting) {
-                        _storage.of(DeckRef::B).select_slot_at(val * kStorageSlotCount);
+                        // round(val * (N-1)): see the deck-A note above. Matches upstream v1.1.0.
+                        _storage.of(DeckRef::B).select_slot_at(std::round(val * (kStorageSlotCount - 1)));
                         break;
                     }
 

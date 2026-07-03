@@ -184,6 +184,9 @@ class Hardware
     infrasonic::Ws2812 leds;
 
     daisy::MidiUartHandler midi_uart;
+#ifdef SPK_USB_MIDI
+    daisy::MidiUsbHandler  midi_usb;   // device MIDI on the rear USB-C (QSPI builds only; see Makefile)
+#endif
 
   private:
     infrasonic::ShiftRegister165 shiftreg_;

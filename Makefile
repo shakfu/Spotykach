@@ -339,6 +339,16 @@ APP_TYPE = BOOT_SRAM
 LDSCRIPT = alt_sram.lds
 BOOT_BIN = bootloader-spotykach-v2.bin
 
+# USB MIDI (device MIDI on the rear USB-C) pulls libDaisy's USB-device + MIDI-class code (~3 KB) into
+# .text. It fits the QSPI-execute builds (csound/chuck/mosc) with room to spare, but overflows the
+# 186 KB SRAM_EXEC budget of the BOOT_SRAM builds (granular already links at ~94%). So enable it
+# automatically for BOOT_QSPI, and allow an explicit override (USB_MIDI=1 / USB_MIDI=0) to measure
+# headroom on a specific SRAM engine. Gates the midi_usb code in hw/hardware.* and ui/core.ui.midi.cpp.
+USB_MIDI ?= $(if $(filter BOOT_QSPI,$(APP_TYPE)),1,0)
+ifeq ($(USB_MIDI),1)
+C_DEFS += -DSPK_USB_MIDI
+endif
+
 C_INCLUDES = -Isrc/ -Ilib/ $(RESO_INC) $(MOSC_INC) $(GRAINCLOUD_INC) $(SOFTCUT_INC) $(GEN_INC) $(CSOUND_INC) $(CHUCK_INC)
 # NOTE: there used to be `C_USR_FLAGS = -ffast-math -funroll-loops` here, but the core Makefile reads
 # C_USER_FLAGS (with the E), so it was dead - those flags never reached the compiler and the shipping

@@ -27,6 +27,9 @@ void CoreUI::tick()
     // Modified libDaisy MIDI handlers require explicit call to transmit
     // enqueued messages instead of blocking every time a message is sent
     _hw.midi_uart.TransmitEnqueuedMessages();
+#ifdef SPK_USB_MIDI
+    _hw.midi_usb.TransmitEnqueuedMessages();
+#endif
 }
 
 // MIDI /////////////////////////////////////
@@ -67,41 +70,58 @@ static uint8_t srt_status_byte(SystemRealTimeType t)
     }
 }
 
+// Handle one parsed MIDI event, from either transport (UART jack or the rear USB-C). The source is
+// irrelevant to the meaning of the message, so both streams funnel through here.
+void CoreUI::_handle_midi_event(daisy::MidiEvent& event, bool& has_clock)
+{
+    // Forward the full channel-voice stream to the engine - ChucK delivers it to a patch's MidiIn
+    // (real velocity, NoteOff, CC, pitch-bend, aftertouch, program change). Engines that only use
+    // handle_midi_note ignore this (default no-op). data[0]/data[1] are the raw MIDI data bytes.
+    if (uint8_t st = chan_status_byte(event))
+        _engine.handle_midi_message(st, event.data[0], event.data[1]);
+
+    switch(event.type)
+    {
+        case MidiMessageType::SystemRealTime: {
+            has_clock = _process_realtime(event) || has_clock;
+            // Also forward clock/start/continue/stop to MidiIn (single status byte, no data) so a
+            // patch can sync to host MIDI clock - independent of the firmware's own transport above.
+            if (uint8_t st = srt_status_byte(event.srt_type))
+                _engine.handle_midi_message(st, 0, 0);
+        }
+        break;
+
+        case MidiMessageType::NoteOn: {
+            auto e = event.AsNoteOn();
+            auto ref = _engine.handle_midi_note(e.channel, e.note);  // deck -> gate-in LED only
+            if (ref != DeckRef::Count) _show_gate_in(ref);
+        }
+        break;
+
+        default: break;
+    }
+}
+
 bool CoreUI::_process_midi()
 {
-    _hw.midi_uart.Listen();
     bool has_clock = false;
-    while(_hw.midi_uart.HasEvents())
-    {
+
+    // Drain both MIDI transports: the TRS/UART jack and USB device MIDI on the rear USB-C
+    // (the same port used for DFU flashing). Either can drive any MIDI-aware engine.
+    _hw.midi_uart.Listen();
+    while(_hw.midi_uart.HasEvents()) {
         auto event = _hw.midi_uart.PopEvent();
-
-        // Forward the full channel-voice stream to the engine - ChucK delivers it to a patch's MidiIn
-        // (real velocity, NoteOff, CC, pitch-bend, aftertouch, program change). Engines that only use
-        // handle_midi_note ignore this (default no-op). data[0]/data[1] are the raw MIDI data bytes.
-        if (uint8_t st = chan_status_byte(event))
-            _engine.handle_midi_message(st, event.data[0], event.data[1]);
-
-        switch(event.type)
-        {
-            case MidiMessageType::SystemRealTime: {
-                has_clock = _process_realtime(event) || has_clock;
-                // Also forward clock/start/continue/stop to MidiIn (single status byte, no data) so a
-                // patch can sync to host MIDI clock - independent of the firmware's own transport above.
-                if (uint8_t st = srt_status_byte(event.srt_type))
-                    _engine.handle_midi_message(st, 0, 0);
-            }
-            break;
-
-            case MidiMessageType::NoteOn: {
-                auto e = event.AsNoteOn();
-                auto ref = _engine.handle_midi_note(e.channel, e.note);  // deck -> gate-in LED only
-                if (ref != DeckRef::Count) _show_gate_in(ref);
-            }
-            break;
-
-            default: break;
-        }
+        _handle_midi_event(event, has_clock);
     }
+
+#ifdef SPK_USB_MIDI
+    _hw.midi_usb.Listen();
+    while(_hw.midi_usb.HasEvents()) {
+        auto event = _hw.midi_usb.PopEvent();
+        _handle_midi_event(event, has_clock);
+    }
+#endif
+
     return has_clock;
 }
 bool CoreUI::_process_realtime(daisy::MidiEvent& event)
@@ -121,4 +141,7 @@ bool CoreUI::_process_realtime(daisy::MidiEvent& event)
 void CoreUI::_process_clock_out()
 {
     _hw.midi_uart.EnqueueMessage(MidiTxMessage::SystemRealtimeClock());
+#ifdef SPK_USB_MIDI
+    _hw.midi_usb.EnqueueMessage(MidiTxMessage::SystemRealtimeClock());
+#endif
 }

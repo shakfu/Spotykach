@@ -71,6 +71,7 @@ private:
     void _process_switches();
     void _process_gate_out(const DeckRef::Ref);
     bool _process_midi();
+    void _handle_midi_event(daisy::MidiEvent&, bool& has_clock);
     bool _process_realtime(daisy::MidiEvent&);
 
     void _on_pad_touch(Hardware::Pad pad);

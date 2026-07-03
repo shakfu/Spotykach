@@ -183,6 +183,16 @@ void Hardware::Init(float sr, size_t blocksize)
     midi_uart.Init(midi_cfg);
     midi_uart.StartReceive();
 
+#ifdef SPK_USB_MIDI
+    // --- USB MIDI ---
+    // Device MIDI on the EXTERNAL USB peripheral (the rear USB-C, also the DFU-flash port).
+    // Independent of the Seed's internal USB used by Log::StartLog, so the two coexist.
+    MidiUsbHandler::Config midi_usb_cfg;
+    midi_usb_cfg.transport_config.periph = MidiUsbTransport::Config::Periph::EXTERNAL;
+    midi_usb.Init(midi_usb_cfg);
+    midi_usb.StartReceive();
+#endif
+
     // -- DAC --
     DacHandle::Config config;
     config.target_samplerate = 48000;
