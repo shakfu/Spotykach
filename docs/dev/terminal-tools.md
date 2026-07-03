@@ -1,14 +1,8 @@
 # Terminal host tooling spec (phase 1)
 
-Status: **implementation-ready spec, unbuilt.** Specifies the host side of the terminal channel: a
-Python client library, a pytest harness that drives real hardware, and `skterm.py`, an interactive
-REPL. All three speak the phase-1 line protocol in [`terminal-dispatch.md`](terminal-dispatch.md) over
-the USB-C CDC port from [`terminal-transport.md`](terminal-transport.md).
+Status: **implementation-ready spec, unbuilt.** Specifies the host side of the terminal channel: a Python client library, a pytest harness that drives real hardware, and `skterm.py`, an interactive REPL. All three speak the phase-1 line protocol in [`terminal-dispatch.md`](terminal-dispatch.md) over the USB-C CDC port from [`terminal-transport.md`](terminal-transport.md).
 
-This is **on-target** tooling - it talks to a flashed device over serial. It is therefore distinct from
-`host/` (off-target C++ unit tests compiled for the build machine, run by `make test`) and belongs
-under a separate `make test-hw` target that is skipped when no device is attached. `make test` stays
-hardware-free.
+This is **on-target** tooling - it talks to a flashed device over serial. It is therefore distinct from `host/` (off-target C++ unit tests compiled for the build machine, run by `make test`) and belongs under a separate `make test-hw` target that is skipped when no device is attached. `make test` stays hardware-free.
 
 ## Layout
 
@@ -29,17 +23,13 @@ tools/
 
 ## The protocol invariant both tools rely on
 
-The transport guarantees TX is single-threaded, so lines never corrupt mid-string, but in unified
-mode logs and replies **share the stream**. The client distinguishes them by one rule:
+The transport guarantees TX is single-threaded, so lines never corrupt mid-string, but in unified mode logs and replies **share the stream**. The client distinguishes them by one rule:
 
 - **Log lines begin with `[`** (the `LOG_TAGGED` format is `[tag] ...`, `src/common.h:29`).
-- **Reply lines never do** - they start with `ok`, `err`, or a `describe` tag
-  (`descr`/`param`/`config`/`query`/`caps`/`end`).
 
-The client discards (or captures) `[`-prefixed lines and treats the next non-log line as the reply.
-Commands are **synchronous, one outstanding at a time** - send a line, read until the reply - so there
-is no reply-to-command ambiguity and no need for sequence numbers in phase 1. (A future `seq N` tag is
-noted under "Later" for pipelined use.)
+- **Reply lines never do** - they start with `ok`, `err`, or a `describe` tag (`descr`/`param`/`config`/`query`/`caps`/`end`).
+
+The client discards (or captures) `[`-prefixed lines and treats the next non-log line as the reply. Commands are **synchronous, one outstanding at a time** - send a line, read until the reply - so there is no reply-to-command ambiguity and no need for sequence numbers in phase 1. (A future `seq N` tag is noted under "Later" for pipelined use.)
 
 ## `protocol.py` - transport client
 
@@ -238,8 +228,7 @@ def test_mode(device):                                  # per-test input isolati
 
 ### `test_generic.py` - the cross-engine payoff
 
-Driven entirely by `describe`; the same file tests every engine build. Parametrized at collection time
-from a describe done once, so each param is its own test case.
+Driven entirely by `describe`; the same file tests every engine build. Parametrized at collection time from a describe done once, so each param is its own test case.
 
 ```python
 import pytest
@@ -264,10 +253,7 @@ def test_param_roundtrip(test_mode, p):
             f"{p.name}[{d}] set {target} got {got}"
 ```
 
-Because `describe` lists only params the engine's `live_params()` mask marks live, this sweep never
-sets an ignored param, so a read-back mismatch is a real defect - not descriptor noise. Tolerance
-accounts for on-device value quantization (e.g. the granular MValue grid); tighten per-engine if a
-build stores exact floats.
+Because `describe` lists only params the engine's `live_params()` mask marks live, this sweep never sets an ignored param, so a read-back mismatch is a real defect - not descriptor noise. Tolerance accounts for on-device value quantization (e.g. the granular MValue grid); tighten per-engine if a build stores exact floats.
 
 ### `test_tape.py` - example per-engine test
 
@@ -288,8 +274,7 @@ test-hw:                                       # on-target; requires a flashed, 
 	cd tools && python -m pytest -q
 ```
 
-Separate from `test` (off-target `host/`). CI without hardware skips (the `device` fixture calls
-`pytest.skip`), so it is safe to leave in the default pipeline.
+Separate from `test` (off-target `host/`). CI without hardware skips (the `device` fixture calls `pytest.skip`), so it is safe to leave in the default pipeline.
 
 ## `skterm.py` - interactive REPL
 
@@ -297,18 +282,17 @@ A thin human front-end over the same `Device`, with `describe`-driven completion
 
 ### Behaviour
 
-- **Connect and introspect.** On start, open the port and run `describe`; build the completion
-  vocabulary from verbs + `descriptor.params` + `descriptor.configs` + decks (`A`/`B`).
-- **Line editing.** `readline` with history persisted to `~/.skterm_history`; a completer that offers
-  the verb set at position 0 and, after `set param`/`get param`/`config`, the relevant names then
-  `A`/`B`.
-- **Send and render.** Each entered line is sent verbatim; the reply is printed - `ok`/results in green,
-  `err <reason>` in red. `describe` is rendered as its multi-line block until `end`.
+- **Connect and introspect.** On start, open the port and run `describe`; build the completion vocabulary from verbs + `descriptor.params` + `descriptor.configs` + decks (`A`/`B`).
+
+- **Line editing.** `readline` with history persisted to `~/.skterm_history`; a completer that offers the verb set at position 0 and, after `set param`/`get param`/`config`, the relevant names then `A`/`B`.
+
+- **Send and render.** Each entered line is sent verbatim; the reply is printed - `ok`/results in green, `err <reason>` in red. `describe` is rendered as its multi-line block until `end`.
+
 - **Log visibility.** In unified mode, `[tag]` lines are shown dimmed. A background reader thread prints
   async logs while idle; toggle with `!log on|off`. Default off (quiet), on for debugging.
-- **Macros.** `@path` sources a file of commands (one per line, `#` comments) - enough for canned test
-  sequences without a macro language. Named macros live in `~/.skterm_macros` as `name: cmd; cmd; ...`
-  and run by `!name`.
+
+- **Macros.** `@path` sources a file of commands (one per line, `#` comments) - enough for canned test sequences without a macro language. Named macros live in `~/.skterm_macros` as `name: cmd; cmd; ...` and run by `!name`.
+
 - **Local commands** (prefix `!`, never sent to the device): `!quit`, `!reconnect`, `!log on|off`,
   `!describe` (re-run and rebuild completion), `!port <dev>`.
 
@@ -386,18 +370,14 @@ if __name__ == "__main__":
 
 ## Cross-cutting notes
 
-- **Synchronous only.** One command in flight; the client reads to the reply before sending the next.
-  No pipelining -> no correlation problem in phase 1. Pipelining would need a device-side `seq` echo
-  (Later).
-- **Disconnection.** A yanked cable surfaces as `Timeout` on the next `_readline`; `!reconnect`
-  re-opens and re-`describe`s. The harness `device` fixture is session-scoped, so a mid-run disconnect
-  fails the running test rather than corrupting later ones.
+- **Synchronous only.** One command in flight; the client reads to the reply before sending the next. No pipelining -> no correlation problem in phase 1. Pipelining would need a device-side `seq` echo (Later).
+
+- **Disconnection.** A yanked cable surfaces as `Timeout` on the next `_readline`; `!reconnect` re-opens and re-`describe`s. The harness `device` fixture is session-scoped, so a mid-run disconnect fails the running test rather than corrupting later ones.
+
 - **Baud is cosmetic** (USB CDC), but `dtr=True` matters - some hosts gate CDC output on DTR.
-- **Determinism belongs to the test, not the tool.** `test_mode()` (client ctx) maps to `mode
-  test`/`mode run`; every hardware test should run inside it so knobs/CV/gate cannot perturb the run.
+
+- **Determinism belongs to the test, not the tool.** `test_mode()` (client ctx) maps to `mode test`/`mode run`; every hardware test should run inside it so knobs/CV/gate cannot perturb the run.
 
 ## Out of scope
 
-L2 `measure` / phase-3 `stim` helpers (add `Device.measure(...)` when those verbs land), OSC
-transport, a GUI/Web-Serial front-end (Tier 2), and pipelined/`seq`-tagged command streams. This spec
-is the phase-1 line-protocol client, the pytest harness, and the REPL.
+L2 `measure` / phase-3 `stim` helpers (add `Device.measure(...)` when those verbs land), OSC transport, a GUI/Web-Serial front-end (Tier 2), and pipelined/`seq`-tagged command streams. This spec is the phase-1 line-protocol client, the pytest harness, and the REPL.

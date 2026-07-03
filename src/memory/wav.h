@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstring>
 
+#include "engine/wav_cues.h"   // spotykach::WavCues (the platform-owned parsed-marker type)
+
 struct WavHeader {
   // Master RIFF chunk
   uint8_t FileTypeBlocID[4] = {'R', 'I', 'F', 'F'};
@@ -127,11 +129,47 @@ inline bool wav_header(const uint8_t* bytes, size_t size, WavHeader& header, siz
         }
 
         if (foundFmt && foundData) return true;
-        
+
         cursor += chunkSize;
         if (cursor % 2 != 0) cursor++;
         if (cursor > size) return false;
     }
 
     return false;
+}
+
+// Scan a WAV byte buffer for the `cue ` chunk and fill `out` with the cue markers' sample-frame
+// offsets, keeping only those inside `frame_limit` (markers past the audio end are dropped) and
+// clamped to WavCues::kMax. Pure and host-testable: no engine, hardware, or allocation deps. `size`
+// is the number of valid bytes in `bytes`. Order-independent (the `cue ` chunk may precede or follow
+// `data`). All reads are bounds-checked - a malformed/truncated chunk yields whatever was parsed so
+// far rather than an over-read.
+//
+// A WAV `cue ` chunk body is: uint32 numCuePoints, then numCuePoints * 24-byte cue points; each cue
+// point carries its dwSampleOffset (the sample-frame position) at byte offset 20 within the point.
+inline void find_cue_points(const uint8_t* bytes, size_t size, size_t frame_limit, spotykach::WavCues& out)
+{
+    out.count = 0;
+    if (size < 12 || !check_id(bytes, 0, "RIFF")) return;
+
+    size_t cursor = 12;   // past RIFF + riffSize + WAVE
+    while (cursor + 8 <= size) {
+        char chunkID[4];
+        std::memcpy(chunkID, bytes + cursor, 4);
+        uint32_t chunkSize = read_val<uint32_t>(bytes, cursor + 4);
+        size_t body = cursor + 8;
+
+        if (std::memcmp(chunkID, "cue ", 4) == 0 && body + 4 <= size) {
+            uint32_t n = read_val<uint32_t>(bytes, body);
+            for (uint32_t i = 0; i < n && out.count < spotykach::WavCues::kMax; ++i) {
+                size_t off = body + 4 + static_cast<size_t>(i) * 24 + 20; // dwSampleOffset within point
+                if (off + 4 > size) break;
+                uint32_t frame = read_val<uint32_t>(bytes, off);
+                if (frame < frame_limit) out.frames[out.count++] = frame;
+            }
+            return;
+        }
+
+        cursor = body + chunkSize + (chunkSize & 1u);   // chunks are word-aligned
+    }
 }

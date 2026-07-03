@@ -79,6 +79,7 @@ TEST_RESO    = $(BUILD)/test_reso
 TEST_REVERB  = $(BUILD)/test_reverb
 TEST_TAPE    = $(BUILD)/test_tape
 TEST_STREAM  = $(BUILD)/test_stream
+TEST_WAV_CUES = $(BUILD)/test_wav_cues
 TEST_SHUTTLE = $(BUILD)/test_shuttle
 TEST_SOFTCUT = $(BUILD)/test_softcut
 TEST_RADIO   = $(BUILD)/test_radio
@@ -99,7 +100,7 @@ TEST_CHUCK_PATCH = $(BUILD)/test_chuck_patch
 BENCH_REVERB     = $(BUILD)/bench_reverb
 BENCH_GRAINCLOUD = $(BUILD)/bench_graincloud
 
-.PHONY: all clean run test test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-shuttle test-radio test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
+.PHONY: all clean run test test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
 all: $(TARGET)
 
 $(TARGET): $(SRC) | $(BUILD)
@@ -239,6 +240,9 @@ $(TEST_STREAM): test_stream.cpp $(ROOT)/src/memory/spsc_ring.h $(ROOT)/src/memor
                 $(ROOT)/src/engine/istreamdeck.h | $(BUILD)
 	$(CXX) $(CXXFLAGS) test_stream.cpp -o $@
 
+$(TEST_WAV_CUES): test_wav_cues.cpp $(ROOT)/src/memory/wav.h $(ROOT)/src/engine/wav_cues.h | $(BUILD)
+	$(CXX) $(CXXFLAGS) test_wav_cues.cpp -o $@
+
 $(BUILD):
 	mkdir -p $(BUILD)
 
@@ -247,7 +251,7 @@ run: $(TARGET)
 
 # `test` runs both engine harnesses. Both inject the transport via EngineContext (granular drives the
 # real platform Transport; edrums uses a small stub ITransport) - the post-transport-decoupling way.
-test: test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-shuttle test-softcut test-radio test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
+test: test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-softcut test-radio test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
 
 test-granular: $(TEST)
 	./$(TEST)
@@ -281,6 +285,9 @@ test-tape: $(TEST_TAPE)
 
 test-stream: $(TEST_STREAM)
 	./$(TEST_STREAM)
+
+test-wav-cues: $(TEST_WAV_CUES)
+	./$(TEST_WAV_CUES)
 
 test-shuttle: $(TEST_SHUTTLE)
 	./$(TEST_SHUTTLE)

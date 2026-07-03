@@ -10,6 +10,7 @@
 #include "engine/deck_ref.h"      // DeckRef (the A/B selector every method takes)
 #include "engine/mode.h"          // Route, ClockSource (contract-owned, items 5b/5c)
 #include "engine/engine_params.h" // ParamId, FxKind, Capabilities
+#include "engine/wav_cues.h"      // WavCues (platform-parsed WAV markers for CapWavCues engines)
 #include "engine/display_model.h" // DisplayModel
 #include "engine/engine_leds.h"   // FxLeds/PlayLeds/AltLeds/TransportLeds/DeckLeds/RingGeometry
 #if SPK_TERMINAL
@@ -127,6 +128,12 @@ public:
     virtual size_t   audio_recorded_bytes(DeckRef::Ref) { return 0; }
     virtual size_t   audio_capacity_bytes(DeckRef::Ref) { return 0; }
     virtual void     audio_apply_loaded(DeckRef::Ref, size_t frames) {}
+
+    // --- WAV cue markers (CapWavCues) --------------------------------------------------------
+    // After a WAV finishes loading for a CapWavCues engine, the platform parses the file's `cue `
+    // chunk and calls this with the markers (sample-frame offsets into the just-loaded audio).
+    // Default no-op; the engine assigns meaning (slice starts, loop points, jump markers, ...).
+    virtual void     on_wav_cues(DeckRef::Ref, const WavCues&) {}
 
     // --- Transport: NOT an engine concern. The platform owns the Transport service and injects a
     //     read-only ITransport via EngineContext; an engine that wants tempo/ticks reads or subscribes

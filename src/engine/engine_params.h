@@ -92,6 +92,10 @@ enum Capability : uint32_t {
                                  // hold the snap via take_param_reseed until the pot is swept across it
     CapTerminal      = 1u << 10, // engine implements custom SPK_TERMINAL verbs / query names via
                                  // handle_command(); advertised so `caps`/`describe`/`help` can note it
+    CapWavCues       = 1u << 11, // engine consumes WAV cue markers: on a load the platform parses the
+                                 // file's `cue ` chunk and delivers the sample-frame offsets via
+                                 // IEngine::on_wav_cues (engine assigns meaning - slice starts, loop
+                                 // points, jump markers, ...). Without it the markers are ignored.
 };
 using Capabilities = uint32_t;
 
