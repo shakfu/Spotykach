@@ -10,6 +10,101 @@ codebase, the footprint constraint that gates which engines can host it, and wha
 Everything is behind `SPK_TERMINAL` and costs **nothing** when off (verified: the terminal TUs compile
 to 0 bytes and the default `granular` binary's SRAM_EXEC is byte-identical to before, 186768 B).
 
+## HARDWARE BRING-UP — IN PROGRESS, BLOCKED (session handoff, 2026-07-03)
+
+**Status: first on-hardware bring-up attempted; BLOCKED on USB-C CDC never enumerating.** The build +
+DFU-flash pipeline works, the app boots and runs, but the terminal's OTG_FS (USB-C) device never
+appears on the host, so nothing has been exercised end-to-end (`make test-hw` unreachable). This
+section is the resume point; the "Verification status" section below is the pre-hardware state.
+
+### The blocking bug
+
+Flashed `make ENGINE=delay TERMINAL=1` (fits -O2, 94% SRAM_EXEC) to the cased Spotykach and the USB-C
+CDC does **not** enumerate. Established, with evidence:
+
+- **Data path is 100% good.** The DFU bootloader (`0483:df11` "Daisy Bootloader") enumerates cleanly
+  and repeatedly on the same cable/port/hub (`3-2.4`, behind a VIA Labs hub), confirmed via `dfu-util
+  -l` and `journalctl -k`. So cable, port, and host are fine.
+- **The app runs.** Knobs change the panel LEDs → `AppImpl::Init()` completes past `_terminal.init()`
+  (`app.cpp:228`) and the main `Loop()` runs. libDaisy's `UsbErrorHandler` is `while(1){}`
+  (`hid/usb.cpp:153`), so a failed `Init(FS_INTERNAL)` would freeze the app — it doesn't, so all four
+  `USBD_Init/RegisterClass/RegisterInterface/Start` calls returned OK and `USBD_Start` ran `DevConnect`.
+- **Yet the host sees LITERALLY NOTHING** on the app's OTG_FS — no `ttyACM`, no `0483:5740`, not even a
+  failed-enumeration line in `journalctl`. A physical unplug/replug produced zero host events. That
+  means the D+ pullup is never seen by the host — the enumeration fails *before* descriptors/IRQs
+  matter (a descriptor/VTOR/IRQ fault would still log "new full-speed USB device" then an error).
+
+### Ruled out (do not re-investigate without new evidence)
+
+1. **VBUS sensing.** Hypothesis: libDaisy sets `hpcd_USB_OTG_FS.Init.vbus_sensing_enable = ENABLE`
+   (`usbd/usbd_conf.c:424`; the OTG_HS core has it DISABLE at :476) and Daisy USB-C VBUS isn't on PA9.
+   Tried a post-`Init` register poke in `Terminal::init()` (clear `GCCFG.VBDEN`, set
+   `GOTGCTL.BVALOEN|BVALOVAL`, soft-disconnect/reconnect via `DCTL.SDIS`). **No effect.** Reverted.
+   (Also: stock `Logger<LOGGER_INTERNAL>` uses the same config and enumerates for other Daisy users, so
+   VBUS-sensing-ENABLE is not itself the blocker.)
+2. **Dual OTG_HS + OTG_FS bring-up.** This build uniquely inits the *external* logger's OTG_HS
+   (`Log::StartLog` at `app.cpp:219`, because the Makefile forces `-DINFS_LOG=1
+   -DINFS_LOG_TARGET=LOGGER_EXTERNAL`) right before the terminal's OTG_FS. Tried skipping the external
+   logger entirely (gate `StartLog`/`LOG_TAGGED` under `#if !SPK_TERMINAL`). **No effect.** Reverted.
+   (Pins are independent: FS=PA11/PA12, HS=PB14/PB15; libDaisy's `FS_BOTH` does HS-then-FS in this same
+   order.)
+3. **USB 48 MHz clock.** libDaisy `sys/system.cpp` enables it: `HSI48State = RCC_HSI48_ON` (:429),
+   `UsbClockSelection = RCC_USBCLKSOURCE_HSI48` (:514), applied by `_hw.Init()`. Present.
+4. **Init call is wrong/incomplete.** `LoggerImpl<LOGGER_INTERNAL>::Init()` is *literally* just
+   `usb_handle_.Init(FS_INTERNAL)` (`hid/logger_impl.h:56`) — byte-identical to the terminal's call.
+
+### Leading theory (unverified)
+
+This project has **never brought up OTG_FS in the app before** — the Makefile forces the Logger to
+`LOGGER_EXTERNAL` (OTG_HS) and `METER` uses `FS_EXTERNAL`, so the USB-C port (OTG_FS) is *only* ever
+touched by the bootloader for DFU. The terminal is the first app-side OTG_FS user, so the
+**bootloader→app OTG_FS handoff** (or something in this app's boot that leaves the FS transceiver
+unpowered/un-pulled) has never been exercised. Because the host sees no pullup at all, the next probe
+targets the *physical layer*: is `DCTL.SDIS` clear (pullup asserted) and is `GCCFG.PWRDWN` set
+(transceiver powered) after `Init()`?
+
+### Hardware reality that changed the plan
+
+The **cased Spotykach hides the Daisy Seed onboard LED AND the SWD pads** (per
+[`chuck-pod-poc.md`](chuck-pod-poc.md)); the **bare Daisy Pod exposes both**. The device is Daisy
+Seed-based (`daisy::DaisySeed seed; seed.Init(true)`, `hw/hardware.cpp:48`). So debugging moves to a
+**Pod as a stock-Seed reference**, which also plugs into the dev host — enabling a direct
+firmware-vs-board isolation and the repo's existing **SWD debug workflow** (ST-Link V3 mini + OpenOCD,
+`pod/daisy_qspi.cfg`, `make -f pod/Makefile.chuck program-swd` / `openocd-attach`).
+
+### RESUME PLAN (next session)
+
+1. **Pod journal test (isolates firmware vs Spotykach board).** Flash the as-designed
+   `make ENGINE=delay TERMINAL=1` to a Pod, plug the Pod into the dev host, watch
+   `journalctl -k -b | grep 'usb 3-'` (or `lsusb | grep 0483`):
+   - **Enumerates (`0483:5740` + `ttyACM`)** → firmware is fine; the cased Spotykach's custom-board
+     USB-C routing/VBUS is the culprit → pivot to the board wiring.
+   - **Also silent** → firmware bug reproduced on stock hardware → go to step 2.
+2. **SWD register read (precise).** Attach ST-Link, `openocd-attach`, and read after `Init()`:
+   `USB_OTG_FS->GCCFG` (PWRDWN bit = transceiver power), the device `DCTL.SDIS` (pullup), `GINTSTS`,
+   and `hUsbDeviceFS.dev_state`. This ends the guessing about *why* the pullup isn't asserted.
+3. **LED diagnostic (fallback, Pod only).** Already built into the tree, off by default:
+   `make ENGINE=delay TERMINAL=1 USBDIAG=1` parks the app after `Init()` and blinks the Seed onboard
+   LED — Group 1 (FAST) = pullup `1`=disconnected/`2`=connected; Group 2 (SLOW) = `GCCFG.PWRDWN`
+   `1`=powered-down/`2`=active; expected-good = FAST 2 + SLOW 2. (Readable on a Pod, not the cased unit.)
+
+### Uncommitted working-tree state at handoff (diagnostic scaffolding, all OFF by default)
+
+- `Makefile`: adds `ifeq ($(USBDIAG),1) C_DEFS += -DTERM_USBDIAG=1`. Marked temporary; remove once USB-C
+  works. Command-line `C_DEFS+=...` does NOT work (it clobbers the in-Makefile `C_DEFS` incl.
+  `-DSTM32H750xx`); use the `USBDIAG=1` switch.
+- `src/app.cpp`: `#ifdef TERM_USBDIAG` block at the end of `AppImpl::Init()` (the onboard-LED probe).
+- `src/terminal/terminal.cpp`: **back to baseline** (the VBUS register-poke experiment was fully
+  reverted; no net change).
+- All prior experiments (VBUS poke, external-logger skip) reverted — only the off-by-default diagnostic
+  remains. Decide whether to keep or drop the `USBDIAG` scaffolding once the root cause is found.
+
+### Side finding — shuttle footprint (not a bug)
+
+`make ENGINE=shuttle TERMINAL=1` fails at -O2 with `region SRAM_EXEC overflowed by 8396 bytes`. This is
+the expected footprint ceiling, not a code fault: `OPT=-Os` fits (98.07% SRAM_EXEC, links clean).
+Shuttle belongs with tape in the fit table below (stream/near-full engine → needs `-Os`).
+
 ## How to build and run
 
 ```
@@ -97,6 +192,7 @@ everywhere:
 | passthrough | fits (-O2) | lean |
 | delay | fits (-O2) | ~94% |
 | tape | overflow at -O2 -> fits at `-Os` | ~98% (-Os) |
+| shuttle | overflow at -O2 (by 8396 B) -> fits at `-Os` | 98.07% (-Os) |
 | mosc (and csound/chuck) | fits (QSPI-execute) | 0% SRAM_EXEC (code in QSPI) |
 | granular | overflow at -O2 **and** -Os | 98% before terminal |
 | reso | overflow at -O2 and -Os | Rings DSP already large |
