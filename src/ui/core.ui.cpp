@@ -190,6 +190,13 @@ void CoreUI::process()
     }
     if (_engine_owns_display) _engine.render(_display);
 
+#if SPK_TERMINAL
+    // `mode test`: drop this iteration's knob applies so no pot value reaches the engine (the pickup
+    // caches in _mv[] still track, so knobs don't jump when test mode is released). One-line freeze of
+    // the whole apply pass below - every _apply.test(...) then reads false. See docs/dev/terminal-*.md.
+    if (_input_frozen) _apply.reset();
+#endif
+
     if (_apply.test(Hardware::CTRL_POS_A)) {
         if (_touched.test(FluxA)) {
             _engine.set_param(ParamId::FluxFb, DeckRef::A, mv(ParamId::FluxFb)[DeckRef::A].value());
@@ -347,6 +354,9 @@ void CoreUI::process()
 
 // CV ///////////////////////////////////////
 void CoreUI::read_cv() {
+#if SPK_TERMINAL
+    if (_input_frozen) return;   // `mode test`: CV jacks must not overwrite terminal-injected cv_* stimulus
+#endif
     // Platform reads + calibrates each CV jack; the engine routes by role.
     auto mix_mod_a = _hw.GetControlVoltageValue(Hardware::CV_MIX_A);
     _engine.cv_mix(DeckRef::A, _calibrator.correct(Hardware::CV_MIX_A, mix_mod_a));
@@ -376,7 +386,10 @@ void CoreUI::read_cv() {
 
 // Gate /////////////////////////////////////
 void CoreUI::process_gate_in()
-{ 
+{
+#if SPK_TERMINAL
+    if (_input_frozen) return;   // `mode test`: gate-in must not race terminal-injected `gate` stimulus
+#endif
     if (_storage.of(DeckRef::A).is_idle()) {
         auto a_high = _hw.GetGateInputAState();
         if (a_high && !_gate_in.test(0)) {

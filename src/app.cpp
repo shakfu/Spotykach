@@ -16,6 +16,9 @@
 #if defined(SPK_USE_STREAM)
 #include "hw/stream_deck.h"   // SD streaming service (any SPK_USE_STREAM engine: tape, shuttle, radio)
 #endif
+#if SPK_TERMINAL
+#include "terminal/terminal.h"   // USB-C text/command test channel (docs/dev/terminal-*.md)
+#endif
 #ifdef METER
 #include "hid/usb.h"   // daisy::UsbHandle - direct non-blocking CDC for the CPU-load meter
 #include <cstdio>      // snprintf
@@ -109,6 +112,9 @@ class AppImpl {
     Storage     _storage;
 #if defined(SPK_USE_STREAM)
     StreamDeck  _stream;  // SD play/record streaming for streaming engines (pumped in Loop)
+#endif
+#if SPK_TERMINAL
+    Terminal    _terminal;  // USB-C text/command channel: on-target engine testing + runtime control
 #endif
 };
 };
@@ -216,6 +222,11 @@ void AppImpl::Init()
     volatile const char* fw_banner = firmware_banner();
     (void)fw_banner;
     LOG_TAGGED("boot", "%s", firmware_banner());
+#if SPK_TERMINAL
+    // Bring up the terminal channel after Log::StartLog so, in a build where a logger owns the CDC
+    // device, it is already up before the RX callback attaches. Binds ActiveEngine as IEngine& for life.
+    _terminal.init(_engine);
+#endif
 #if DEBUG || defined(METER)
     _log_timer.Init();
 #endif
@@ -248,6 +259,13 @@ void AppImpl::Loop()
         {
             System::ResetToBootloader(System::BootloaderMode::DAISY_INFINITE_TIMEOUT);
         }
+
+#if SPK_TERMINAL
+        // Drain the command channel and republish the input-isolation flag: `mode test` freezes the
+        // physical input path (knobs/CV/gate) so terminal-injected stimulus is the only engine driver.
+        _terminal.process();
+        _ui.set_input_frozen(_terminal.test_mode());
+#endif
 
         _ui.process();
         _engine.prepare();
