@@ -46,6 +46,9 @@
 #elif defined(SPK_ENGINE_RADIO)
   #include "engine/radio/radio_engine.h"
   namespace spotykach { using ActiveEngine = RadioEngine; }
+#elif defined(SPK_ENGINE_BARD)
+  #include "engine/bard/bard_engine.h"
+  namespace spotykach { using ActiveEngine = BardEngine; }
 #elif defined(SPK_ENGINE_GLITCH)
   #include "engine/glitch/glitch_engine.h"
   namespace spotykach { using ActiveEngine = GlitchEngine; }
@@ -82,5 +85,5 @@
   #include "engine/chuck/chuck_engine.h"
   namespace spotykach { using ActiveEngine = ChuckEngine; }
 #else
-  #error "No engine selected: build with ENGINE=granular (default), passthrough, delay, edrums, reso, graincloud, tape, reverb, shuttle, softcut, radio, or chorus"
+  #error "No engine selected: build with ENGINE=granular (default), passthrough, delay, edrums, reso, graincloud, tape, reverb, shuttle, softcut, radio, bard, or chorus"
 #endif

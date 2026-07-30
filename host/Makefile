@@ -61,6 +61,9 @@ SHUTTLE_SRC = $(ROOT)/src/engine/shuttle/shuttle_engine.cpp
 # The dual-deck softcut overdub looper: engine wrapper + the vendored monome softcut core (5 .cpp).
 SOFTCUT_SRC = $(ROOT)/src/engine/softcut/softcut_engine.cpp $(wildcard $(ROOT)/src/engine/softcut/vendor/src/*.cpp)
 RADIO_SRC   = $(ROOT)/src/engine/radio/radio_engine.cpp
+# The bard storyteller: bookmark-navigated audiobook decks. The sidecar parser / auto-marks / resume table
+# are header-only (src/engine/bard/bookmarks.h, resume_table.h), so only the engine wrapper compiles here.
+BARD_SRC    = $(ROOT)/src/engine/bard/bard_engine.cpp
 # The dual-deck glitch/lo-fi noise engine (12 Noisferatu algorithms, header-only Voice). Self-contained.
 GLITCH_SRC  = $(ROOT)/src/engine/glitch/glitch_engine.cpp
 # The real-time PaulStretch ambient engine (vendored radix-2 FFT + Stretcher, header-only). Self-contained.
@@ -83,6 +86,8 @@ TEST_WAV_CUES = $(BUILD)/test_wav_cues
 TEST_SHUTTLE = $(BUILD)/test_shuttle
 TEST_SOFTCUT = $(BUILD)/test_softcut
 TEST_RADIO   = $(BUILD)/test_radio
+TEST_BARD    = $(BUILD)/test_bard
+BARD_CARD_CHECK = $(BUILD)/bard_card_check
 TEST_GLITCH  = $(BUILD)/test_glitch
 TEST_PSTRETCH = $(BUILD)/test_pstretch
 TEST_CHORUS  = $(BUILD)/test_chorus
@@ -100,7 +105,7 @@ TEST_CHUCK_PATCH = $(BUILD)/test_chuck_patch
 BENCH_REVERB     = $(BUILD)/bench_reverb
 BENCH_GRAINCLOUD = $(BUILD)/bench_graincloud
 
-.PHONY: all clean run test test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
+.PHONY: all clean run bard-card-check test test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
 all: $(TARGET)
 
 $(TARGET): $(SRC) | $(BUILD)
@@ -198,6 +203,19 @@ $(TEST_RADIO): test_radio.cpp $(LIB_SRC) $(RADIO_SRC) $(ROOT)/src/engine/radio/r
                $(ROOT)/src/memory/raw_stream.h | $(BUILD)
 	$(CXX) $(CXXFLAGS) test_radio.cpp $(LIB_SRC) $(RADIO_SRC) -o $@
 
+# Bard engine + its header-only bookmark/resume model.
+$(TEST_BARD): test_bard.cpp $(LIB_SRC) $(BARD_SRC) $(ROOT)/src/engine/bard/bard_engine.h \
+              $(ROOT)/src/engine/bard/bookmarks.h $(ROOT)/src/engine/bard/resume_table.h | $(BUILD)
+	$(CXX) $(CXXFLAGS) test_bard.cpp $(LIB_SRC) $(BARD_SRC) -o $@
+
+# Card validator for the bard engine: applies the firmware's own scan filters and parses each sidecar with
+# the real bookmarks.h, so "will the device see this card?" is answered by the same code the device runs.
+# Header-only dependency, so it links alone.
+$(BARD_CARD_CHECK): bard_card_check.cpp $(ROOT)/src/engine/bard/bookmarks.h | $(BUILD)
+	$(CXX) $(CXXFLAGS) bard_card_check.cpp -o $@
+bard-card-check: $(BARD_CARD_CHECK)
+	@echo "usage: ./$(BARD_CARD_CHECK) <card-root-or-shelf-dir>"
+
 # Glitch engine + its header-only Voice (no extra deps).
 $(TEST_GLITCH): test_glitch.cpp $(LIB_SRC) $(GLITCH_SRC) $(ROOT)/src/engine/glitch/glitch_engine.h \
                 $(ROOT)/src/engine/glitch/glitch_voice.h | $(BUILD)
@@ -251,7 +269,7 @@ run: $(TARGET)
 
 # `test` runs both engine harnesses. Both inject the transport via EngineContext (granular drives the
 # real platform Transport; edrums uses a small stub ITransport) - the post-transport-decoupling way.
-test: test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-softcut test-radio test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
+test: test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-softcut test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
 
 test-granular: $(TEST)
 	./$(TEST)
@@ -297,6 +315,9 @@ test-softcut: $(TEST_SOFTCUT)
 
 test-radio: $(TEST_RADIO)
 	./$(TEST_RADIO)
+
+test-bard: $(TEST_BARD)
+	./$(TEST_BARD)
 
 test-glitch: $(TEST_GLITCH)
 	./$(TEST_GLITCH)

@@ -1,0 +1,55 @@
+{
+  "engine": "bard",
+  "title": "Bard - bookmarked audiobook player",
+  "subtitle": "two SD storytellers navigated by a text-file mark list",
+
+  "knobs": {
+    "Pitch": "BOOK select (+V/Oct CV); Alt = SHELF",
+    "Position": "BOOKMARK select (+CV); Alt = SCRUB",
+    "Size": "RATE 0.5-2.5x (varispeed)",
+    "Envelope": "PITCH-KEEP (varispeed <-> pitch held)",
+    "Mix (SOS)": "deck volume (+CV); Alt = SEAM fade",
+    "Cycle": "duck release",
+    "Glow": "duck depth"
+  },
+
+  "pads": {
+    "Play": "play/pause; Alt = drop mark; hold = commit",
+    "Reverse": "jump back 15 s; Alt = re-roll auto-marks",
+    "Grit": "ROOM (plate / hall / slap)",
+    "Flux": "VOICE COLOUR (drive + band-limit)",
+    "Seq": "next segment; Alt = arm to clock, Alt-hold = loop/hold"
+  },
+
+  "ring": "book progress + bookmark ticks; shelf dots (Alt)",
+
+  "crossfade": "A/B blend of the two storytellers",
+
+  "switches": {
+    "Mode (L/C/R)": "sequence: Read / Recite / Wander",
+    "Routing (L/C/R)": "stereo image: a story per ear / mono / random",
+    "CV target (U/C/D)": "-",
+    "Out trims A/B": "output trims"
+  },
+
+  "transport": {
+    "Tap": "tempo (quantizes armed segment advance)",
+    "Spot": "-"
+  },
+
+  "cv": {
+    "Size/Pos A/B": "BOOKMARK CV",
+    "Mix A/B": "deck volume CV",
+    "V/Oct A/B": "BOOK CV",
+    "Crossfade CV": "A/B blend"
+  },
+
+  "gates": {
+    "Gate in A/B": "next bookmark",
+    "Gate out A/B": "pulse per bookmark crossing"
+  },
+
+  "mod_midi": {
+    "Mod CV out A/B": "speech envelope"
+  }
+}

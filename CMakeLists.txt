@@ -154,6 +154,16 @@ elseif(ENGINE STREQUAL radio)
     # StreamDeck/FatFile symbols.
     set(ENGINE_DEFINES SPK_USE_STREAM)
     set(ENGINE_SOURCES src/engine/radio/radio_engine.cpp)
+elseif(ENGINE STREQUAL bard)
+    set(ENGINE_DEFINE SPK_ENGINE_BARD)
+    # The storyteller: bookmark-navigated audiobook decks. Streams books from SD via the shared streaming
+    # service in src/hw/ (stream_deck.cpp, fat_file.cpp -- HW_SOURCES glob) and also WRITES its small resume
+    # table through it, so SPK_USE_STREAM is required (same gate as tape/radio/pstretch).
+    set(ENGINE_DEFINES SPK_USE_STREAM)
+    set(ENGINE_SOURCES src/engine/bard/bard_engine.cpp)
+    # -Os for the same reason the Makefile gives: WSOLA + the room reach ~94% SRAM_EXEC at -O2, leaving too
+    # little headroom to work in. ~88% at -Os, and the M7 has ample compute margin for this engine.
+    set(APP_OPT -Os)
 elseif(ENGINE STREQUAL glitch)
     set(ENGINE_DEFINE SPK_ENGINE_GLITCH)
     # Dual lo-fi/circuit-bent glitch voice: 12 Noisferatu algorithms behind a header-only glitch::Voice.
@@ -272,7 +282,7 @@ elseif(ENGINE STREQUAL chuck)
     # firmware keeps them off, so libstdc++'s exception machinery does not bloat the SRAM-tight platform).
     set_source_files_properties(src/engine/chuck/chuck_engine.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions;-frtti")
 else()
-    message(FATAL_ERROR "Unknown ENGINE '${ENGINE}' - use granular, passthrough, delay, qdelay, edrums, reso, mosc, graincloud, tape, radio, glitch, pstretch, reverb, shuttle, softcut, gigaverb, chorus, filter, voice, csound, or chuck")
+    message(FATAL_ERROR "Unknown ENGINE '${ENGINE}' - use granular, passthrough, delay, qdelay, edrums, reso, mosc, graincloud, tape, radio, bard, glitch, pstretch, reverb, shuttle, softcut, gigaverb, chorus, filter, voice, csound, or chuck")
 endif()
 
 # Source list = the Makefile's CPP_SOURCES, with the wildcard dirs expanded the same way.

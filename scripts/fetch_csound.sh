@@ -35,7 +35,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tp="$repo_root/thirdparty/csound"
 
 CSOUND_REPO="${CSOUND_REPO:-https://github.com/csound/csound}"
-CSOUND_REF="${CSOUND_REF:-7.0.0-beta.16}"
+CSOUND_REF="${CSOUND_REF:-7.0.0-beta.17}"
 JOBS="${JOBS:-$( (command -v nproc >/dev/null && nproc) || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
 do_build=1
