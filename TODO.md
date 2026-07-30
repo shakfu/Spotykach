@@ -2,10 +2,11 @@
 
 Deferred work, in priority order (highest first). See `docs/` for the platform/engine design and `CHANGELOG.md` for done work.
 
-Priority is driven less by size than by what unblocks/gates what, and by whether an item is **build-verifiable on the host** vs. **hardware-gated** (needs a flash to verify). Most of the open work is now hardware-gated and has piled up: several engines have been *flashed and heard informally but not rigorously measured/voiced* - they sound alive, but CPU headroom (`Meter::cpu`) and the full voicing range haven't been pinned down. The dominant move is therefore a single bench session (P2) that does that measured pass; the remaining items are a deliberate code refactor (P3), an optional voicing tweak (P4), and a strategic build-system decision (P5).
+Priority is driven less by size than by what unblocks/gates what, and by whether an item is **build-verifiable on the host** vs. **hardware-gated** (needs a flash to verify). Most of the open work is now hardware-gated and has piled up: several engines have been *flashed and heard informally but not rigorously measured/voiced* - they sound alive, but CPU headroom (`Meter::cpu`) and the full voicing range haven't been pinned down. The dominant move is therefore a single bench session (P2) that does that measured pass; the remaining items are a deliberate code refactor (P3), an optional voicing tweak (P4), and a strategic build-system decision (P5). Ahead of all of them sits **P0**, a desk/host audit of whether every engine actually uses the full UI/indicator grammar the panel can express.
 
 | # | Item | Effort | Risk | Verify | Gating |
 |---|------|--------|------|--------|--------|
+| P0 | Audit every engine for full UI / indicator-grammar usage | med | low | code read (desk) | produces the per-engine UI-gap worklist; fixes fold into P2 |
 | P1 | Mono-input: answer the normalling question | trivial | n/a | a fact | unblocks/kills its own code item |
 | P2 | One bench session: measure + voice the engines flashed-but-not-quantified | low-med | med | **hardware flash** | turns "sounds fine" into measured CPU headroom + confirmed voicing range |
 | P3 | Refactor delay engine onto shared primitives (by ear) | med | med-high | **hardware flash** | none (primitives in `dsp/`); folds into P2 |
@@ -13,6 +14,20 @@ Priority is driven less by size than by what unblocks/gates what, and by whether
 | P5 | Finish or back out the CMake adoption (now merged to `main`, incomplete) | high | high | flash + cleanup | strategic; three build-system files straddle `main` |
 
 ---
+
+## P0 - Audit every engine for full UI / indicator-grammar usage
+
+Go through **all** engines and check whether each speaks the full visual grammar the panel can express, or is leaving capability on the table. The reference vocabulary — mode-hued arcs, position/grain dots, red pickup-deviation overlays, breathe, clock-locked blink, the eight named per-deck indicators, storage rings — is inventoried in [`docs/dev/indicator-grammar.md`](docs/dev/indicator-grammar.md); the existing per-engine gap analysis is in [`docs/dev/indicator-comparison.md`](docs/dev/indicator-comparison.md). Extend that comparison to cover every engine (incl. the newer `bard`, `pstretch`, `glitch`, `qdelay`, `softcut`, `mosc`) and act on the gaps.
+
+Known findings to build on:
+
+- Most own-display engines (`CapOwnDisplay`) converge on a thin dialect — level arc + pitch/position dot + play dot + mode LEDs — and skip breathe, blink, value-pickup feedback, and storage animation, because those live in the platform's granular path and must be re-coded in an own-display `render()`.
+
+- A few (`softcut`, `shuttle`, `chuck`) go further but **re-implement** platform features instead of reusing them.
+
+- The reusable half of the grammar now lives in the shared **`src/engine/indicators.h`** toolkit — engines should call it (selector/slot/progress/level rings, breathe, value-pickup feedback, direction-coded transport color, the canonical palette) rather than hand-roll.
+
+**Deliverable:** a per-engine "draws now vs. could draw" table and, for each gap, whether to close it via `indicators.h`. The audit itself is desk/host work (reading each engine's `render()`); applying and confirming the LED changes on the panel is hardware-gated and folds into the P2 bench session.
 
 ## P1 - Mono-input normalization (left -> right when right is unused)
 
