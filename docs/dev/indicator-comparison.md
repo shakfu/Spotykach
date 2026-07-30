@@ -2,7 +2,9 @@
 
 Companion to [`indicator-grammar.md`](indicator-grammar.md), which reverse-engineers the full indicator vocabulary from the reference `granular` engine. This document asks the follow-up question: **do the other engines actually use that vocabulary, or are they leaving capability on the table?**
 
-Short answer: **most engines use a small fraction of what the panel can express.** The rich grammar (mode-hued arcs, position/grain dots, red pickup-deviation overlays, breathe, clock-locked blink, the eight named per-deck indicators, storage rings) is almost entirely a `granular` phenomenon. Own-display engines converge on a common minimal dialect — *level arc + pitch/position dot + play dot + mode LEDs* — and a couple (`softcut`, `shuttle`, `chuck`) go further but **re-implement** platform features rather than reuse them.
+Short answer: **most engines use a small fraction of what the panel can express.** The rich grammar (mode-hued arcs, position/grain dots, red pickup-deviation overlays, breathe, clock-locked blink, the eight named per-deck indicators, storage rings) is almost entirely a `granular` phenomenon. Own-display engines converge on a common minimal dialect — *level arc + pitch/position dot + play dot + mode LEDs* — and several (`softcut`, `shuttle`, `chuck`, `bard`) go further but **re-implement** platform features rather than reuse them.
+
+> **2026-07-31 audit refresh (TODO P0).** §7 below re-runs this comparison against the current tree, across *every* engine including the ones that postdate the original write-up (`bard`, `pstretch`, `glitch`, `qdelay`, `softcut`, `mosc`). Net finding: the shared toolkit `src/engine/indicators.h` now exists and `tape` + `shuttle` are migrated onto it, but **13 own-display engines still hand-roll everything** and call zero toolkit helpers. The per-engine table and the ranked migration worklist are in §7.
 
 ---
 
@@ -149,3 +151,63 @@ Ordered by leverage:
 5. **Give Faust engines a non-blank default.** Even without `meter`, a mode-hued idle breathe + play dot would lift the floor.
 
 The theme: the grammar is rich but **trapped in the platform's granular path**. Turning its key pieces (value feedback, breathe, selector/progress rings, palette) into shared helpers callable from `render()` would let every own-display engine speak the full language instead of the current pidgin.
+
+---
+
+## 7. Audit refresh (2026-07-31, TODO P0) — full current-tree pass
+
+§1–6 were written as the toolkit (`src/engine/indicators.h`) was being introduced and `tape`/`shuttle` migrated. This section re-runs the comparison against the current tree, across **every** engine — including those that postdate the original write-up (`bard`, `pstretch`, `glitch`, `qdelay`, `softcut`, `mosc`).
+
+### 7.1 Adoption status
+
+The toolkit exists but almost nobody calls it: `src/engine/indicators.h` is `#include`d by exactly **two** engines. Every other own-display engine hand-rolls the same pictures against raw `LEDRing` + literal hex.
+
+| Group | Engines | State |
+|---|---|---|
+| **Co-authored** (platform draws the full grammar) | `granular`, `graincloud` | Full grammar, but the *platform* owns it |
+| **Migrated onto `indicators.h`** | `tape`, `shuttle` | The intended end-state (value bars, breathe, selector/slots, named FX LEDs) |
+| **Own-display, 100 % hand-rolled** | `bard`, `softcut`, `edrums`, `reso`, `mosc`, `delay`, `qdelay`, `reverb`, `radio`, `glitch`, `pstretch`, `csound`, `chuck` | **13 engines** re-implementing what the toolkit provides |
+| **Faust floor** | `chorus`, `filter`, `voice` | Level arc + play *iff* `Traits::meter`; otherwise a **dark panel** |
+
+### 7.2 Per-engine — draws now vs. top gaps (→ helper)
+
+| Engine | Draws now | Top gaps left on the table |
+|---|---|---|
+| **bard** | play, gate_in, grit, flux, cycle, progress+bookmark ring, shelf selector, route L/C/R | Richest hand-roller. Shelf ring→`ring::selector`; route block→`led::route_leds`; transport ladder→`transport_view`; all hex→`pal::`; `led::cycle`. *Caveat: bard repurposes grit=room-colour, flux=amber — `led::grit/flux` fixed hues wouldn't preserve intent; `pal::`+`led::cycle` drop in.* |
+| **softcut** | play, mode/route, transport-colour ring, slot picker, **hand-rolled cos breathe** | The one true cos/%2400 breathe→`motion::breathe_standby`; transport ladder→`led::transport`; slots→`ring::slots`; has `CapPitchPickup` but **no `ring::value` pickup feedback** |
+| **edrums** | play, **rev** (only user), step-sequencer ring | Sequences off transport but no `led::clock`; handles Route but shows **no route LEDs**→`led::route_leds`; model-flash→`ring::selector` |
+| **reso** | level arc, pitch dot, 5-dot model selector, play, mode L/C/R | Selector→`ring::selector`; **`CapTransport` but no `led::clock`**; arp/drift→`led::cycle`; mode hues **drift** from `pal::kReel/Slice/Drift` |
+| **mosc** | level arc, pitch dot, **1-dot** engine readout, play, route | 24-engine readout should be N-dot `ring::selector`; route→`led::route_leds`; CV mod→`led::cycle`; `pal::` |
+| **delay** | division arc, transport-colour play, route | **Tempo-synced but no `led::clock`**; mod LFO→`led::cycle`; route→`led::route_leds`; Clean colour *is* `pal::kCyan`, re-declared |
+| **qdelay** | division arc, transport-colour play, route | Same as delay + Duck env; Clean==`pal::kCyan`, Duck==`pal::kAmber`, re-declared |
+| **reverb** | dim baseline + decay arc, algorithm mode LEDs, play | Static `0.10` baseline→`motion::breathe_standby`; decay→`ring::value`; algo choice→`ring::selector`; greyhole ModDepth→`led::cycle/flux` |
+| **radio** | station marker, **bank selector**, play, route | Bank ring→`ring::selector`; route→`led::route_leds`; idle-dark→`motion::breathe_standby`; `pal::` |
+| **glitch** | algo marker, **algorithm selector**, play, route | Algo ring→`ring::selector`; route→`led::route_leds`; `pal::` |
+| **pstretch** | stretch marker, **clip selector**, state-colour play, route | Clip ring→`ring::slots`; stretch marker→`ring::value` (has `CapAltPos` scrub → pickup story); route→`led::route_leds`; state hex→`pal::`+`transport_view` |
+| **csound** | level meter, **patch selector**, play, source LED | Patch ring→`ring::selector`; meter→`ring::level`; `0x00c0ff`≈`pal::kCyan`; play→`led::transport` |
+| **chuck** | level meter+peak dot, **patch selector**, panic rings, METER rings, play | Same as csound (selector shared *verbatim*); meter→`ring::level`+`ring::playhead`; panic→`transport_view(error)` |
+| **chorus / filter / voice** | level arc + play *iff* `meter` | Dark when `meter=false`; no mode/breathe |
+
+### 7.3 Systemic findings — the same code reinvented
+
+1. **Selector ring reinvented 9×** — reso(models), mosc(engines), bard(shelves), softcut(slots), radio(banks), glitch(algos), pstretch(clips), csound(patches), chuck(patches). csound↔chuck are byte-identical. → `ring::selector` / `ring::slots`.
+2. **`led::route_leds` copied ~8×** — bard, softcut, radio, glitch, pstretch, mosc, delay, qdelay each ship the identical white L/C/R block.
+3. **Transport-colour ladder reinvented ~7×** — softcut, bard, delay, qdelay, pstretch, csound, chuck. → `transport_view` + `led::transport`.
+4. **Value-pickup feedback: zero own-display adoption** (except tape/shuttle). The single biggest expressive gap — even `softcut`(`CapPitchPickup`) and `pstretch`(scrub) skip it. → `ring::value`.
+5. **Idle = dark** — only `softcut` breathes (by hand); every other stopped panel is indistinguishable from powered-off. → `motion::breathe_standby`.
+6. **Clock indicator never lit off the granular path** — `reso`(CapTransport), `delay`/`qdelay`(tempo-synced), `edrums`(sequences off clock) all show no `clock_in`. → `led::clock`.
+7. **Palette re-declared in every engine**; `0x00c0ff`/`0x00aaff`/`0x00a0ff` recur as near-misses for `pal::kCyan`, and reso's mode hues drift from the canonical set. → `pal::`.
+8. **`alt` and `spot` LEDs: used by no engine at all.**
+
+### 7.4 Migration worklist (ranked by leverage)
+
+The audit itself is desk/host work (done). Applying and confirming the LED changes on the panel is **hardware-gated** and folds into the P2 bench session.
+
+1. **`led::route_leds` + `pal::` sweep** — trivial, mechanical, hits 8 engines, kills the colour drift.
+2. **`ring::selector` / `ring::slots`** — retire 9 hand-rolled selectors (csound/chuck share one).
+3. **`ring::value` pickup feedback** — highest expressive win; start with the engines that already track pickup (`softcut`, `pstretch`, `reso`).
+4. **`motion::breathe_standby`** idle glow everywhere idle==dark; **`led::transport`** for the 7 transport ladders.
+5. **`led::clock`** for reso/delay/qdelay/edrums; **`led::cycle`** for the LFO/mod engines.
+6. **Faust floor:** a mode-hued idle breathe + play dot when `meter=false`.
+
+`bard` is both the richest hand-roller and a clean migration candidate (selector + route + `pal::` + `led::cycle` all drop in).
