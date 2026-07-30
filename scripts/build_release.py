@@ -54,6 +54,7 @@ from pathlib import Path
 #   - gigaverb    : the lone gen~ demo - left out until it is tested / optimized further (it builds fine,
 #                   but sounded poor as a reverb voice and the better `reverb` engine covers reverb).
 DEFAULT_ENGINES = [
+    "bard",
     "chuck",
     "csound",
     "delay",
