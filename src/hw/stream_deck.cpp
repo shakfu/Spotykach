@@ -38,6 +38,7 @@ bool StreamDeck::start_play(DeckRef::Ref deck, const char* path) {
     if (d.mode.load(std::memory_order_acquire) != Mode::idle || d.finalizing) return false;
     if (!d.file.open_read(path)) return false;
     if (!d.reader.begin(&d.file)) { d.file.close(); return false; }   // not a valid WAV
+    d.raw_src = false;
     d.play.start(&d.reader);
     d.mode.store(Mode::play, std::memory_order_release);             // ISR may now consume
     return true;
@@ -94,6 +95,7 @@ bool StreamDeck::start_play_raw(DeckRef::Ref deck, const char* path, uint32_t st
     d.raw.seek_to_frame(start_frame);                               // jump to the virtual position
     d.play.set_loop(loop);
     d.play.start(&d.raw);
+    d.raw_src = true;
     d.mode.store(Mode::play, std::memory_order_release);            // ISR may now consume
     return true;
 }
@@ -111,6 +113,25 @@ bool StreamDeck::start_play_wav(DeckRef::Ref deck, const char* path, uint32_t st
     d.raw.seek_to_frame(start_frame);
     d.play.set_loop(loop);
     d.play.start(&d.raw);
+    d.raw_src = true;
+    d.mode.store(Mode::play, std::memory_order_release);
+    return true;
+}
+
+// The lighter in-file seek: reposition the live handle instead of reopening the file. Sequence matters -
+// drop the deck to idle FIRST so the ISR stops consuming (play_consume on an idle deck returns 0, which
+// the caller reads as an underrun and handles as silence), then f_lseek, then re-arm. play.start() resets
+// the ring and clears the EOF latch, so a deck that had already run out becomes playable again.
+bool StreamDeck::seek_play(DeckRef::Ref deck, uint32_t frame) {
+    Deck& d = _d[deck];
+    if (d.mode.load(std::memory_order_acquire) != Mode::play || d.finalizing) return false;
+    if (!d.raw_src || !d.file.is_open()) return false;      // the float-WAV play path is not frame-seekable
+    d.mode.store(Mode::idle, std::memory_order_release);    // ISR stops consuming
+    if (!d.raw.seek_to_frame(frame)) {
+        d.mode.store(Mode::play, std::memory_order_release);  // seek failed: leave the deck as it was
+        return false;
+    }
+    d.play.start(&d.raw);                                   // flush + re-seed the ring, clear eof
     d.mode.store(Mode::play, std::memory_order_release);
     return true;
 }
@@ -193,6 +214,20 @@ int StreamDeck::read_text(const char* path, char* buf, int max) const {
     f.close();
     buf[got] = '\0';
     return static_cast<int>(got);
+}
+
+// Write a small text file (the bard engine's resume table), truncating any existing content. A local
+// FatFile, opened/closed here - it never touches a deck's file handle, so it cannot race a streaming
+// deck. Main-loop only. Returns false on any failure (missing tree, write-protected, full, short write);
+// the caller treats that as "persistence unavailable" and keeps playing.
+bool StreamDeck::write_text(const char* path, const char* buf, int n) {
+    if (n < 0) return false;
+    FatFile f;
+    if (!f.open_write(path)) return false;
+    const uint32_t want = static_cast<uint32_t>(n);
+    const uint32_t put  = want ? f.write(buf, want) : 0u;
+    f.close();
+    return put == want;
 }
 
 void StreamDeck::process() {

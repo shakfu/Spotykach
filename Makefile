@@ -56,6 +56,18 @@ C_DEFS += -DSPK_ENGINE_RADIO
 # every non-streaming engine stays byte-identical.
 C_DEFS += -DSPK_USE_STREAM
 ENGINE_SOURCES = src/engine/radio/radio_engine.cpp
+else ifeq ($(ENGINE), bard)
+C_DEFS += -DSPK_ENGINE_BARD
+# The storyteller: bookmark-navigated audiobook decks. Streams 16-bit-mono books from SD via the shared
+# streaming service (stream_deck.cpp + fat_file.cpp, guarded by SPK_USE_STREAM like tape/radio/pstretch),
+# and is the one engine that WRITES a small text file (its resume table) through the same service.
+# Bookmark parsing / auto-marks / the resume table are header-only under src/engine/bard/.
+C_DEFS += -DSPK_USE_STREAM
+ENGINE_SOURCES = src/engine/bard/bard_engine.cpp
+# WSOLA (the PITCH-KEEP time-scaler) + the room push SRAM_EXEC to ~94% at -O2, leaving too little headroom
+# to work in. Build bard at -Os as reso/reverb already do: ~88% with room to spare, and the M7 @ 480 MHz has
+# ample compute margin for this engine (its DSP is a resampler, a correlation search, biquads and combs).
+OPT = -Os
 else ifeq ($(ENGINE), glitch)
 C_DEFS += -DSPK_ENGINE_GLITCH
 # Dual-deck lo-fi/circuit-bent noise voice: 12 curated algorithms ported from Rob Scape's Noisferatu
@@ -276,7 +288,7 @@ LDFLAGS += -u _printf_float
 # Route ChucK's C-malloc family to the SDRAM pool (chuck_alloc.cpp); the platform heap stays in SRAM.
 LDFLAGS += -Wl,--wrap=malloc,--wrap=free,--wrap=calloc,--wrap=realloc
 else
-$(error Unknown ENGINE '$(ENGINE)' - use 'granular', 'passthrough', 'delay', 'qdelay', 'edrums', 'reso', 'mosc', 'graincloud', 'tape', 'reverb', 'shuttle', 'radio', 'chorus', 'filter', 'voice', 'csound', or 'chuck')
+$(error Unknown ENGINE '$(ENGINE)' - use 'granular', 'passthrough', 'delay', 'qdelay', 'edrums', 'reso', 'mosc', 'graincloud', 'tape', 'reverb', 'shuttle', 'radio', 'bard', 'chorus', 'filter', 'voice', 'csound', or 'chuck')
 endif
 
 # Opt-in (make ... METER=1): enable the on-device CPU load meter (app.cpp's CpuLoadMeter). It writes
@@ -416,7 +428,7 @@ all: check-boundary
 
 # One-shot variant flash: clean -> build -> flash over DFU. Put the device in DFU mode first
 # (hold Reset ~3s until the bottom pad LEDs breathe white), then `make granular` / `make passthrough`.
-.PHONY: engine-granular engine-passthrough engine-delay engine-qdelay engine-edrums engine-reso engine-mosc program-mosc engine-graincloud engine-tape engine-shuttle engine-softcut engine-reverb engine-radio engine-glitch engine-pstretch engine-chorus engine-filter engine-voice engine-gigaverb engine-csound program-csound engine-chuck program-chuck
+.PHONY: engine-granular engine-passthrough engine-delay engine-qdelay engine-edrums engine-reso engine-mosc program-mosc engine-graincloud engine-tape engine-shuttle engine-softcut engine-reverb engine-radio engine-bard engine-glitch engine-pstretch engine-chorus engine-filter engine-voice engine-gigaverb engine-csound program-csound engine-chuck program-chuck
 engine-granular:
 	$(MAKE) clean
 	$(MAKE) -j8 ENGINE=granular
@@ -484,6 +496,11 @@ engine-radio:
 	$(MAKE) clean
 	$(MAKE) -j8 ENGINE=radio
 	$(MAKE) ENGINE=radio program-dfu
+
+engine-bard:
+	$(MAKE) clean
+	$(MAKE) -j8 ENGINE=bard
+	$(MAKE) ENGINE=bard program-dfu
 
 engine-glitch:
 	$(MAKE) clean

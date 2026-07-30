@@ -33,7 +33,7 @@ endif
 
 .PHONY: all build configure clean check-boundary program-dfu program-boot \
         engine-granular engine-passthrough engine-delay engine-qdelay engine-edrums engine-reso engine-mosc engine-graincloud engine-tape \
-        engine-reverb engine-shuttle engine-softcut engine-radio engine-glitch engine-pstretch engine-gigaverb engine-csound engine-chuck \
+        engine-reverb engine-shuttle engine-softcut engine-radio engine-bard engine-glitch engine-pstretch engine-gigaverb engine-csound engine-chuck \
         engine-chorus engine-filter engine-voice \
         faust-gen gen-engines test-scripts test-scripts-deps
 
@@ -95,6 +95,8 @@ engine-softcut:
 	$(MAKE) -f $(THIS) ENGINE=softcut build program-dfu
 engine-radio:
 	$(MAKE) -f $(THIS) ENGINE=radio build program-dfu
+engine-bard:
+	$(MAKE) -f $(THIS) ENGINE=bard build program-dfu
 engine-glitch:
 	$(MAKE) -f $(THIS) ENGINE=glitch build program-dfu
 engine-pstretch:

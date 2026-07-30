@@ -72,7 +72,7 @@ The `ParamId` names are granular-flavored (the platform's vocabulary), but a non
 ## Building and flashing a variant
 
 ```text
-make -j8 ENGINE=granular      # default; also: delay | edrums | reso | graincloud | tape | shuttle | reverb | gigaverb | radio | glitch | pstretch | chorus | filter | voice | passthrough
+make -j8 ENGINE=granular      # default; also: delay | edrums | reso | graincloud | tape | shuttle | reverb | gigaverb | radio | bard | glitch | pstretch | chorus | filter | voice | passthrough
 make ENGINE=edrums program-dfu
 make engine-edrums            # one-shot: clean + build + flash (device in DFU mode)
 make check-boundary           # platform (hw/ui/memory/transport) must not include engine/granular/
@@ -94,6 +94,7 @@ The **Built via** column links to the development method ([`../engine-types/`](.
 | Reverb | `reverb` | route-aware stereo reverb, three all-Faust algorithms (Dattorro plate / Zita hall / Greyhole), Reel/Slice/Drift switch selects; DoubleMono = two mono plates (heavy hall/greyhole are stereo-only) | [Faust](../engine-types/faust.md) | [reverb.md](reverb.md) |
 | gigaverb | `gigaverb` | stereo reverb from a Max gen~ patch | [gen~](../engine-types/gen.md) | [gigaverb.md](gigaverb.md) |
 | Radio | `radio` | dual virtual RadioMusic: two SD-streaming "radios" with a free-running virtual playhead; `.raw`/`.wav` stations in numbered banks | [native C++](../engine-types/cpp.md) | [radio.md](radio.md) |
+| Bard | `bard` | the **storyteller**: dual bookmark-navigated audiobook decks. Books stream from numbered SD shelves; a plain-text sidecar next to each book lists timestamps whose **line order is the recitation order**, so a scrambled list is a re-ordering of the book. Owned/resumable playhead (the inverse of `radio`'s free-running one), play/pause, jump-back, rate 0.5-2.5x with continuous **pitch-keep** (WSOLA), voice colour + room, and Read / Recite / Wander sequence modes that can be armed to the transport | [native C++](../engine-types/cpp.md) | [bard.md](bard.md) |
 | Glitch | `glitch` | dual lo-fi / circuit-bent noise voice: 12 curated [Noisferatu](https://github.com/rob-scape/noisferatu) algorithms per deck (Alt+PITCH = algorithm select) - buffer/bit-mangle glitch, logic-noise, generative scale blips, rhythmic noise | [native C++](../engine-types/cpp.md) | [glitch.md](glitch.md) |
 | Pstretch | `pstretch` | real-time, clean-room **PaulStretch** ambient time-smear: FFT phase-randomized wash per deck; live smear, Freeze drone, and capture-and-stretch-through (Rev pad). Self-contained vendored FFT | [native C++](../engine-types/cpp.md) | [pstretch.md](pstretch.md) |
 | Chorus | `chorus` | stereo chorus - the demo of the **generated** Faust path (`.dsp` + JSON manifest, no hand-written C++) | [Faust (generated)](../engine-types/faust.md#generated-engines-no-hand-written-c) | [chorus.md](chorus.md) |

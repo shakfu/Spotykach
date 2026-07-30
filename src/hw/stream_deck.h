@@ -44,9 +44,11 @@ public:
     // free-running playhead position; frames_of/scan_bank build the bank index off the audio path.
     bool start_play_raw(DeckRef::Ref deck, const char* path, uint32_t start_frame, bool loop) override;
     bool start_play_wav(DeckRef::Ref deck, const char* path, uint32_t start_frame, bool loop) override;
+    bool seek_play(DeckRef::Ref deck, uint32_t frame) override;
     uint32_t frames_of(const char* path) const override;
     int  scan_bank(const char* dir, BankEntry* out, int max) const override;
     int  read_text(const char* path, char* buf, int max) const override;
+    bool write_text(const char* path, const char* buf, int n) override;
 
 private:
     enum class Mode : uint8_t { idle, play, record };
@@ -60,7 +62,8 @@ private:
         PlayStream      play;
         RecordStream    record;
         WavStreamReader reader;
-        RawStreamReader raw;                 // headerless 16-bit-mono source (radio engine)
+        RawStreamReader raw;                 // headerless 16-bit-mono source (radio/bard engines)
+        bool            raw_src = false;     // the live play source is `raw` (frame-seekable), not `reader`
         WavStreamWriter writer;
         FatFile         file;                // one file handle per deck (play XOR record)
     };

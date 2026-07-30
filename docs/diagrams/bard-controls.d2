@@ -1,0 +1,175 @@
+# GENERATED from controls-template.d2 by scripts/gen_controls_diagram.py.
+# Edit the JSON spec (bard.json), not this file; then re-run / `make diagrams`.
+
+direction: up
+
+vars: {
+  d2-config: {
+    layout-engine: dagre
+    pad: 40
+  }
+}
+
+title: |md
+  # Bard - bookmarked audiobook player
+  _two SD storytellers navigated by a text-file mark list_
+| {
+  near: top-center
+  style.font-size: 26
+}
+
+classes: {
+  knob:   { style: { fill: "#ebf4ff"; stroke: "#90cdf4"; stroke-width: 2 } }
+  pad:    { style: { fill: "#fffaf0"; stroke: "#fbd38d"; stroke-width: 2 } }
+  shared: { style: { fill: "#faf5ff"; stroke: "#d6bcfa"; stroke-width: 2 } }
+  io:     { style: { fill: "#f0fff4"; stroke: "#9ae6b4"; stroke-width: 2 } }
+}
+
+panel: Front panel {
+  grid-columns: 3
+  grid-gap: 60
+  style.stroke: "#cbd5e0"
+
+  # ----------------------------------------------------------------- DECK A
+  deckA: Deck A {
+    style.stroke: "#90cdf4"
+
+    knobsA: Knobs (7) {
+      class: knob
+      shape: sql_table
+      Pitch: "BOOK select (+V/Oct CV); Alt = SHELF"
+      Position: "BOOKMARK select (+CV); Alt = SCRUB"
+      Size: "RATE 0.5-2.5x (varispeed)"
+      Envelope: "PITCH-KEEP (varispeed <-> pitch held)"
+      "Mix (SOS)": "deck volume (+CV); Alt = SEAM fade"
+      Cycle: "duck release"
+      Glow: "duck depth"
+    }
+
+    padsA: Pads (5) {
+      class: pad
+      shape: sql_table
+      Play: "play/pause; Alt = drop mark; hold = commit"
+      Reverse: "jump back 15 s; Alt = re-roll auto-marks"
+      Grit: "ROOM (plate / hall / slap)"
+      Flux: "VOICE COLOUR (drive + band-limit)"
+      Seq: "next segment; Alt = arm to clock, Alt-hold = loop/hold"
+    }
+
+    ringA: "LED Ring A (32px)" {
+      class: knob
+      shape: circle
+      label: "Ring A\nbook progress + bookmark ticks; shelf dots (Alt)"
+    }
+  }
+
+  # --------------------------------------------------------------- SHARED
+  center: Shared / Transport {
+    style.stroke: "#d6bcfa"
+
+    xfade: Crossfade {
+      class: shared
+      shape: sql_table
+      Crossfade: "A/B blend of the two storytellers"
+    }
+
+    switches: Switches (74HC165) {
+      class: shared
+      shape: sql_table
+      "Mode (L/C/R)": "sequence: Read / Recite / Wander"
+      "Routing (L/C/R)": "stereo image: a story per ear / mono / random"
+      "CV target (U/C/D)": "-"
+      "Out trims A/B": "output trims"
+    }
+
+    transport: Transport {
+      class: shared
+      shape: sql_table
+      Tap: "tempo (quantizes armed segment advance)"
+      Alt:  "modifier (held)"
+      Spot: "-"
+    }
+
+    clockled: "Clock LED" {
+      class: shared
+      shape: circle
+      label: "Clock\n[ src color ]"
+    }
+  }
+
+  # ----------------------------------------------------------------- DECK B
+  deckB: Deck B {
+    style.stroke: "#90cdf4"
+
+    knobsB: Knobs (7) {
+      class: knob
+      shape: sql_table
+      Pitch: "BOOK select (+V/Oct CV); Alt = SHELF"
+      Position: "BOOKMARK select (+CV); Alt = SCRUB"
+      Size: "RATE 0.5-2.5x (varispeed)"
+      Envelope: "PITCH-KEEP (varispeed <-> pitch held)"
+      "Mix (SOS)": "deck volume (+CV); Alt = SEAM fade"
+      Cycle: "duck release"
+      Glow: "duck depth"
+    }
+
+    padsB: Pads (5) {
+      class: pad
+      shape: sql_table
+      Play: "play/pause; Alt = drop mark; hold = commit"
+      Reverse: "jump back 15 s; Alt = re-roll auto-marks"
+      Grit: "ROOM (plate / hall / slap)"
+      Flux: "VOICE COLOUR (drive + band-limit)"
+      Seq: "next segment; Alt = arm to clock, Alt-hold = loop/hold"
+    }
+
+    ringB: "LED Ring B (32px)" {
+      class: knob
+      shape: circle
+      label: "Ring B\nbook progress + bookmark ticks; shelf dots (Alt)"
+    }
+  }
+}
+
+# ---------------------------------------------------------------------- I/O
+io: I/O jacks (fixed) {
+  grid-columns: 4
+  grid-gap: 40
+  style.stroke: "#9ae6b4"
+
+  audio: Audio {
+    class: io
+    shape: sql_table
+    "In L/R":        "codec 48k"
+    "Out A / Out B": "mono + trims"
+    "Stereo out":    "TRS"
+  }
+
+  cv: CV in (7) {
+    class: io
+    shape: sql_table
+    "Size/Pos A/B": "BOOKMARK CV"
+    "Mix A/B": "deck volume CV"
+    "V/Oct A/B": "BOOK CV"
+    "Crossfade CV": "A/B blend"
+  }
+
+  gates: Clock / Gate {
+    class: io
+    shape: sql_table
+    "Clock in (TRS 4PPQN)": "sync"
+    "Gate in A/B": "next bookmark"
+    "Gate out A/B": "pulse per bookmark crossing"
+  }
+
+  modmidi: Mod CV / MIDI {
+    class: io
+    shape: sql_table
+    "Mod CV out A/B": "speech envelope"
+    "MIDI in/out":    "24 PPQN + notes"
+  }
+}
+
+panel -> io: {
+  style: { stroke: "#cbd5e0"; stroke-dash: 4 }
+}
