@@ -211,3 +211,19 @@ The audit itself is desk/host work (done). Applying and confirming the LED chang
 6. **Faust floor:** a mode-hued idle breathe + play dot when `meter=false`.
 
 `bard` is both the richest hand-roller and a clean migration candidate (selector + route + `pal::` + `led::cycle` all drop in).
+
+### 7.5 Migration sequence (per-engine, by leverage)
+
+The worklist above is ordered by *helper*; this is the same work ordered by *engine* — cleanest / highest-visibility first. `tape` + `shuttle` are already migrated; `granular` / `graincloud` are the co-authored reference (out of scope).
+
+| # | Engine(s) | Why this rank |
+|---|---|---|
+| 1 | **bard** | Richest hand-roller; selector + route + `pal::` + `led::cycle` all drop in cleanly |
+| 2 | **csound + chuck** | Byte-identical patch selector — migrate together, one helper retires two copies |
+| 3 | **softcut** | Only true hand-rolled cos-breathe + slots + transport ladder; twin `shuttle` is a proven template |
+| 4 | **radio, glitch, pstretch** | Near-identical shape (route block + Alt selector); one repeatable mechanical pass |
+| 5 | **reso, mosc** | Selector + missing clock/cycle; reso's mode-hue drift fixed by `pal::` |
+| 6 | **delay, qdelay** | Identical twins — tempo-synced `led::clock` + route + `pal::kCyan`/`kAmber` cleanup |
+| 7 | **reverb** | Static baseline → `motion::breathe_standby`, decay → `ring::value`, algo → `ring::selector` |
+| 8 | **edrums** | Route LEDs + `led::clock` + model `ring::selector` |
+| 9 | **chorus / filter / voice** (Faust) | Different shape — non-blank default when `meter=false`; lowest visibility, do last |

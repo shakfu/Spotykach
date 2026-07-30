@@ -35,6 +35,26 @@ Priority is driven less by size than by what unblocks/gates what, and by whether
 
 `bard` is the richest hand-roller and a clean first migration (selector + route + `pal::` + `led::cycle` drop in; note its grit=room-colour / flux=amber repurposing means `led::grit`/`led::flux`'s fixed hues wouldn't preserve intent).
 
+**Migration sequence (by leverage — cleanest / highest-visibility first).** `tape` + `shuttle` are already migrated; `granular` / `graincloud` are the co-authored reference (out of scope).
+
+1. **bard** — richest hand-roller; selector + route + `pal::` + `led::cycle` all drop in cleanly.
+
+2. **csound + chuck** — share a byte-identical patch selector; migrate together so one helper retires both copies.
+
+3. **softcut** — the only true hand-rolled cos-breathe + slots + transport ladder; its twin `shuttle` is a proven template.
+
+4. **radio, glitch, pstretch** — near-identical shape (route block + Alt selector); one repeatable mechanical pass.
+
+5. **reso, mosc** — selector + missing clock/cycle; reso's mode-hue drift is fixed by `pal::`.
+
+6. **delay, qdelay** — identical twins: tempo-synced `led::clock` + route + `pal::kCyan`/`kAmber` cleanup.
+
+7. **reverb** — static baseline → `motion::breathe_standby`, decay arc → `ring::value`, algorithm → `ring::selector`.
+
+8. **edrums** — route LEDs + `led::clock` + model `ring::selector`.
+
+9. **chorus / filter / voice** (Faust) — different shape: a non-blank default when `meter=false`; lowest visibility, do last.
+
 ## P1 - Mono-input normalization (left -> right when right is unused)
 
 Highest-leverage *decision* before any code: answering one hardware fact either kills this item or scopes it. The fix itself (raised while testing the stereo delay, engine #2: a mono source into the left input left the right delay tap silent) is to mirror left -> right so a mono source feeds both channels.
