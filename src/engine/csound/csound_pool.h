@@ -121,6 +121,16 @@ public:
     // Usable payload bytes of an allocated pool block (for the realloc-to-SRAM copy in the shim).
     std::size_t payload(void* p) const noexcept { return size_of(block_of(p)) - kHdr; }
 
+    // True iff p is the payload of a currently-allocated (used) pool block. The aligned_alloc shim
+    // (csound_alloc.cpp) uses this to tell a direct pool payload from an over-aligned handle: an
+    // over-aligned handle stores a control word (bit0 clear) where block_of(handle)->size would sit,
+    // so this reports false for it. A genuine live payload's size field always has the used bit set,
+    // making the distinction collision-free.
+    bool is_used_payload(const void* p) const noexcept
+    {
+        return reinterpret_cast<const Block*>(static_cast<const u8*>(p) - kHdr)->size & kUsed;
+    }
+
     bool owns(const void* p) const noexcept
     {
         return p >= _base + kHdr && p < _base + _cap;

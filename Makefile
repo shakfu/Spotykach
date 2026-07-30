@@ -261,7 +261,9 @@ ENGINE_SOURCES = src/engine/csound/csound_engine.cpp src/engine/csound/csound_al
 LIBS    += $(CSOUND_BASE)/lib/libcsound.a
 LDFLAGS += -u _printf_float
 # Route Csound's C-malloc family to the SDRAM bump pool (csound_alloc.cpp); the platform heap stays in SRAM.
-LDFLAGS += -Wl,--wrap=malloc,--wrap=free,--wrap=calloc,--wrap=realloc
+# aligned_alloc is wrapped too: Csound (memalloc.c, beta17+) uses it, and nano-libc's aligned_alloc pulls
+# in posix_memalign, which nosys does not provide (undefined-reference link error) - our wrap replaces it.
+LDFLAGS += -Wl,--wrap=malloc,--wrap=free,--wrap=calloc,--wrap=realloc,--wrap=aligned_alloc
 else ifeq ($(ENGINE), chuck)
 # ChucK is a QSPI-ONLY target (like Csound): it links libchuck.a (~1.1 MB code) which can't fit the
 # 186 KB SRAM_EXEC budget, so it must run from QSPI. Build it BOOT_QSPI with the QSPI linker script:
