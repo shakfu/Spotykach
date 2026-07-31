@@ -1,4 +1,5 @@
 #include "engine/pstretch/pstretch_engine.h"
+#include "engine/indicators.h"   // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 
 #include "engine/arena.h"
 #include "daisysp.h"   // daisysp::SoftLimit
@@ -465,27 +466,21 @@ void PstretchEngine::render(DisplayModel& m) {
         // a clip) or RED if SD is selected but no clips were found on the card, Capture = amber (looping a
         // grab), Live = green.
         const uint32_t c = _frozen[i] ? 0x00ffffu
-                         : (_source[i] == Source::SD ? (_nclips > 0 ? 0xff00ffu : 0xff0000u)
-                         : (_source[i] == Source::Capture ? 0xff8000u : 0x00ff00u));
+                         : (_source[i] == Source::SD ? (_nclips > 0 ? pal::kPink : pal::kRed)
+                         : (_source[i] == Source::Capture ? 0xff8000u : pal::kGreen));
         m.play[i] = { c, 0.7f };
         m.ring[i].set_hex_color(0x101010); m.ring[i].set_segment(0.f, 0.999f);
         if (_aux_held[i] && _source[i] == Source::SD && _nclips > 0) {
-            // Alt held on a streaming deck: show the clip selector - a dot per clip, the selected one bright.
-            m.ring[i].set_point_hex_color(0xff00ffu);
-            for (int k = 0; k < _nclips; k++) {
-                const float pos = (static_cast<float>(k) + 0.5f) / static_cast<float>(_nclips);
-                m.ring[i].add_point(pos, k == _clip_sel[i] ? 1.f : 0.25f);
-            }
+            // Alt held on a streaming deck: clip selector - a dot per clip, the selected one bright.
+            ring::selector(m.ring[i], _nclips, _clip_sel[i], pal::kPink, 0.25f);
         } else {
             // Otherwise a marker whose position tracks the stretch amount, in the state colour (brighter held).
-            m.ring[i].set_point_hex_color(c);
-            m.ring[i].add_point(_stretch_n[i], (_frozen[i] || _source[i] != Source::Live) ? 1.f : 0.6f);
+            ring::playhead(m.ring[i], _stretch_n[i],
+                           (_frozen[i] || _source[i] != Source::Live) ? 1.f : 0.6f, c);
         }
         m.ring[i].set_updated();
     }
-    if (_route == Route::DoubleMono)  m.mode_left   = { 0xffffff, 0.8f };
-    else if (_route == Route::Stereo) m.mode_center = { 0xffffff, 0.8f };
-    else                              m.mode_right  = { 0xffffff, 0.8f };
+    led::route_leds(m, _route);
 }
 
 void PstretchEngine::_roll_random_pans() {

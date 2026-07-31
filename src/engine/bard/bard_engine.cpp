@@ -1,4 +1,5 @@
 #include "engine/bard/bard_engine.h"
+#include "engine/indicators.h" // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 
 #include "daisysp.h"   // daisysp::SoftLimit
 
@@ -812,22 +813,18 @@ void BardEngine::render(DisplayModel& m) {
         const bool playing = open && !_paused[i] && _stream && _stream->is_playing(d);
 
         const bool committed = _time && now < _commit_flash[i];
-        const uint32_t c = committed  ? 0xffffff        // white: marks written to the sidecar
+        const uint32_t c = committed  ? pal::kWhite     // white: marks written to the sidecar
                          : err        ? kErrColor
-                         : !open      ? 0x000000
-                         : _armed[i]  ? 0x00c0ff        // cyan: armed to the clock
-                         : playing    ? 0x00ff00        // green: reading
-                                      : 0xff8000;       // amber: paused
+                         : !open      ? pal::kBlack
+                         : _armed[i]  ? pal::kCyan       // cyan: armed to the clock
+                         : playing    ? pal::kGreen      // green: reading
+                                      : 0xff8000;        // amber: paused (bard-specific hue)
         m.play[i] = { c, (open || err || committed) ? 1.f : 0.f };
-        m.gate_in[i] = { 0x00c0ff, _armed[i] ? 0.6f : 0.f };
+        m.gate_in[i] = { pal::kCyan, _armed[i] ? 0.6f : 0.f };
 
         if (_aux_held[i]) {
-            m.ring[i].set_hex_color(0x202020); m.ring[i].set_segment(0.f, 0.999f);
-            m.ring[i].set_point_hex_color(0xffffff);
-            for (int s = 0; s < kMaxShelves; s++) {
-                const float pos = static_cast<float>(s) / static_cast<float>(kMaxShelves);
-                m.ring[i].add_point(pos, (s == _shelf[i]) ? 1.f : 0.15f);
-            }
+            // Alt-held shelf selector (kMaxShelves dots, active bright) — was a hand-rolled loop.
+            ring::selector(m.ring[i], kMaxShelves, _shelf[i], pal::kWhite, 0.15f, 0x202020);
         } else {
             m.ring[i].set_hex_color(0x101010); m.ring[i].set_segment(0.f, 0.999f);
             if (open && _book_frames[i] > 0) {
@@ -858,12 +855,10 @@ void BardEngine::render(DisplayModel& m) {
             const uint32_t rgb = (rc == C::Plate) ? 0x4080ff : (rc == C::Hall) ? 0x8040ff : 0x40ffc0;
             m.grit[i] = { rgb, (_grit_held[i] || _grit_lock[i]) ? 1.f : 0.f };
         }
-        m.cycle[i] = { 0x40a0ff, _follow[i] ? (_duck_n[i] > 0.001f ? 1.f : 0.3f) : 0.f };
+        led::cycle(m, i, _follow[i] ? (_duck_n[i] > 0.001f ? 1.f : 0.3f) : 0.f, 0x40a0ff);
     }
 
-    if (_route == Route::DoubleMono)  m.mode_left   = { 0xffffff, 0.8f };
-    else if (_route == Route::Stereo) m.mode_center = { 0xffffff, 0.8f };
-    else                              m.mode_right  = { 0xffffff, 0.8f };
+    led::route_leds(m, _route);
 }
 
 // ---- path helpers ----------------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 // algorithms are ported from the GPLv3 Noisferatu (https://github.com/rob-scape/noisferatu), so a build
 // with ENGINE=glitch is a combined work distributed under GPLv3. See src/engine/glitch/{NOTICE.md,LICENSE}.
 #include "engine/glitch/glitch_engine.h"
+#include "engine/indicators.h"   // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 
 #include "daisysp.h"   // daisysp::SoftLimit
 
@@ -103,28 +104,21 @@ void GlitchEngine::render(DisplayModel& m) {
     m.clear();
     for (DeckRef::Ref dk : { DeckRef::A, DeckRef::B }) {
         const int i = (dk == DeckRef::A) ? 0 : 1;
-        m.play[i] = { 0x00ff00, 0.6f };   // a generator is always "running"
+        m.play[i] = { pal::kGreen, 0.6f };   // a generator is always "running"
 
         if (_aux_held[i]) {
             // ALGORITHM selector: kAlgoCount dots around the ring, the current algorithm bright.
-            m.ring[i].set_hex_color(0x202020); m.ring[i].set_segment(0.f, 0.999f);
-            m.ring[i].set_point_hex_color(0xffffff);
-            const int cur = _algo_index(dk);
-            for (int a = 0; a < glitch::kAlgoCount; a++) {
-                const float pos = static_cast<float>(a) / static_cast<float>(glitch::kAlgoCount);
-                m.ring[i].add_point(pos, (a == cur) ? 1.f : 0.15f);
-            }
+            ring::selector(m.ring[i], glitch::kAlgoCount, _algo_index(dk), pal::kWhite, 0.15f, 0x202020);
         } else {
             // Otherwise a faint base ring with a marker at the current algorithm position.
             m.ring[i].set_hex_color(0x101010); m.ring[i].set_segment(0.f, 0.999f);
-            m.ring[i].set_point_hex_color(0x00ff80);
-            m.ring[i].add_point((static_cast<float>(_algo_index(dk)) + 0.5f) / static_cast<float>(glitch::kAlgoCount), 1.f);
+            ring::playhead(m.ring[i],
+                           (static_cast<float>(_algo_index(dk)) + 0.5f) / static_cast<float>(glitch::kAlgoCount),
+                           1.f, 0x00ff80);
         }
         m.ring[i].set_updated();
     }
-    if (_route == Route::DoubleMono)  m.mode_left   = { 0xffffff, 0.8f };
-    else if (_route == Route::Stereo) m.mode_center = { 0xffffff, 0.8f };
-    else                              m.mode_right  = { 0xffffff, 0.8f };
+    led::route_leds(m, _route);
 }
 
 int GlitchEngine::_algo_index(DeckRef::Ref d) const {

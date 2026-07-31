@@ -15,45 +15,28 @@ Priority is driven less by size than by what unblocks/gates what, and by whether
 
 ---
 
-## P0 - Migrate engines onto the indicator toolkit (audit DONE 2026-07-31)
+## P0 - Migrate engines onto the indicator toolkit (mechanical migration DONE 2026-07-31)
 
-**Audit complete.** Every engine was checked against the full visual grammar ([`docs/dev/indicator-grammar.md`](docs/dev/indicator-grammar.md)); the per-engine "draws now vs. could draw" table and the ranked worklist are recorded in [`docs/dev/indicator-comparison.md` §7](docs/dev/indicator-comparison.md#7-audit-refresh-2026-07-31-todo-p0--full-current-tree-pass). Headline: the shared toolkit `src/engine/indicators.h` exists and `tape`+`shuttle` are migrated onto it, but **13 own-display engines still hand-roll everything and call zero toolkit helpers**, re-implementing the same selector rings (9×), route L/C/R block (~8×), transport-colour ladder (~7×), breathe, and palette.
+**Audit + mechanical migration complete.** Every engine was checked against the full visual grammar ([`docs/dev/indicator-grammar.md`](docs/dev/indicator-grammar.md); per-engine table in [`indicator-comparison.md` §7](docs/dev/indicator-comparison.md#7-audit-refresh-2026-07-31-todo-p0--full-current-tree-pass)) and then migrated onto the shared `src/engine/indicators.h` toolkit. All 15 own-display engines now include it; the duplicated hand-rolled grammar is retired. **All engines build clean** on ARM (`make dist` + clean per-engine builds; SRAM_EXEC unchanged-to-slightly-lower).
 
-**Remaining work — apply the migration (hardware-gated, confirm LEDs on the panel; folds into P2):**
+**Done (the mechanical dedup):**
 
-1. **`led::route_leds` + `pal::` sweep** — trivial/mechanical, hits 8 engines, kills the colour drift (`0x00c0ff`/`0x00aaff` near-misses for `pal::kCyan`).
+- **`ring::selector` / `ring::slots`** — retired all 9 hand-rolled Alt-held selectors (bard shelves, csound+chuck patches [shared verbatim], softcut slots, radio banks, glitch algos, pstretch clips, reso models, mosc engines).
+- **`led::route_leds`** — replaced the byte-for-byte route L/C/R block in bard, softcut, radio, glitch, pstretch, mosc, delay, qdelay; **added** to edrums (previously showed no route feedback).
+- **`pal::` sweep** — unified the palette across every migrated engine, killing the `0x00c0ff`/`0x00aaff`/`0x00a0ff`-near-`kCyan` drift and reso's Reel/Slice/Drift hue drift.
+- **`ring::level` / `ring::playhead`** — meters + markers (csound/chuck meters, reverb baseline+decay, delay/qdelay division arcs, radio/glitch/pstretch markers, reso/mosc pitch dots).
+- **`motion::breathe_standby` + `transport_view`/`led::transport`** — softcut (replaced its hand-rolled cos breathe + transport-colour ladder; `kErrColor` was already `== pal::kErr`).
+- **Faust floor** — `chorus`/`filter`/`voice` meter path → `ring::level`; added a static dim mode-hued "on, ready" floor for the `meter=false` case (no `ITimeSource` in that render, so static rather than a breathe).
+- **`led::cycle`** — bard (follow/duck indicator).
 
-2. **`ring::selector` / `ring::slots`** — retire the 9 hand-rolled Alt-held selectors (reso models, mosc engines, bard shelves, softcut slots, radio banks, glitch algos, pstretch clips, csound+chuck patches — the last two byte-identical).
+**Deferred — net-NEW indicators needing per-engine data plumbing + hardware verification (fold into P2):**
 
-3. **`ring::value` pickup feedback** — the biggest expressive gap (no own-display engine but tape/shuttle shows knob-turn feedback); start with engines already tracking pickup: `softcut`, `pstretch`, `reso`.
+- **`ring::value` pickup feedback** — the biggest remaining expressive gap. Needs each engine to track edit-param/knob/picked-up in `render()` (as `shuttle` does); `softcut`/`pstretch`/`reso` don't yet.
+- **`led::clock`** for `reso`(CapTransport)/`delay`/`qdelay`(tempo-synced)/`edrums` — needs the clock source surfaced into `render()`.
+- **`led::cycle`** for the LFO/mod engines (`reso` arp/drift, `mosc` CV, `delay`/`qdelay` mod LFO, `reverb` greyhole ModDepth) — needs the modulator phase/depth in `render()`.
+- **Breathe** on the still-static-when-idle engines (reso/mosc/delay/qdelay/reverb) — their `render()` has no `ITimeSource`.
 
-4. **`motion::breathe_standby`** idle glow everywhere idle currently reads as powered-off; **`led::transport`** for the 7 transport-colour ladders.
-
-5. **`led::clock`** for `reso`(CapTransport)/`delay`/`qdelay`(tempo-synced)/`edrums`(sequences off clock), which show no clock today; **`led::cycle`** for the LFO/mod engines.
-
-6. **Faust floor** (`chorus`/`filter`/`voice`): a mode-hued idle breathe + play dot when `meter=false` (today the panel is dark).
-
-`bard` is the richest hand-roller and a clean first migration (selector + route + `pal::` + `led::cycle` drop in; note its grit=room-colour / flux=amber repurposing means `led::grit`/`led::flux`'s fixed hues wouldn't preserve intent).
-
-**Migration sequence (by leverage — cleanest / highest-visibility first).** `tape` + `shuttle` are already migrated; `granular` / `graincloud` are the co-authored reference (out of scope).
-
-1. **bard** — richest hand-roller; selector + route + `pal::` + `led::cycle` all drop in cleanly.
-
-2. **csound + chuck** — share a byte-identical patch selector; migrate together so one helper retires both copies.
-
-3. **softcut** — the only true hand-rolled cos-breathe + slots + transport ladder; its twin `shuttle` is a proven template.
-
-4. **radio, glitch, pstretch** — near-identical shape (route block + Alt selector); one repeatable mechanical pass.
-
-5. **reso, mosc** — selector + missing clock/cycle; reso's mode-hue drift is fixed by `pal::`.
-
-6. **delay, qdelay** — identical twins: tempo-synced `led::clock` + route + `pal::kCyan`/`kAmber` cleanup.
-
-7. **reverb** — static baseline → `motion::breathe_standby`, decay arc → `ring::value`, algorithm → `ring::selector`.
-
-8. **edrums** — route LEDs + `led::clock` + model `ring::selector`.
-
-9. **chorus / filter / voice** (Faust) — different shape: a non-blank default when `meter=false`; lowest visibility, do last.
+**Note:** LED changes are **not** hardware-verified yet (render() is hardware-only; host tests can't exercise it — and the host harness is separately broken pre-existing on `granular/detector.h`). Confirm on the panel during the P2 bench session.
 
 ## P1 - Mono-input normalization (left -> right when right is unused)
 

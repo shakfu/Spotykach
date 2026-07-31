@@ -10,6 +10,8 @@
 #include "daisy_seed.h"   // target only: daisy::QSPIHandle / PersistentStorage for the kit preset
 #endif
 
+#include "engine/indicators.h"   // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
+
 using namespace spotykach;
 
 constexpr uint8_t EdrumsEngine::kDivTable[3];
@@ -576,6 +578,13 @@ void EdrumsEngine::set_mod_speed(DeckRef::Ref deck, float value, bool /*sync*/)
     _mark_dirty();
 }
 
+// Platform pushes this each loop for CapAux engines: true while Alt is held and this deck's PITCH isn't
+// claimed by an fx touch. It gates the held-Alt model selector drawn in render().
+void EdrumsEngine::set_aux_active(DeckRef::Ref deck, bool active)
+{
+    _aux_held[static_cast<int>(deck)] = active;
+}
+
 void EdrumsEngine::render(DisplayModel& m)
 {
     m.clear();
@@ -591,10 +600,17 @@ void EdrumsEngine::render(DisplayModel& m)
         const int inv = sl ^ 1;                 // the backgrounded slot
         const uint32_t col = kColor[c][sl];
 
-        // Just after an Alt+PITCH model change, show the model number (model+1 white dots) for a moment.
-        if (_model_show[c][sl] > 0) {
+        // Alt+PITCH held: a persistent model selector for the focused drum - all kModelCount tones spaced
+        // around the ring, the current one bright, in the drum's colour - so scrolling tones has live
+        // feedback (previously nothing showed unless the value happened to change, and then only briefly).
+        if (_aux_held[c]) {
+            ring::selector(m.ring[c], kModelCount, _model[c][sl], col);
+            m.ring[c].set_updated();
+        }
+        // Just after releasing Alt (or any model change), briefly confirm the model number (model+1 dots).
+        else if (_model_show[c][sl] > 0) {
             _model_show[c][sl]--;
-            m.ring[c].set_point_hex_color(0xffffff);
+            m.ring[c].set_point_hex_color(pal::kWhite);
             for (uint8_t i = 0; i <= _model[c][sl]; i++) m.ring[c].set_point(static_cast<uint8_t>(i * 3), 1.f);
             m.ring[c].set_updated();
         }
@@ -628,4 +644,7 @@ void EdrumsEngine::render(DisplayModel& m)
         if (_flash[c][sl]  > 0) _flash[c][sl]--;
         if (_flash[c][inv] > 0) _flash[c][inv]--;
     }
+    // Routing switch (drum-bus topology) on the mode L/C/R LEDs via the shared helper — previously the
+    // edrums panel showed no route feedback at all.
+    led::route_leds(m, _route);
 }

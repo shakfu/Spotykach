@@ -158,9 +158,11 @@ The theme: the grammar is rich but **trapped in the platform's granular path**. 
 
 §1–6 were written as the toolkit (`src/engine/indicators.h`) was being introduced and `tape`/`shuttle` migrated. This section re-runs the comparison against the current tree, across **every** engine — including those that postdate the original write-up (`bard`, `pstretch`, `glitch`, `qdelay`, `softcut`, `mosc`).
 
+> **Update 2026-07-31 — mechanical migration landed.** §7.2/§7.3 below capture the *pre-migration* state (the audit). Since then the mechanical dedup in §7.4/§7.5 was applied: **all 15 own-display engines now `#include` and call `src/engine/indicators.h`** — every hand-rolled selector (9×), route block (~8×), meter, and palette constant is retired, and the Faust floor got a non-blank `meter=false` default. All engines build clean on ARM. **Deferred** (net-new indicators needing per-engine data plumbing + on-panel verification, folded into P2): `ring::value` pickup feedback, `led::clock`, `led::cycle` for the LFO engines, and breathe on the renders that have no `ITimeSource`. LED appearance is not hardware-verified yet.
+
 ### 7.1 Adoption status
 
-The toolkit exists but almost nobody calls it: `src/engine/indicators.h` is `#include`d by exactly **two** engines. Every other own-display engine hand-rolls the same pictures against raw `LEDRing` + literal hex.
+The toolkit exists but almost nobody calls it: `src/engine/indicators.h` is `#include`d by exactly **two** engines. Every other own-display engine hand-rolls the same pictures against raw `LEDRing` + literal hex. *(Pre-migration snapshot; see the 2026-07-31 update above — now all 15 own-display engines call the toolkit.)*
 
 | Group | Engines | State |
 |---|---|---|

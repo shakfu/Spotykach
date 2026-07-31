@@ -7,6 +7,7 @@
 
 #include "engine/chuck/chuck_engine.h"
 #include "engine/chuck/chuck_patch.h"   // chuck_path / scan_chuck_patches / aux_to_index / read_program
+#include "engine/indicators.h"          // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 #include "config.h"                     // Config::dynamic() midi_channel_a/b for the channel->deck map
 
 // NOTE: we deliberately do NOT pull in the shim's ck_prelude.h here. That force-include exists so
@@ -613,16 +614,11 @@ void ChuckEngine::render(DisplayModel& m)
     // previewed one bright. (The built-in is index 0; SD slots follow.) Same look as CsoundEngine.
     if (_aux_held) {
         for (int i = 0; i < 2; i++) {
-            m.play[i] = { running ? 0x00ff00u : 0x000000u, running ? 1.f : 0.f };
-            m.ring[i].set_hex_color(0x00c0ff);          // patch-selector hue (cyan)
-            m.ring[i].set_segment(0.f, 0.999f);
-            for (int a = 0; a < _avail_n; a++) {
-                const float pos = (_avail_n <= 1) ? 0.f : static_cast<float>(a) / static_cast<float>(_avail_n);
-                m.ring[i].add_point(pos, (a == _sel_preview) ? 1.f : 0.18f);
-            }
+            m.play[i] = { pal::kGreen, running ? 1.f : 0.f };
+            ring::selector(m.ring[i], _avail_n, _sel_preview, pal::kCyan, 0.18f, pal::kCyan);
             m.ring[i].set_updated();
         }
-        m.mode_center = { 0x00c0ffu, 0.6f };            // selector hue
+        m.mode_center = { pal::kCyan, 0.6f };           // selector hue
         return;
     }
 
@@ -631,12 +627,11 @@ void ChuckEngine::render(DisplayModel& m)
     // After the selector branch above, so the selector still draws/works as the escape route.
     if (_panic) {
         for (int i = 0; i < 2; i++) {
-            m.play[i] = { 0xff0000u, 1.f };
-            m.ring[i].set_hex_color(0xff0000);
-            m.ring[i].set_segment(0.f, 0.999f);
+            m.play[i] = { pal::kRed, 1.f };
+            ring::level(m.ring[i], 0.999f, pal::kRed);   // solid red ring
             m.ring[i].set_updated();
         }
-        m.mode_center = { 0xff0000u, 0.8f };
+        m.mode_center = { pal::kRed, 0.8f };
         return;
     }
 
@@ -698,19 +693,16 @@ void ChuckEngine::render(DisplayModel& m)
         const float a = meter_db_norm(rms[i]);         // RMS  -> dB ring position (loudness arc)
         const float p = meter_db_norm(peak[i]);        // peak -> dB ring position (marker)
         // Colour by peak on the dB scale: red near 0 dBFS (>= -3 dB), amber from ~-12 dB, else green.
-        const uint32_t col = (p > 0.95f) ? 0xff2000u : (p > 0.80f) ? 0xffa000u : 0x00ff00u;
-        m.play[i] = { running ? 0x00ff00u : 0x000000u, running ? 1.f : 0.f };
+        const uint32_t col = (p > 0.95f) ? 0xff2000u : (p > 0.80f) ? pal::kAmber : pal::kGreen;
+        m.play[i] = { pal::kGreen, running ? 1.f : 0.f };
         m.ring[i].set_hex_color(0x0a0a0a);              // faint full base ring
         m.ring[i].set_segment(0.f, 0.999f);
-        if (running && a > 0.001f) {                    // bright arc proportional to RMS (dB)
-            m.ring[i].set_hex_color(col);
-            m.ring[i].set_segment(0.f, a);
-        }
-        if (running && p > 0.001f) m.ring[i].add_point(p, 1.f);   // peak marker (dB)
+        if (running && a > 0.001f) ring::level(m.ring[i], a, col);   // bright arc proportional to RMS (dB)
+        if (running && p > 0.001f) ring::playhead(m.ring[i], p, 1.f);   // peak marker (dB)
         m.ring[i].set_updated();
     }
     // Centre mode LED tells the program source: cyan = an SD slot, white = the built-in.
-    m.mode_center = { _patch_loaded ? 0x00c0ffu : 0xffffffu, 0.5f };
+    m.mode_center = { _patch_loaded ? pal::kCyan : pal::kWhite, 0.5f };
 }
 
 } // namespace spotykach

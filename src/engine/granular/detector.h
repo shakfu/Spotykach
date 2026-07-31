@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>   // size_t (was relying on transitive include order; broke the host build)
 
 namespace spotykach {
 

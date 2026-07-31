@@ -6,6 +6,7 @@
 
 #include "engine/csound/csound_engine.h"
 #include "engine/csound/csound_patch.h"   // patch_path / scan_patches / aux_to_index / read_orchestra
+#include "engine/indicators.h"            // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 
 #include "config.h"                        // Config::dynamic() midi_channel_a/b for the channel->deck map
 
@@ -384,35 +385,27 @@ void CsoundEngine::render(DisplayModel& m)
     // previewed one bright. (The built-in is index 0; SD slots follow.)
     if (_aux_held) {
         for (int i = 0; i < 2; i++) {
-            m.play[i] = { running ? 0x00ff00u : 0x000000u, running ? 1.f : 0.f };
-            m.ring[i].set_hex_color(0x00c0ff);          // patch-selector hue (cyan)
-            m.ring[i].set_segment(0.f, 0.999f);
-            for (int a = 0; a < _avail_n; a++) {
-                const float pos = (_avail_n <= 1) ? 0.f : static_cast<float>(a) / static_cast<float>(_avail_n);
-                m.ring[i].add_point(pos, (a == _sel_preview) ? 1.f : 0.18f);
-            }
+            m.play[i] = { pal::kGreen, running ? 1.f : 0.f };
+            ring::selector(m.ring[i], _avail_n, _sel_preview, pal::kCyan, 0.18f, pal::kCyan);
             m.ring[i].set_updated();
         }
-        m.mode_center = { 0x00c0ffu, 0.6f };            // selector hue
+        m.mode_center = { pal::kCyan, 0.6f };           // selector hue
         return;
     }
 
     // Otherwise: the output level meter on both rings (green base, amber past -4 dBish, red near clip).
     float lvl = _level;
     if (lvl > 1.f) lvl = 1.f;
-    const uint32_t col = (lvl > 0.85f) ? 0xff2000u : (lvl > 0.60f) ? 0xffa000u : 0x00ff00u;
+    const uint32_t col = (lvl > 0.85f) ? 0xff2000u : (lvl > 0.60f) ? pal::kAmber : pal::kGreen;
     for (int i = 0; i < 2; i++) {
-        m.play[i] = { running ? 0x00ff00u : 0x000000u, running ? 1.f : 0.f };
+        m.play[i] = { pal::kGreen, running ? 1.f : 0.f };
         m.ring[i].set_hex_color(0x0a0a0a);              // faint full base ring
         m.ring[i].set_segment(0.f, 0.999f);
-        if (running && lvl > 0.02f) {                   // bright arc proportional to level
-            m.ring[i].set_hex_color(col);
-            m.ring[i].set_segment(0.f, lvl);
-        }
+        if (running && lvl > 0.02f) ring::level(m.ring[i], lvl, col);   // bright arc proportional to level
         m.ring[i].set_updated();
     }
     // Centre mode LED tells the patch source: cyan = an SD slot, white = the built-in.
-    m.mode_center = { _patch_loaded ? 0x00c0ffu : 0xffffffu, 0.5f };
+    m.mode_center = { _patch_loaded ? pal::kCyan : pal::kWhite, 0.5f };
 }
 
 } // namespace spotykach

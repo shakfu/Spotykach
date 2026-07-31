@@ -45,6 +45,7 @@ public:
     void  set_mod_speed(DeckRef::Ref deck, float value, bool sync) override; // MODFREQ -> division
     bool  set_config(ConfigId id, DeckRef::Ref deck, int value) override;    // routing switch -> output mode
     Route route() const override { return _route; }                         // mode L/C/R LED
+    void  set_aux_active(DeckRef::Ref deck, bool active) override;           // Alt+PITCH held -> model selector
 
     bool  on_play_pad(DeckRef::Ref deck, bool reverse) override;       // Play: stop/start deck; Rev: swap drum
     void  on_record_pad(DeckRef::Ref deck, bool reverse) override;     // Alt+Play: toggle the deck's mute
@@ -197,6 +198,7 @@ private:
     uint8_t  _flash[DeckRef::Count][kSlots] = { { 0, 0 }, { 0, 0 } };       // per-drum play-LED hit flash
     uint8_t  _model[DeckRef::Count][kSlots]      = { { 0, 4 }, { 1, 3 } };  // A: kick/tom, B: snare/hat
     uint8_t  _model_show[DeckRef::Count][kSlots] = { { 0, 0 }, { 0, 0 } };  // frames left to show the model number
+    bool     _aux_held[DeckRef::Count]           = { false, false };        // platform: Alt+PITCH held -> draw model selector
     float    _gain[DeckRef::Count][kSlots]       = { { 0.8f, 0.8f }, { 0.8f, 0.8f } }; // SOS knob: per-drum level
     float    _param[static_cast<size_t>(ParamId::Count)][DeckRef::Count][kSlots] = {};
 };

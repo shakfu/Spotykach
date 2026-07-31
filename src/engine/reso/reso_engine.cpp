@@ -1,6 +1,7 @@
 // SYNTHUX ACADEMY /////////////////////////////////////////
 // SPOTYKACH ///////////////////////////////////////////////
 #include "engine/reso/reso_engine.h"
+#include "engine/indicators.h"   // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 
 #include "engine/arena.h"
 
@@ -288,34 +289,31 @@ struct ResoEngine::Impl {
 
     void render(DisplayModel& m) {
         m.clear();
-        static const uint32_t kColor[3] = { 0xffcc00 /*Reel*/, 0x00aaff /*Slice*/, 0xaa00ff /*Drift*/ };
+        // Canonical Reel/Slice/Drift hues from the shared palette. reso carries its OWN Mode enum
+        // (Reel=0/Slice=1/Drift=2), not the platform Mode, so it indexes pal:: directly rather than
+        // going through pal::mode()/led::mode_leds() (which take spotykach::Mode).
+        static const uint32_t kMode[3] = { pal::kReel, pal::kSlice, pal::kDrift };
         for (int d = 0; d < DeckRef::Count; d++) {
             Deck& dk = deck[d];
-            const uint32_t col = kColor[static_cast<int>(dk.mode)];
+            const uint32_t col = kMode[static_cast<int>(dk.mode)];
             float level = dk.level * 1.5f;
             if (level > 1.f) level = 1.f;
             m.ring[d].set_hex_color(col);
             if (level > 1e-3f) m.ring[d].set_segment(0.f, level * 0.999f);
-            m.ring[d].set_point_hex_color(0xffffff);
             if (dk.aux_held) {
-                // Alt+PITCH model selector: while Alt is held, show all kModels options evenly spaced
-                // around the ring with the selected model bright and the rest dim - so both the choices
-                // and the current pick are visible. Replaces the pitch dot for as long as Alt is held.
-                for (int k = 0; k < kModels; k++)
-                    m.ring[d].set_point(static_cast<uint8_t>(3 + k * 6), k == dk.model ? 1.f : 0.12f);
+                // Alt+PITCH model selector: all kModels options evenly spaced, the selected one bright.
+                ring::selector(m.ring[d], kModels, dk.model, pal::kWhite, 0.12f);
             } else {
-                int pled = static_cast<int>(dk.pitch_n * 31.f + 0.5f);
-                pled = pled < 0 ? 0 : (pled > 31 ? 31 : pled);
-                m.ring[d].set_point(static_cast<uint8_t>(pled), 1.f);
+                ring::playhead(m.ring[d], dk.pitch_n, 1.f);   // pitch position dot
             }
             m.ring[d].set_updated();
             m.play[d] = { col, dk.flash > 0 ? 1.f : 0.12f };
             if (dk.flash > 0) dk.flash--;
         }
-        const Mode am = deck[0].mode;
-        m.mode_center = { kColor[0], am == Mode::Reel  ? 1.f : 0.1f };
-        m.mode_left   = { kColor[1], am == Mode::Slice ? 1.f : 0.1f };
-        m.mode_right  = { kColor[2], am == Mode::Drift ? 1.f : 0.1f };
+        const auto am = deck[0].mode;
+        m.mode_center = { pal::kReel,  am == Mode::Reel  ? 1.f : 0.1f };
+        m.mode_left   = { pal::kSlice, am == Mode::Slice ? 1.f : 0.1f };
+        m.mode_right  = { pal::kDrift, am == Mode::Drift ? 1.f : 0.1f };
     }
 };
 

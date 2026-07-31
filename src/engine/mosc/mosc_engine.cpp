@@ -1,6 +1,7 @@
 // SYNTHUX ACADEMY /////////////////////////////////////////
 // SPOTYKACH ///////////////////////////////////////////////
 #include "engine/mosc/mosc_engine.h"
+#include "engine/indicators.h"   // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 
 #include "engine/arena.h"
 
@@ -267,29 +268,19 @@ struct MoscEngine::Impl {
             if (level > 1.f) level = 1.f;
             m.ring[d].set_hex_color(col);
             if (level > 1e-3f) m.ring[d].set_segment(0.f, level * 0.999f);
-            m.ring[d].set_point_hex_color(0xffffff);
             if (dk.aux_held) {
-                // Alt+PITCH engine selector: 24 engines map around the 32-LED ring; show the current
-                // pick bright. (A coarse readout for the scaffold; a labelled menu can come later.)
-                int e = static_cast<int>(static_cast<float>(dk.engine) * 31.f / (kEngines - 1) + 0.5f);
-                e = e < 0 ? 0 : (e > 31 ? 31 : e);
-                m.ring[d].set_point(static_cast<uint8_t>(e), 1.f);
+                // Alt+PITCH engine selector: all kEngines models around the ring, current pick bright.
+                ring::selector(m.ring[d], kEngines, dk.engine, pal::kWhite);
             } else {
-                int pled = static_cast<int>(dk.pitch_n * 31.f + 0.5f);
-                pled = pled < 0 ? 0 : (pled > 31 ? 31 : pled);
-                m.ring[d].set_point(static_cast<uint8_t>(pled), 1.f);
+                ring::playhead(m.ring[d], dk.pitch_n, 1.f);   // pitch position dot
             }
             m.ring[d].set_updated();
             m.play[d] = { col, dk.flash > 0 ? 1.f : 0.12f };
             if (dk.flash > 0) dk.flash--;
         }
-        // The center/left/right LEDs sit under the global routing switch -> show the active Route
-        // (Stereo = center, DoubleMono = left, GenerativeStereo = right). Per-deck Gate/Drone is shown
-        // by the deck ring + play colour above.
-        static const uint32_t kRoute = 0xffffff;
-        m.mode_center = { kRoute, _route == Route::Stereo           ? 1.f : 0.1f };
-        m.mode_left   = { kRoute, _route == Route::DoubleMono       ? 1.f : 0.1f };
-        m.mode_right  = { kRoute, _route == Route::GenerativeStereo ? 1.f : 0.1f };
+        // The center/left/right LEDs sit under the global routing switch -> show the active Route via the
+        // shared helper (per-deck Gate/Drone is shown by the deck ring + play colour above).
+        led::route_leds(m, _route);
     }
 };
 

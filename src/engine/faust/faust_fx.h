@@ -26,6 +26,7 @@
 #include "engine/iengine.h"
 #include "engine/engine_params.h"
 #include "engine/display_model.h"
+#include "engine/indicators.h"   // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 #include "engine/arena.h"
 #include "engine/faust/faust_capture.h"
 #include "daisysp.h"   // daisysp::SoftLimit (soft_limit feature)
@@ -151,15 +152,20 @@ public:
     }
 
     void render(DisplayModel& m) override {
-        if constexpr (Traits::meter) {
-            m.clear();
-            for (int d = 0; d < 2; d++) {
+        m.clear();
+        for (int d = 0; d < 2; d++) {
+            if constexpr (Traits::meter) {
                 const float raw = _peak[(kDecks > 1) ? d : 0];
                 const float lvl = raw > 1.f ? 1.f : raw;
-                if (lvl > 1e-4f) { m.ring[d].set_hex_color(Traits::color); m.ring[d].set_segment(0.f, lvl * 0.999f); }
-                m.ring[d].set_updated();
+                ring::level(m.ring[d], lvl, Traits::color);
                 m.play[d] = { Traits::color, lvl > 1e-4f ? 1.f : 0.f };
+            } else {
+                // No meter configured: a dim mode-hued "on, ready" floor + play dot so the panel isn't
+                // dark (no ITimeSource in this render, so a static glow rather than a breathe).
+                ring::level(m.ring[d], 0.999f, Traits::color, 0.12f);
+                m.play[d] = { Traits::color, 0.3f };
             }
+            m.ring[d].set_updated();
         }
     }
 

@@ -26,6 +26,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **All own-display engines migrated onto the shared indicator toolkit (`src/engine/indicators.h`).** Following a full-tree audit ([`indicator-comparison.md` §7](docs/dev/indicator-comparison.md)), the 13 engines that hand-rolled their LED grammar (bard, csound, chuck, softcut, radio, glitch, pstretch, reso, mosc, delay, qdelay, reverb, edrums) plus the Faust engines now call the toolkit instead of duplicating it: the 9 hand-rolled Alt-held selectors → `ring::selector`/`ring::slots`, the ~8 copies of the route L/C/R block → `led::route_leds`, meters/markers → `ring::level`/`ring::playhead`, softcut's libm-`cos` breathe + transport ladder → `motion::breathe_standby`/`transport_view`, and the per-engine near-miss palette constants (`0x00c0ff`/`0x00aaff`≈`kCyan`, reso's drifted mode hues) unified onto `pal::`. Also lit previously-dark indicators — `led::route_leds` on edrums, a non-blank `meter=false` floor on the Faust engines. All engines build clean; net-new indicators needing per-engine data (`ring::value` pickup feedback, `led::clock`, `led::cycle` for the LFO engines) are deferred. **On-panel appearance not yet hardware-verified.** ([`docs/dev/indicator-comparison.md`](docs/dev/indicator-comparison.md), `src/engine/indicators.h`)
+
 - **Synced platform-level changes from upstream Spotykach v1.2.0/v1.2.1.** Ported the fork-worthy upstream improvements into the sk-engines platform — external-clock dropout **recovery + downbeat re-alignment** in `Transport`, **USB MIDI** over the rear USB-C (host-built, hardware test pending), the **SD-slot selector off-by-one** fix, a generic **WAV cue-point** capability (`CapWavCues` + `wav_cues.h`, platform-parsed so any engine can use it), and a **Hann-table dedup** that trims per-TU copies out of the audio hot path. The granular cue/DSP rewrite is intentionally not chased — the granular engine is the frozen compatibility reference. ([`docs/dev/1.2.0-upstream-sync.md`](docs/dev/1.2.0-upstream-sync.md))
 
 - **CMake build (`CMakeLists.txt` + `Makefile.cmake`) brought to full parity with the Makefile.** The opt-in CMake path (previously WIP and broken for every engine) now builds the same 20 engines as the canonical Makefile — including the QSPI-execute `mosc`/`csound`/`chuck` that were Make-only — and its `SRAM_EXEC` gap vs the Makefile is closed to ~0.65%. The Makefile stays canonical.
@@ -39,6 +41,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Reverb: the parked Freeverb voice (`freeverb.dsp` + `faust_kernel_freeverb.h`) is deleted.** It was never wired into the engine (active voices are Dattorro plate / Zita hall / Greyhole) and wasn't liked. No build or behaviour change.
 
 ### Fixed
+
+- **edrums: Alt+PITCH (drum-tone select) now shows a live ring selector.** Choosing a drum's tone with Alt+PITCH gave no persistent feedback — only a brief flash, and only when the value actually changed. edrums now tracks the Alt-held state (`set_aux_active`) and, while Alt is held, draws a `ring::selector` of all five tones (the current one bright, in the focused drum's colour). Hardware-gated like the rest of the indicator work. (`src/engine/edrums/edrums_engine.{h,cpp}`)
+
+- **Latent missing `<cstddef>` in `granular/detector.h`.** It used `size_t` with only `<array>` included, relying on transitive include order the host toolchain doesn't provide (the ARM firmware was unaffected). Added the include. *(The broader host harness has more pre-existing latent-include gaps; those remain.)*
 
 - **Host test suite builds under Apple clang 21 (macOS Tahoe).** Clang 21's stricter front-end broke `make -C host test` at three host-only spots (a missing `<cstddef>`, a non-const VLA array bound, and a stale stmlib include path); all 22 host suites pass again. The ARM firmware build was unaffected.
 

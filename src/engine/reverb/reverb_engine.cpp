@@ -2,6 +2,7 @@
 // SPOTYKACH ///////////////////////////////////////////////
 #include "engine/reverb/reverb_engine.h"
 #include "engine/arena.h"
+#include "engine/indicators.h"           // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 #include "engine/faust/faust_capture.h"  // shared faustgen::CaptureUI / Bind / Role
 
 // The generated kernels. Each declares `class mydsp` inside namespace spotykach::rv_<name>; the
@@ -281,13 +282,10 @@ void ReverbEngine::render(DisplayModel& m)
     for (int d = 0; d < DeckRef::Count; d++) {
         const float decay = _v[dual ? d : DeckRef::A][K_Decay];
         const float level = _peak[d] > 1.f ? 1.f : _peak[d];
-        // Dim full-ring baseline in the algorithm colour - never fully dark (cf. the radio/tape ring idiom).
-        m.ring[d].set_hex_color(color);
-        m.ring[d].set_brightness(0.10f);
-        m.ring[d].set_segment(0.f, 0.999f);
-        // The decay arc, brighter and pulsing with the output level.
-        m.ring[d].set_brightness(0.35f + 0.60f * level);
-        m.ring[d].set_segment(0.f, decay > 0.f ? decay * 0.999f : 0.001f);
+        // Dim full-ring baseline in the algorithm colour (never fully dark; cf. the radio/tape ring idiom),
+        // then the DECAY arc on top, its brightness pulsing with the output level so the tail visibly fades.
+        ring::level(m.ring[d], 0.999f, color, 0.10f);
+        ring::level(m.ring[d], decay,  color, 0.35f + 0.60f * level);
         m.ring[d].set_updated();
         m.play[d] = { color, 0.35f + 0.60f * level }; // play pad: algorithm colour, also pulsing with level
     }

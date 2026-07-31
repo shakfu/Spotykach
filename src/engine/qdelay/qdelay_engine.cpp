@@ -3,6 +3,7 @@
 // GPLv3 (NOT MIT): incorporates the GPLv3 diffuser. See src/engine/qdelay/{NOTICE.md,LICENSE}.
 #include "engine/qdelay/qdelay_engine.h"
 #include "engine/arena.h"
+#include "engine/indicators.h"   // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 #include "config.h"   // kTempoMinBpm (sizes the delay buffer for the longest division at min tempo)
 
 #include <cmath>
@@ -299,23 +300,20 @@ bool QdelayEngine::set_config(ConfigId id, DeckRef::Ref deck, int value)
 void QdelayEngine::render(DisplayModel& m)
 {
     m.clear();
-    // Ring tint by character: Clean = cyan-blue, Diffuse = teal, Duck = amber.
-    static const uint32_t kModeColor[ModeCount] = { 0x00a0ffu, 0x00ddaau, 0xffaa00u };
+    // Ring tint by character: Clean = cyan (canonical), Diffuse = teal, Duck = amber (canonical).
+    static const uint32_t kModeColor[ModeCount] = { pal::kCyan, 0x00ddaau, pal::kAmber };
 
-    DisplayModel::Indicator* mode_led[3] = { &m.mode_left, &m.mode_center, &m.mode_right };
-    const int route_led = (_route == Route::DoubleMono) ? 0 : (_route == Route::GenerativeStereo) ? 2 : 1;
-    *mode_led[route_led] = { 0xffffffu, 0.8f };
+    led::route_leds(m, _route);   // 3 mode LEDs show the ROUTE (DoubleMono / Stereo / GenerativeStereo)
 
     const bool linked = (_route != Route::DoubleMono);
     for (int c = 0; c < 2; c++) {
         const int     src = linked ? DeckRef::A : c;
         const uint8_t md  = _mode[src];
-        m.ring[c].set_hex_color(kModeColor[md]);
-        m.ring[c].set_segment(0.f, static_cast<float>(_tap[c].div + 1) / kDivCount);
+        ring::level(m.ring[c], static_cast<float>(_tap[c].div + 1) / kDivCount, kModeColor[md]); // division arc (SIZE)
         m.ring[c].set_updated();
         // Play pad: white when frozen, cyan when reversed, else green lit by the input signal.
-        m.play[c] = _freeze[src]  ? DisplayModel::Indicator{ 0xffffffu, 1.f }
-                  : _reverse[src] ? DisplayModel::Indicator{ 0x00ffffu, 1.f }
-                                  : DisplayModel::Indicator{ 0x00ff00u, _tap[c].peak > 1e-3f ? 1.f : 0.15f };
+        m.play[c] = _freeze[src]  ? DisplayModel::Indicator{ pal::kWhite, 1.f }
+                  : _reverse[src] ? DisplayModel::Indicator{ pal::kCyan,  1.f }
+                                  : DisplayModel::Indicator{ pal::kGreen, _tap[c].peak > 1e-3f ? 1.f : 0.15f };
     }
 }

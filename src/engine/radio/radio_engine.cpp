@@ -1,4 +1,5 @@
 #include "engine/radio/radio_engine.h"
+#include "engine/indicators.h"   // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 
 #include "daisysp.h"   // daisysp::SoftLimit
 
@@ -168,33 +169,26 @@ void RadioEngine::render(DisplayModel& m) {
         const int  i       = (dk == DeckRef::A) ? 0 : 1;
         const bool playing = _stream && _stream->is_playing(dk);
         const bool err     = _time && now < _err_until[i];
-        const uint32_t c   = err ? kErrColor : playing ? 0x00ff00 : 0x000000;
+        const uint32_t c   = err ? kErrColor : playing ? pal::kGreen : pal::kBlack;
         m.play[i] = { c, (playing || err) ? 1.f : 0.f };
 
         if (_aux_held[i]) {
             // BANK selector: kMaxBanks dots around the ring, the current bank bright.
-            m.ring[i].set_hex_color(0x202020); m.ring[i].set_segment(0.f, 0.999f);
-            m.ring[i].set_point_hex_color(0xffffff);
-            for (int b = 0; b < kMaxBanks; b++) {
-                const float pos = static_cast<float>(b) / static_cast<float>(kMaxBanks);
-                m.ring[i].add_point(pos, (b == _bank[i]) ? 1.f : 0.15f);
-            }
+            ring::selector(m.ring[i], kMaxBanks, _bank[i], pal::kWhite, 0.15f, 0x202020);
         } else {
             // STATION position: a faint base ring + a bright marker at station/N (amber if the bank is empty).
             const uint32_t base = playing ? 0x003000 : 0x101010;
             m.ring[i].set_hex_color(base); m.ring[i].set_segment(0.f, 0.999f);
             if (_nst[i] > 0 && _open_station[i] >= 0) {
-                m.ring[i].set_point_hex_color(err ? kErrColor : 0x00ff00);
-                m.ring[i].add_point(static_cast<float>(_open_station[i]) / static_cast<float>(_nst[i]), 1.f);
+                ring::playhead(m.ring[i], static_cast<float>(_open_station[i]) / static_cast<float>(_nst[i]),
+                               1.f, err ? kErrColor : pal::kGreen);
             } else if (err) {
-                m.ring[i].set_point_hex_color(kErrColor); m.ring[i].add_point(0.f, 1.f);
+                ring::playhead(m.ring[i], 0.f, 1.f, kErrColor);
             }
         }
         m.ring[i].set_updated();
     }
-    if (_route == Route::DoubleMono)  m.mode_left   = { 0xffffff, 0.8f };
-    else if (_route == Route::Stereo) m.mode_center = { 0xffffff, 0.8f };
-    else                              m.mode_right  = { 0xffffff, 0.8f };
+    led::route_leds(m, _route);
 }
 
 // --- private ------------------------------------------------------------------------------------------

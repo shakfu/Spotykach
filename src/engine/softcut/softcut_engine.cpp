@@ -1,5 +1,6 @@
 #include "engine/softcut/softcut_engine.h"
 #include "engine/arena.h"
+#include "engine/indicators.h"   // shared indicator toolkit (docs/dev/indicator-comparison.md §7)
 
 #include <cmath>
 #include <cstring>
@@ -556,45 +557,31 @@ static constexpr uint32_t kTrackHue[SoftcutEngine::kTracks] = {
 
 void SoftcutEngine::render(DisplayModel& m) {
     m.clear();
-    const uint32_t now = _time ? _time->now_ms() : 0;
-    const float ph      = static_cast<float>(now % 2400u) / 2400.f;
-    const float breathe = 0.35f + 0.25f * (0.5f - 0.5f * std::cos(6.2831853f * ph));
+    const uint32_t now     = _time ? _time->now_ms() : 0;
+    const float    breathe = motion::breathe_standby(now);   // 0.35..0.60 "loaded & ready" pulse
 
     for (DeckRef::Ref dk : { DeckRef::A, DeckRef::B }) {
         const int  i   = idx(dk);
         const int  s   = _active[i];
         if (_save[i] != Save::Idle) {              // saving a loop to SD: solid amber ring + indicator
-            m.play[i] = DisplayModel::Indicator{ 0xffaa00, 1.f };
-            m.ring[i].set_brightness(1.f);
-            m.ring[i].set_hex_color(0xffaa00);
-            m.ring[i].set_segment(0.f, 0.999f);
+            m.play[i] = { pal::kAmber, 1.f };
+            ring::level(m.ring[i], 0.999f, pal::kAmber);
             m.ring[i].set_updated();
             continue;
         }
-        const bool err = _time && now < _err_until[i];
-        const float rr = rate_from_knob(_rate_n[i][s]);
-        // Transport color of the focused track: overdub red, forward green, reverse cyan, frozen white.
-        uint32_t c; float b;
-        const bool rec = _overdub[i][s] || _defining[i][s];
-        if      (err)                 { c = kErrColor; b = 1.f; }
-        else if (rec)                 { c = 0xff0000;  b = 1.f; }
-        else if (_rolling[i][s] && rr > 0.f) { c = 0x00ff00; b = 1.f; }
-        else if (_rolling[i][s] && rr < 0.f) { c = 0x00a0ff; b = 1.f; }
-        else if (_rolling[i][s])      { c = 0x404040;  b = 0.5f; }
-        else                          { c = 0x000000;  b = 0.f; }
-        const bool live = err || rec || _rolling[i][s];
-        m.play[i] = live ? DisplayModel::Indicator{ c, b }
-                         : DisplayModel::Indicator{ kTrackHue[s], breathe * 0.5f };
+        const bool  err = _time && now < _err_until[i];
+        const float rr  = rate_from_knob(_rate_n[i][s]);
+        const bool  rec = _overdub[i][s] || _defining[i][s];
+        // Direction-coded transport of the focused track: overdub red, forward green, reverse cyan,
+        // engaged-but-frozen dim white, rejected amber, idle -> the track hue breathing (standby).
+        const auto tv = transport_view(_rolling[i][s], rec, rr, err, kTrackHue[s], breathe * 0.5f);
+        led::transport(m, i, tv);
 
         if (_aux_held[i]) {
-            // Alt+PITCH held: SD slot selector for the focused track.
-            m.ring[i].set_brightness(1.f);
-            m.ring[i].set_hex_color(0x202020); m.ring[i].set_segment(0.f, 0.999f);
-            m.ring[i].set_point_hex_color(0xffffff);
-            for (int t = 0; t < kTapeSlots; t++) {
-                const float pb = (t == _tape_slot[i][s]) ? 1.f : (_slot_used[i][t] ? 0.45f : 0.12f);
-                m.ring[i].set_point(static_cast<uint8_t>(t * (kRingLeds / kTapeSlots)), pb);
-            }
+            // Alt+PITCH held: SD slot selector for the focused track (selected bright, used mid, empty dim).
+            uint32_t used = 0;
+            for (int t = 0; t < kTapeSlots; t++) if (_slot_used[i][t]) used |= (1u << t);
+            ring::slots(m.ring[i], kTapeSlots, _tape_slot[i][s], used);
         } else if (_swap_show[i] > 0) {
             _swap_show[i]--;
             m.ring[i].set_brightness(1.f);
@@ -602,25 +589,20 @@ void SoftcutEngine::render(DisplayModel& m) {
             m.ring[i].set_point_hex_color(0xffffff);
             for (int t = 0; t <= s; t++) m.ring[i].set_point(static_cast<uint8_t>(t * 4), 1.f);
         } else {
-            if (live) { m.ring[i].set_brightness(1.f);     m.ring[i].set_hex_color(c); }
-            else      { m.ring[i].set_brightness(breathe); m.ring[i].set_hex_color(kTrackHue[s]); }
-            m.ring[i].set_segment(0.f, 0.999f);
+            const uint32_t back = tv.live ? tv.rgb : kTrackHue[s];
+            ring::level(m.ring[i], 0.999f, back, tv.live ? 1.f : breathe);   // full-ring transport/idle picture
             // Read-position dot, mapped into the loop window (softcut reports head position in seconds).
             const float ext = _extent_sec(i, s);
             if (ext > 0.f) {
                 const float st  = _loop_start_sec(i, s);
                 float len = _size_n[i][s] * ext; if (len < kMinLoopSec) len = kMinLoopSec; if (len > ext) len = ext;
-                float frac = (len > 0.f) ? (_voice[i][s].getSavedPosition() - st) / len : 0.f;
-                frac -= std::floor(frac);
-                m.ring[i].set_point_hex_color(0xffffff);
-                m.ring[i].add_point(frac, live ? 1.f : 0.55f);
+                const float frac = (len > 0.f) ? (_voice[i][s].getSavedPosition() - st) / len : 0.f;
+                ring::playhead(m.ring[i], frac, tv.live ? 1.f : 0.55f);
             }
         }
         m.ring[i].set_updated();
     }
-    if      (_route == Route::DoubleMono) m.mode_left   = { 0xffffff, 0.8f };
-    else if (_route == Route::Stereo)     m.mode_center = { 0xffffff, 0.8f };
-    else                                  m.mode_right  = { 0xffffff, 0.8f };
+    led::route_leds(m, _route);
 }
 
 const char* SoftcutEngine::_path(DeckRef::Ref d, int slot) {
