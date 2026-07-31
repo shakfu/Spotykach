@@ -26,6 +26,32 @@ ifeq ($(TERMINAL), 1)
 C_DEFS += -DSPK_TERMINAL=1
 endif
 
+# USB-C bring-up diagnostic (docs/dev/terminal-impl.md). `make ENGINE=<e> TERMINAL=1 USBDIAG=1` blinks
+# the OTG_FS bring-up verdict on the Daisy onboard LED (six groups, 1 blink = bad / 2 = good; see
+# AppImpl::usb_diag_tick). For use when the port does not enumerate and there is therefore no channel to
+# report over; the onboard LED is readable on a Pod / open unit, not on a cased Spotykach.
+# The build is otherwise a NORMAL, fully runnable app: the blink is non-blocking, driven from Loop(),
+# and touches only the onboard LED (which the app never otherwise uses). In particular the boot-button
+# DFU escape hatch stays live - do NOT make this park in Init(), which would take that with it.
+# Note: a command-line `C_DEFS+=...` does not work here (it clobbers the in-Makefile C_DEFS, including
+# -DSTM32H750xx), which is why this is a switch rather than a define you pass through.
+ifeq ($(USBDIAG), 1)
+C_DEFS += -DTERM_USBDIAG=1
+endif
+
+# Which USB port the terminal lives on. DEFAULT = external: OTG_HS-as-FS on PB14/PB15 (Seed pins
+# D29/D30), which is where the Spotykach's panel USB-C is wired - verified on hardware 2026-07-31.
+# `TERMPORT=int` selects OTG_FS (PA11/PA12), the Daisy Seed's own USB connector, for a bare Seed or Pod.
+# The symptom of having this wrong is distinctive: the USBDIAG readout shows a completely healthy core
+# (clocks, supply, transceiver, pullup asserted, pads in the right alternate function) while the host
+# never sends a frame - i.e. the app is driving a connector that is not connected to anything.
+ifeq ($(TERMPORT), ext)
+C_DEFS += -DSPK_TERMINAL_PORT_EXTERNAL=1
+endif
+ifeq ($(TERMPORT), int)
+C_DEFS += -DSPK_TERMINAL_PORT_EXTERNAL=0
+endif
+
 # Swappable DSP engine selected at build time (item 3b). Default = the granular looper.
 # `make ENGINE=passthrough` builds the minimal passthrough variant. The define drives
 # src/engine/engine_select.h (-> ActiveEngine); ENGINE_SOURCES compiles only the chosen engine.
@@ -437,16 +463,35 @@ build/version.o build/app.o: build/.version-stamp
 build/.version-stamp: FORCE | $(BUILD_DIR)
 	@echo '$(SPK_VERSION)' | cmp -s - $@ 2>/dev/null || echo '$(SPK_VERSION)' > $@
 
-# -DSPK_TERMINAL is invisible to make's dependency graph, so without this a `make TERMINAL=1` over a
-# stale non-terminal build would leave the platform TUs (app/core.ui, which reference the terminal only
-# under the flag) and the terminal service TUs (whose bodies are entirely under #if SPK_TERMINAL)
-# compiled the old way. Stamp them on the TERMINAL value so exactly those objects rebuild on a toggle.
-# (The engine objects also see the flag via the IEngine vtable; switching engines already `make clean`s,
-# and toggling TERMINAL is a clean build per the note above, so they are covered there.)
-build/app.o build/core.ui.o \
-build/terminal.o build/dispatch.o build/fmt.o build/names.o build/text_sink.o: build/.terminal-stamp
+# Build-flag stamps. -DSPK_TERMINAL / -DTERM_USBDIAG / -DSPK_TERMINAL_PORT_EXTERNAL are invisible to
+# make's dependency graph, so without these a `make TERMINAL=1` over a stale tree would silently keep
+# objects compiled the other way.
+#
+# These flags change TYPE LAYOUT, not just behaviour: SPK_TERMINAL adds members to CoreUI (_input_frozen)
+# and AppImpl (_terminal) and virtuals to IEngine; TERM_USBDIAG adds another CoreUI member. Mixing
+# objects built with and without them puts every later member at the wrong offset - which presents as a
+# frozen/garbled panel while the terminal itself still works, and is maddening to diagnose. So a change
+# must invalidate EVERYTHING, not just the TUs that mention the flag.
+#
+# Why the objects are deleted rather than just out-dated: this project builds under GNU Make 3.81
+# (what macOS ships), which compares mtimes at WHOLE-SECOND resolution. A stamp rewritten in the same
+# second an object was compiled is not "newer", so the object is skipped - producing a PARTIAL rebuild
+# whose stale subset depends on timing. That is exactly the layout-mismatch case above, and it bit us
+# on hardware (see docs/dev/terminal-impl.md). Deleting the objects is immune to timestamp resolution.
+#
+# The stamps are prerequisites of every object, so all three recipes run before any compilation starts;
+# the rm therefore cannot race a concurrent -j compile.
+$(OBJECTS): build/.terminal-stamp build/.usbdiag-stamp build/.termport-stamp
+
 build/.terminal-stamp: FORCE | $(BUILD_DIR)
-	@echo '$(TERMINAL)' | cmp -s - $@ 2>/dev/null || echo '$(TERMINAL)' > $@
+	@echo '$(TERMINAL)' | cmp -s - $@ 2>/dev/null || { echo '$(TERMINAL)' > $@; rm -f $(BUILD_DIR)/*.o; }
+
+build/.usbdiag-stamp: FORCE | $(BUILD_DIR)
+	@echo '$(USBDIAG)' | cmp -s - $@ 2>/dev/null || { echo '$(USBDIAG)' > $@; rm -f $(BUILD_DIR)/*.o; }
+
+build/.termport-stamp: FORCE | $(BUILD_DIR)
+	@echo '$(TERMPORT)' | cmp -s - $@ 2>/dev/null || { echo '$(TERMPORT)' > $@; rm -f $(BUILD_DIR)/*.o; }
+
 .PHONY: FORCE
 FORCE:
 

@@ -64,6 +64,14 @@ public:
     void set_input_frozen(bool f) { _input_frozen = f; }
 #endif
 
+#if SPK_TERMINAL && TERM_USBDIAG
+    // USB-C bring-up verdict, rendered on the panel instead of the normal UI (docs/dev/terminal-impl.md).
+    // The cased Spotykach hides the Daisy onboard LED, so the panel is the only readout it has - and the
+    // channel being diagnosed is the one that would otherwise report. app.cpp pushes the bitmask each
+    // main-loop iteration; bit i lit green = check i passed, red = failed. See _draw_usb_diag().
+    void set_usb_diag(uint16_t bits) { _usb_diag_bits = bits; }
+#endif
+
 private:
     NOCOPY(CoreUI)
 
@@ -95,6 +103,9 @@ private:
 
     // LEDs ////////////////////////////////////////
     void _draw_leds();
+#if SPK_TERMINAL && TERM_USBDIAG
+    void _draw_usb_diag();
+#endif
     void _draw_launching();
     void _blit_display(); // blit an own-display engine's DisplayModel (rings + indicators) - 3b-2a
 
@@ -168,6 +179,9 @@ private:
     bool _pitch_pickup = false;        // route PITCH through the pickup-gated path (CapPitchPickup, e.g. shuttle)
 #if SPK_TERMINAL
     bool _input_frozen = false;        // `mode test`: freeze physical input -> engine (terminal.h)
+#endif
+#if SPK_TERMINAL && TERM_USBDIAG
+    uint16_t _usb_diag_bits = 0;       // USB bring-up verdict, pushed from app.cpp each Loop
 #endif
     Settings& _settings;
     Storage& _storage;

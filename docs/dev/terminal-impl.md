@@ -1,14 +1,98 @@
 # Terminal channel - phase 1 implementation state
 
-Status: **phase 1 built and build-verified; not yet run on hardware.** This records what actually landed against the four design specs ([`terminal-control.md`](terminal-control.md), [`terminal-transport.md`](terminal-transport.md), [`terminal-dispatch.md`](terminal-dispatch.md), [`terminal-tools.md`](terminal-tools.md)) - the file layout, the deviations forced by the real codebase, the footprint constraint that gates which engines can host it, and what remains. Built 2026-07-03.
+Status: **phase 1 working on hardware (2026-07-31).** This records what actually landed against the four design specs ([`terminal-control.md`](terminal-control.md), [`terminal-transport.md`](terminal-transport.md), [`terminal-dispatch.md`](terminal-dispatch.md), [`terminal-tools.md`](terminal-tools.md)) - the file layout, the deviations forced by the real codebase, the footprint constraint that gates which engines can host it, and what remains. Built 2026-07-03.
 
 Everything is behind `SPK_TERMINAL` and costs **nothing** when off (verified: the terminal TUs compile to 0 bytes and the default `granular` binary's SRAM_EXEC is byte-identical to before, 186768 B).
 
-## HARDWARE BRING-UP — IN PROGRESS, BLOCKED (session handoff, 2026-07-03)
+## HARDWARE BRING-UP — RESOLVED, PHASE 1 WORKING ON BOTH BOARDS (2026-07-31)
 
-**Status: first on-hardware bring-up attempted; BLOCKED on USB-C CDC never enumerating.** The build + DFU-flash pipeline works, the app boots and runs, but the terminal's OTG_FS (USB-C) device never appears on the host, so nothing has been exercised end-to-end (`make test-hw` unreachable). This section is the resume point; the "Verification status" section below is the pre-hardware state.
+**Root cause: the channel was on the wrong USB peripheral.** The Spotykach's panel USB-C is wired to
+**OTG_HS (PB14/PB15**, Seed pins D29/D30), not to the Seed's own OTG_FS pins (PA11/PA12). The app was
+bringing up `FS_INTERNAL` and driving two pins this board connects to nothing, so the host never saw an
+attach. The board's bootloader is libDaisy's `extdfu` variant, which serves DFU over OTG_HS - which is
+why DFU always enumerated on the very connector the app could not use. Fixed by defaulting
+`SPK_TERMINAL_PORT_EXTERNAL` to 1 (`TERMPORT=int` for a bare Seed/Pod).
 
-### The blocking bug
+Verified on hardware: `skterm.py` connects, `describe` parses (24 params, 6 configs), `query usb`
+returns, params round-trip. Also verified on a Daisy Pod with `TERMPORT=int`, whose USB connector
+genuinely is OTG_FS.
+
+`query usb` on the Spotykach, working:
+
+```
+ok boot=3 region=3 clkcfg=1 hsi48=1 usbsel=3 usb33den=1 usb33rdy=1 phy=1 pullup=1 \
+   vbussense=0 vbusovr=0 dp=1 dm=1 rst=0 sof=1
+```
+
+### Why this took two sessions, and what the tree was already saying
+
+The Makefile routes the logger to `LOGGER_EXTERNAL` **unconditionally**. That is a statement about
+which jack this hardware exposes, and it was read as an incidental detail: deviation #1 below observed
+it and concluded "nothing owns `FS_INTERNAL`, so the terminal must init it" - the opposite inference.
+`terminal-transport.md` was then written on the premise that the channel shares the *internal* port
+with the Logger. Every subsequent hypothesis (VBUS sensing, clock config, supply ordering, the
+bootloader handoff) was a search for a fault on a peripheral that was working perfectly.
+
+Two boards also differ in ways that muddied the comparison: the Spotykach runs a v6.1+ bootloader
+(`boot=3`, so `clkcfg=1` - it configures its own clocks) while the Pod runs a pre-v6 one (`boot=0`,
+`clkcfg=0`, taking the `skip_clocks` path). Neither mattered in the end.
+
+### What actually identified it
+
+A live, on-panel register readout. The decisive reading was a **completely healthy OTG_FS core** -
+clocks, supply, transceiver powered, `DCTL.SDIS` clear, and both pads still in AF10 - with **zero host
+activity**. A controller doing everything right into total silence means the wire is not there. That
+combination is the signature of a disconnected port, and no single-bit pass/fail experiment could have
+produced it.
+
+Two lessons worth keeping:
+
+- **An init-time snapshot is not enough.** The first probe captured state once in `Terminal::init()`
+  and could not have detected anything that changed afterwards. It had to become a live re-read
+  (`usb_diag_refresh`, called every main loop) before it could be trusted.
+- **`sof` is the reliable host-activity bit; `rst` is not.** The bus reset is transient and the ISR
+  clears `GINTSTS` long before the main loop samples it, so `usb_reset_seen` reads 0 even on a fully
+  working link (see the capture above). Judge "is the host talking to us" by `sof`.
+
+### A build-system trap that cost a hardware debugging cycle (fixed 2026-07-31)
+
+After the port fix, `TERMINAL=1` builds came up with a **frozen, garbled panel** (both rings stuck
+amber, panel button dead) while the terminal channel itself answered `query usb` normally. The port was
+blamed first; it was innocent - `TERMPORT=int` reproduced it too.
+
+Root cause: this project builds under **GNU Make 3.81** (what macOS ships), which compares mtimes at
+whole-second resolution. The `.terminal-stamp` mechanism relies on the stamp becoming *newer* than the
+objects that depend on it, so any object compiled in the same second the stamp was rewritten was judged
+up to date and skipped. A flag toggle therefore produced a **partial** rebuild whose stale subset
+depended on timing - hence intermittent.
+
+That is fatal here because these flags change **type layout**, not just behaviour: `SPK_TERMINAL` adds
+`_input_frozen` to `CoreUI`, `_terminal` to `AppImpl` and three virtuals to `IEngine`; `TERM_USBDIAG`
+adds another `CoreUI` member. Linking stale against fresh objects puts every later member at the wrong
+offset. A fresh `app.o` kept the channel working while a stale `core.ui.leds.o` rendered the panel from
+garbage - which is exactly the symptom, and why it looked like a USB fault rather than a build fault.
+
+Fixed by making a stamp change **delete the objects** (`rm -f build/*.o`) rather than relying on mtime
+ordering, and by making all three stamps prerequisites of `$(OBJECTS)` so the recipes run before any
+compilation and cannot race a `-j` build. Toggling any of TERMINAL / USBDIAG / TERMPORT now forces a
+full rebuild, which is what the flags actually require.
+
+The general lesson: a stamp file that encodes a flag is only safe if the flag cannot change type
+layout, or if the recipe deletes rather than out-dates. The Makefile's old advice ("toggling TERMINAL is
+a clean build") was correct and the stamp quietly undermined it by making a partial rebuild look valid.
+
+### Diagnostics that remain in the tree
+
+- `USBDIAG=1` - the panel/onboard-LED readout (`AppImpl::usb_diag_tick`, `CoreUI::_draw_usb_diag`).
+  Worth keeping: it is the only way to get an answer out of a cased unit whose channel is down.
+- `SPK_TERMINAL_USB33_PREINIT` (default on) - a genuine ordering correction to libDaisy, which enables
+  the VDD33_USB detector only *after* `USBD_Start` has already connected and never waits for
+  `USB33RDY`.
+- `VBUSOFF=1` - **now dead scaffolding.** It targets an OTG_FS problem that never existed, and libDaisy
+  already configures OTG_HS with `vbus_sensing_enable = DISABLE` (`vbussense=0` above, with the
+  override not run). Candidate for removal.
+
+### HISTORICAL - the blocking bug as first characterized (2026-07-03), resolved above
 
 Flashed `make ENGINE=delay TERMINAL=1` (fits -O2, 94% SRAM_EXEC) to the cased Spotykach and the USB-C CDC does **not** enumerate. Established, with evidence:
 
@@ -18,15 +102,19 @@ Flashed `make ENGINE=delay TERMINAL=1` (fits -O2, 94% SRAM_EXEC) to the cased Sp
 
 - **Yet the host sees LITERALLY NOTHING** on the app's OTG_FS — no `ttyACM`, no `0483:5740`, not even a failed-enumeration line in `journalctl`. A physical unplug/replug produced zero host events. That means the D+ pullup is never seen by the host — the enumeration fails *before* descriptors/IRQs matter (a descriptor/VTOR/IRQ fault would still log "new full-speed USB device" then an error).
 
-### Ruled out (do not re-investigate without new evidence)
+### HISTORICAL - hypotheses pursued while the channel was on the wrong port
 
-1. **VBUS sensing.** Hypothesis: libDaisy sets `hpcd_USB_OTG_FS.Init.vbus_sensing_enable = ENABLE` (`usbd/usbd_conf.c:424`; the OTG_HS core has it DISABLE at :476) and Daisy USB-C VBUS isn't on PA9. Tried a post-`Init` register poke in `Terminal::init()` (clear `GCCFG.VBDEN`, set
-   `GOTGCTL.BVALOEN|BVALOVAL`, soft-disconnect/reconnect via `DCTL.SDIS`). **No effect.** Reverted.
-   (Also: stock `Logger<LOGGER_INTERNAL>` uses the same config and enumerates for other Daisy users, so VBUS-sensing-ENABLE is not itself the blocker.)
+All of these were searches for a fault on OTG_FS, which was healthy throughout. Kept for the record only.
+
+1. ~~**VBUS sensing.**~~ **BACK IN PLAY - this is now the leading hypothesis (see the status section above).** The original reasoning was: libDaisy sets `hpcd_USB_OTG_FS.Init.vbus_sensing_enable = ENABLE` (`usbd/usbd_conf.c:424`; the OTG_HS core has it DISABLE at :476) and Daisy USB-C VBUS may not be on PA9; a post-`Init` register poke in `Terminal::init()` (clear `GCCFG.VBDEN`, set `GOTGCTL.BVALOEN|BVALOVAL`, soft-disconnect/reconnect via `DCTL.SDIS`) had **no effect**, so it was reverted.
+
+   Two problems with retiring it on that basis. First, the poke ran *after* `USBD_Start` had already asserted `DevConnect`; for the host to notice, the sequence must assert `DCTL.SDIS` to disconnect **first**, change `GCCFG`/`GOTGCTL`, wait a few ms so the host registers the disconnect, and only then clear `SDIS`. A poke without that settle window looks exactly like "no effect" whether or not it worked. Second, the supporting argument - that stock `Logger<LOGGER_INTERNAL>` uses the same config and enumerates for other Daisy users - compares against flash-resident builds on a stock Seed, whose USB connector routes VBUS to PA9; it says nothing about a custom board's panel connector. The cleaner test is to set `vbus_sensing_enable = DISABLE` in the vendored `usbd_conf.c` and let the HAL configure the core correctly from reset (needs `make -C lib/libDaisy`).
 
 2. **Dual OTG_HS + OTG_FS bring-up.** This build uniquely inits the *external* logger's OTG_HS (`Log::StartLog` at `app.cpp:219`, because the Makefile forces `-DINFS_LOG=1 -DINFS_LOG_TARGET=LOGGER_EXTERNAL`) right before the terminal's OTG_FS. Tried skipping the external logger entirely (gate `StartLog`/`LOG_TAGGED` under `#if !SPK_TERMINAL`). **No effect.** Reverted. (Pins are independent: FS=PA11/PA12, HS=PB14/PB15; libDaisy's `FS_BOTH` does HS-then-FS in this same order.)
 
-3. **USB 48 MHz clock.** libDaisy `sys/system.cpp` enables it: `HSI48State = RCC_HSI48_ON` (:429), `UsbClockSelection = RCC_USBCLKSOURCE_HSI48` (:514), applied by `_hw.Init()`. Present.
+3. ~~**USB 48 MHz clock.**~~ **NOT ruled out - the original reasoning does not hold for this build.** It cited `sys/system.cpp` enabling `HSI48State = RCC_HSI48_ON` (:429) and `UsbClockSelection = RCC_USBCLKSOURCE_HSI48` (:514) as "applied by `_hw.Init()`". But both live inside `System::ConfigureClocks()`, which `System::Init()` **skips entirely** when `config.skip_clocks` is set (`sys/system.cpp:220-224`), and `daisy_seed.cpp:110-117` sets `skip_clocks = true` whenever the bootloader is `LT_v6_0` **and** the program memory region is not internal flash. Every build in this repo is `APP_TYPE = BOOT_SRAM` (`Makefile:368`), so whether the app configures the USB clock at all is a runtime property of the installed bootloader - it cannot be settled by reading libDaisy. Now measured directly (see the resume plan below).
+
+   The same correction applies to the supporting argument that stock `Logger<LOGGER_INTERNAL>` enumerates for other Daisy users: the standard Daisy examples are flash-resident images programmed through the ST system bootloader, where `ConfigureClocks()` always runs and there is no Daisy-bootloader-to-app OTG_FS handoff. That observation does not transfer to a bootloader-launched SRAM app.
 
 4. **Init call is wrong/incomplete.** `LoggerImpl<LOGGER_INTERNAL>::Init()` is *literally* just `usb_handle_.Init(FS_INTERNAL)` (`hid/logger_impl.h:56`) — byte-identical to the terminal's call.
 
@@ -40,26 +128,48 @@ The **cased Spotykach hides the Daisy Seed onboard LED AND the SWD pads** (per [
 
 ### RESUME PLAN (next session)
 
-1. **Pod journal test (isolates firmware vs Spotykach board).** Flash the as-designed `make ENGINE=delay TERMINAL=1` to a Pod, plug the Pod into the dev host, watch
-   `journalctl -k -b | grep 'usb 3-'` (or `lsusb | grep 0483`):
+0. **Read the bring-up probe first (built, no debugger needed).** `Terminal::init()` now captures every register that has to be right before a D+ pullup can exist, into `UsbDiag` (`src/terminal/usb_diag.{h,cpp}`), and `make ENGINE=delay TERMINAL=1 USBDIAG=1` parks the app and blinks the verdict on the Daisy onboard LED - six groups in dependency order, **1 blink = bad, 2 = good**:
 
-   - **Enumerates (`0483:5740` + `ttyACM`)** → firmware is fine; the cased Spotykach's custom-board USB-C routing/VBUS is the culprit → pivot to the board wiring.
+   | Group | Reads | Bad means |
+   |---|---|---|
+   | 1 | clocks configured (not the `skip_clocks` path) | the app never ran `ConfigureClocks()`; USB clock is whatever the bootloader left |
+   | 2 | `RCC_CR.HSI48RDY` | no 48 MHz source |
+   | 3 | `RCC_D2CCIP2R.USBSEL == 3` (HSI48) | USB clocked from the wrong source, or not at all |
+   | 4 | `PWR_CR3.USB33RDY` | transceiver supply never validated |
+   | 5 | `GCCFG.PWRDWN` | transceiver powered down |
+   | 6 | `DCTL.SDIS` clear | core is soft-disconnected - no pullup |
 
-   - **Also silent** → firmware bug reproduced on stock hardware → go to step 2.
+   Groups 1-4 are new ground; 5-6 are the SWD reads the old plan deferred to step 2, now available without a debugger. The first group reading ONE is the layer to investigate. Expected-good is six double-blinks. Once the port does enumerate, the same snapshot is readable as `query usb`.
+
+   **The `USBDIAG` build is a normal, fully runnable app.** The blink is non-blocking (driven from `Loop()`, touching only the onboard LED, which nothing else uses), so panel, audio, and the boot-button DFU escape all behave as usual. This matters: the escape hatch lives entirely in app code - `Hardware::ProcessDigitalControls` (`src/hw/hardware.cpp:224-231`) resets on BOOT release, and `AppImpl::Loop` calls `ResetToBootloader` on a 3s hold - so **any diagnostic that parks before `Loop()` removes the only software route into DFU**. A first cut of this probe did exactly that and had to be recovered through the bootloader's own reset-time DFU window. Do not reintroduce a park.
+
+   Also landed with it: `Terminal::init()` now enables the VDD33_USB level detector and waits for `USB33RDY` **before** `UsbHandle::Init()` (`SPK_TERMINAL_USB33_PREINIT`, default 1). libDaisy calls `HAL_PWREx_EnableUSBVoltageDetector()` *after* `InitFS()` - i.e. after `USBD_Start` has already asserted `DevConnect` - and never waits for the ready flag (`hid/usb.cpp:88-102`), so the core could be told to connect before its supply was valid. If the port now enumerates, that ordering was the bug; set the flag to 0 to confirm by reverting to libDaisy's order.
+
+1. ~~**Pod journal test.**~~ **DONE 2026-07-31: the Pod enumerates.** Firmware is cleared; the fault is the cased Spotykach's board or bootloader image. Note the confound this test carries, in case it is repeated: the Pod's bootloader version is its own variable, so "Pod works" would also be explained by a newer bootloader. It happened not to apply here - the Pod reports `boot=0` (`LT_v6_0`), the same pre-v6 class, so the boot path really was like-for-like.
 
 2. **SWD register read (precise).** Attach ST-Link, `openocd-attach`, and read after `Init()`: `USB_OTG_FS->GCCFG` (PWRDWN bit = transceiver power), the device `DCTL.SDIS` (pullup), `GINTSTS`, and `hUsbDeviceFS.dev_state`. This ends the guessing about *why* the pullup isn't asserted.
 
-3. **LED diagnostic (fallback, Pod only).** Already built into the tree, off by default: `make ENGINE=delay TERMINAL=1 USBDIAG=1` parks the app after `Init()` and blinks the Seed onboard LED — Group 1 (FAST) = pullup `1`=disconnected/`2`=connected; Group 2 (SLOW) = `GCCFG.PWRDWN` `1`=powered-down/`2`=active; expected-good = FAST 2 + SLOW 2. (Readable on a Pod, not the cased unit.)
+2. **SWD register read (only if step 0 comes back all-good).** Attach ST-Link, `openocd-attach`, and read `GINTSTS` and `hUsbDeviceFS.dev_state` - the state the LED probe cannot express. `GCCFG`/`DCTL` are already covered by groups 5-6.
 
-### Uncommitted working-tree state at handoff (diagnostic scaffolding, all OFF by default)
+3. **Peripheral-reset control (untried, cheap).** If step 0 is all-good and the port is still silent, the remaining candidate is the bootloader-to-app OTG_FS handoff: the Daisy bootloader runs its own DFU device on this peripheral immediately before the jump. Force `__HAL_RCC_USB1_OTG_FS_FORCE_RESET()` / `RELEASE_RESET()` before `Init()` and re-probe. That separates "core left in a stale state" from "clock/supply".
 
-- `Makefile`: adds `ifeq ($(USBDIAG),1) C_DEFS += -DTERM_USBDIAG=1`. Marked temporary; remove once USB-C works. Command-line `C_DEFS+=...` does NOT work (it clobbers the in-Makefile `C_DEFS` incl. `-DSTM32H750xx`); use the `USBDIAG=1` switch.
+### Diagnostic scaffolding in the tree (all OFF by default)
 
-- `src/app.cpp`: `#ifdef TERM_USBDIAG` block at the end of `AppImpl::Init()` (the onboard-LED probe).
+- `Makefile`: `ifeq ($(USBDIAG),1) C_DEFS += -DTERM_USBDIAG=1`, plus a `build/.usbdiag-stamp` so `app.o` rebuilds on a toggle. Command-line `C_DEFS+=...` does NOT work (it clobbers the in-Makefile `C_DEFS` incl. `-DSTM32H750xx`); use the `USBDIAG=1` switch. Temporary - remove once USB-C works.
 
-- `src/terminal/terminal.cpp`: **back to baseline** (the VBUS register-poke experiment was fully reverted; no net change).
+- `src/terminal/usb_diag.{h,cpp}`: the `UsbDiag` snapshot, its two capture points, and `usb_supply_bringup()`. 152 B of flash when `SPK_TERMINAL` is on, 0 when off.
 
-- All prior experiments (VBUS poke, external-logger skip) reverted — only the off-by-default diagnostic remains. Decide whether to keep or drop the `USBDIAG` scaffolding once the root cause is found.
+- `src/app.cpp`: `AppImpl::usb_diag_tick()` under `#if SPK_TERMINAL && TERM_USBDIAG`, called once per `Loop()` iteration - the onboard-LED probe. Non-blocking (a millisecond-timed segment schedule), so the app runs normally; `USBDIAG=1` costs ~340 B (delay: 180844 B vs 180508 B SRAM_EXEC).
+
+- All prior experiments (VBUS poke, external-logger skip) remain reverted. Decide whether to keep or drop the `USBDIAG` scaffolding once the root cause is found.
+
+### Transport fixes landed alongside the probe
+
+Two defects found by review of the shipped `flush_tx`, both fixed before the next bring-up attempt so they cannot be mistaken for USB faults:
+
+- **TX staging buffer was reused while a transfer was still in flight.** `CDC_Transmit_FS` returns `USBD_OK` once the packet is *queued*; in non-DMA mode the HAL copies out of the caller's buffer later, from the TX-FIFO-empty interrupt (`usbd_cdc_if.c:300-310`). The single `_scratch[64]` was refilled by the next `process()` - microseconds later, far inside a 1 ms USB frame - corrupting the packet the peripheral was about to send. Symptom would have been intermittently garbled or duplicated `describe` output. Now two slots, swapped only on a successful transmit: a transmit only succeeds when `TxState` is clear, which proves the other slot is free.
+
+- **Dropped replies were silently swallowed.** `flush_tx` called `_tx.take_overflow()` and discarded the result, against the transport spec's promise that a TX overflow is latched and reported. With a synchronous host (one command outstanding) a lost reply reads as an unexplained timeout. Now reported as `err tx-overflow` from `process()`; if that enqueue does not fit either, `TxFifo` re-latches and it retries.
 
 ### Side finding — shuttle footprint (not a bug)
 
@@ -71,6 +181,7 @@ The **cased Spotykach hides the Daisy Seed onboard LED AND the SWD pads** (per [
 make ENGINE=delay TERMINAL=1                 # lean engine, fits at -O2
 make ENGINE=tape  TERMINAL=1 OPT=-Os         # near-full engine, needs -Os
 make ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds TERMINAL=1   # QSPI-execute, unlimited room
+make ENGINE=delay TERMINAL=1 USBDIAG=1        # USB bring-up probe; parks + blinks, does not run
 make engine-delay TERMINAL=1                  # clean build + DFU flash (one-shot)
 make test-hw                                  # host pytest harness over USB-C (skips w/o a device)
 ```
@@ -89,7 +200,8 @@ Platform service under `src/terminal/`, parallel to `src/transport/` (added to t
 | [1] RX ring | `src/terminal/rx_ring.h` | SPSC, `volatile` indices + `spk_dmb()` (inline `dmb 0xF`, no CMSIS include) |
 | [1] TX FIFO | `src/terminal/tx_fifo.h` | 2 KB, single-threaded, `peek`/`commit` so a busy host never loses bytes |
 | [1] line buffer | `src/terminal/line_assembler.h` | 128 B bound; over-long lines swallowed to their `\n`, reported once |
-| [1] USB + pump | `src/terminal/terminal.{h,cpp}` | owns `FS_INTERNAL`, static RX trampoline -> file-scope `g_rx`, non-blocking `flush_tx` |
+| [1] USB + pump | `src/terminal/terminal.{h,cpp}` | owns `FS_INTERNAL`, static RX trampoline -> file-scope `g_rx`, non-blocking `flush_tx` (ping-ponged TX staging) |
+| [1] USB probe | `src/terminal/usb_diag.{h,cpp}` | `UsbDiag` clock/supply/pullup snapshot; pre-Init `USB33RDY` bring-up; read via `query usb` or the `USBDIAG` LED probe |
 | shared state | `src/terminal/term_state.h` | `TermState{ test_mode }`, shared by terminal + dispatch |
 | [2] tokenizer | `src/terminal/command.h` | in-place split, `kMaxArgs = 6` |
 | [2] coercion | `src/terminal/fmt.{h,cpp}` | `parse_f32/i32/deck/onoff` (libc parse ok; only *print* avoids `%f`) |
@@ -98,11 +210,15 @@ Platform service under `src/terminal/`, parallel to `src/transport/` (added to t
 | [3] dispatch | `src/terminal/dispatch.{h,cpp}` | verb table + handlers + `describe`; forwards unknowns to `handle_command` |
 | integration | `src/app.cpp` | `_terminal` member; `init(_engine)` after `Log::StartLog`; `process()` + push `test_mode()` each Loop |
 | `mode test` | `src/ui/core.ui.{h,cpp}` | `set_input_frozen()` gates `read_cv`/`process_gate_in`/the knob apply-pass |
-| host tooling | `tools/` | `skdev/` client lib, `skterm.py` REPL, `conftest.py` + `test_generic.py` + `test_tape.py`, `README.md` |
+| host tooling | `tools/` | `skdev/` client lib, `skterm.py` REPL, `conftest.py` + `test_generic.py` + `test_tape.py` (need a device) + `test_descriptor.py` (does not), `README.md` |
+| off-target tests | `host/test_terminal.cpp` | codec/dispatch/format/ring/FIFO/describe against a mock `IEngine`; no device |
 
 ## Deviations from the design specs (and why)
 
-1. **The terminal owns `FS_INTERNAL` itself; there is no Logger coexistence to manage.** The transport spec's central premise was "the Logger already owns USB-C (internal)", so the terminal must attach only its RX callback and not re-init. But the **Makefile forces `-DINFS_LOG_TARGET=daisy::LOGGER_EXTERNAL`** (overriding `common.h`'s `LOGGER_INTERNAL` default), so the Logger - when present at all (`INFS_LOG`/`DEBUG`) - is on the *external* port. Nothing owns `FS_INTERNAL`, so `Terminal::init()` calls `Init(FS_INTERNAL)` unconditionally (`SPK_TERMINAL_INIT_USB`, default 1). Consequence: replies flow on USB-C, any logs flow on the external port - separate streams, so the host reply stream is clean. The `is_log` (`[`-prefix) filter still works; it just never fires. If a build ever puts the Logger back on the internal port, set `SPK_TERMINAL_INIT_USB=0`.
+1. **The terminal owns the CDC device itself; there is no Logger coexistence to manage.** (The port
+   choice in this item was WRONG - see the resolved section above; the channel is on `FS_EXTERNAL`.
+   Note also that `INFS_LOG=1` is set only under `DEBUG=1`, so a normal build has no logger at all and
+   never brings up a second OTG core.) The transport spec's central premise was "the Logger already owns USB-C (internal)", so the terminal must attach only its RX callback and not re-init. But the **Makefile forces `-DINFS_LOG_TARGET=daisy::LOGGER_EXTERNAL`** (overriding `common.h`'s `LOGGER_INTERNAL` default), so the Logger - when present at all (`INFS_LOG`/`DEBUG`) - is on the *external* port. Nothing owns `FS_INTERNAL`, so `Terminal::init()` calls `Init(FS_INTERNAL)` unconditionally (`SPK_TERMINAL_INIT_USB`, default 1). Consequence: replies flow on USB-C, any logs flow on the external port - separate streams, so the host reply stream is clean. The `is_log` (`[`-prefix) filter still works; it just never fires. If a build ever puts the Logger back on the internal port, set `SPK_TERMINAL_INIT_USB=0`.
 
 2. **`describe` config lines carry no scope token.** The dispatch spec's rendered example shows `config mode deck 0:slice ...`, but its own `parse_describe` sketch reads `tok[2:]` as `int:label` pairs (no scope). Firmware emits the parser-consistent form: `config <name> <i:label>...`. `param` and `query` lines *do* carry scope (`deck`/`global`). The host `parse_describe` was additionally made tolerant of both forms. Verified: a sample of the firmware's exact output round-trips through `parse_describe`.
 
@@ -129,6 +245,10 @@ Rule of thumb: lean SRAM engines fit at -O2, near-full ones need `OPT=-Os`, and 
 ## Verification status
 
 Done (host / build):
+- **Off-target test coverage of everything below the USB transport** (`host/test_terminal.cpp`, run by `make -C host test-terminal`, part of `make -C host test`). The codec, dispatcher, name/describe tables, reply formatter, ring, TX FIFO and line assembler are all hardware-free, so they run on the desktop against a recording mock `IEngine`; only `src/terminal/terminal.cpp` (which owns `daisy::UsbHandle`) is excluded. Covers the tokenizer and its arg limits, CRLF vs bare LF and the over-long-line swallow, ring wraparound/overflow, the TX FIFO's peek/commit discipline and all-or-nothing enqueue, every coercion including its rejections, float formatting by integer decomposition (rounding carry, nan/inf, INT32_MIN, hex), every phase-1 verb bound to the exact `IEngine` call and the exact reply bytes, the full error taxonomy, target-B forwarding, and `describe` (liveness masks honoured, scope tags, CRLF framing, `end` terminator).
+
+- **The firmware/host descriptor loop is closed.** The C++ test writes the exact `describe` block to `host/build/describe_sample.txt`; `tools/test_descriptor.py` parses that file through the real `skdev.descriptor.parse_describe`. It needs no device, so a descriptor format change fails in CI rather than on the bench. `skdev/__init__.py` now re-exports its serial-backed names lazily (PEP 562) so `skdev.descriptor` imports without pyserial.
+
 - Zero-cost-off proven (terminal objects 0 bytes; default binary unchanged).
 
 - Clean compile + link with `TERMINAL=1` on passthrough, delay, tape (`-Os`), mosc (QSPI).
@@ -137,14 +257,25 @@ Done (host / build):
 
 - Fixed a pre-existing `-j` build race (the stamp recipes' `mkdir -p build` vs the core Makefile's plain `mkdir build`): all three stamps now order-only-depend on `$(BUILD_DIR)` instead of each racing to create it.
 
-Not yet done (needs a flashed device - the checks from `terminal-transport.md` "To verify on hardware"):
-- CDC RX re-arm across back-to-back packets (a >64-byte paste arriving intact through the ring).
+Done on hardware (Daisy Pod, macOS, 2026-07-31) - the checks from `terminal-transport.md` "To verify on hardware":
+- `TransmitInternal` cadence with a draining host: the 938-byte `describe` dump (~15 packets) arrives whole and parses, so `flush_tx` neither spins nor corrupts across packets.
 
-- `TransmitInternal` busy-return cadence with a draining vs silent host (confirm `flush_tx` never spins).
+- Enumeration as the host sees it: a `/dev/tty.usbmodem*` node appears and the `tools/` VID-based discovery finds it unaided.
 
-- Enumeration VID/PID as the host sees it (affects the `tools/` port glob).
+- End-to-end command path: connect, `describe`, `caps`, `query`, and a `set`/`get` param round-trip.
 
-- End-to-end `make test-hw` against a real engine (the generic round-trip sweep + `test_tape.py`).
+Not yet done:
+- CDC RX re-arm across back-to-back packets (a >64-byte line arriving intact through the ring; send a >128-char line and expect `err line-too-long`, then a normal command, to prove the swallowed tail is not re-parsed).
+
+- `make test-hw` end to end. Blocked on the descriptor defects, not on the channel: no engine implements `live_params()`, so `describe` over-reports the whole `ParamId` enum and the generic sweep sets params the engine ignores. Fix that first (see the review items) or the run is all false failures.
+
+### Host tooling defects found on first real use (2026-07-31, fixed)
+
+`tools/` had never been executed against a device; `py_compile` catches syntax, not wrong API usage.
+
+- `skdev/protocol.py` `open_serial`: `serial.Serial(..., dtr=True)` raises `ValueError` - `dtr` is a property, not a constructor keyword (pyserial's ctor has `dsrdtr`, which is flow control, a different thing). Fatal: nothing could connect. Now set after opening. Immaterial to this device either way - the firmware's `CDC_SET_CONTROL_LINE_STATE` handler is a no-op - but some hosts gate output on DTR.
+
+- `skterm.py` `_install_completer`: `readline.parse_and_bind("tab: complete")` is GNU-readline syntax, silently ignored by the libedit backend macOS ships, so tab completion did nothing. Now detects the backend and binds `bind ^I rl_complete`.
 
 ## Not in phase 1 (unchanged from the specs)
 

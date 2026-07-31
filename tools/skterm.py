@@ -112,7 +112,13 @@ class Repl:
         if readline is None:
             return
         readline.set_completer(self._vocab)
-        readline.parse_and_bind("tab: complete")
+        # macOS ships readline backed by libedit, which does not understand GNU
+        # readline's "tab: complete" syntax and silently ignores it - completion
+        # would just do nothing. Detect the backend and bind accordingly.
+        if "libedit" in (readline.__doc__ or ""):
+            readline.parse_and_bind("bind ^I rl_complete")
+        else:
+            readline.parse_and_bind("tab: complete")
 
     # --- main loop -----------------------------------------------------------
     def run(self):

@@ -76,6 +76,35 @@ static uint32_t grit_color(const GritMode mode)
     }
 }
 
+#if SPK_TERMINAL && TERM_USBDIAG
+// USB-C bring-up verdict on the panel. Eight LEDs at the top of ring A, read left-to-right along the
+// chain: GREEN = check passed, RED = failed. The SPOTY pad is lit dim white so a diagnostic build is
+// unmistakable. The normal UI is suppressed entirely - this build is for answering one question.
+//
+// The bits, in the order a D+ pullup depends on them (app.cpp packs them). 0-3 and 7 are init-time
+// facts; 4-6 and 8-11 are re-read every loop, because an init snapshot cannot see later damage.
+//   0 clocks configured (System::Init ran ConfigureClocks, not the skip_clocks path)
+//   1 HSI48 ready                       2 USB clock source == HSI48
+//   3 VDD33_USB ready                   4 transceiver powered (GCCFG.PWRDWN)      [live]
+//   5 D+ pullup asserted (DCTL.SDIS clear)                                        [live]
+//   6 VBUS sensing off for this core (GCCFG.VBDEN clear)                          [live]
+//   7 D+ pad still owned by the USB PHY: alternate function, correct AF           [live]
+//   8 D- pad still owned by the USB PHY: alternate function, correct AF           [live]
+//   9 the host has issued a USB bus reset at least once (sticky)                  [live]
+//  10 the host is sending SOF frames (sticky)                                     [live]
+// Bit 9 is weak: the bus reset is transient and the ISR clears GINTSTS before the main loop samples
+// it, so it reads red even on a working link. Bit 10 (SOF) is the reliable "the host is talking to us"
+// signal. Both red = the host has never seen this device at all.
+void CoreUI::_draw_usb_diag()
+{
+    _hw.leds.Set(Hardware::LED_SPOTY_PAD, kWhite, .2f);
+    for (uint8_t i = 0; i < 11; i++) {
+        const bool good = (_usb_diag_bits >> i) & 1u;
+        _hw.leds.Set(static_cast<uint8_t>(Hardware::LED_RING_A + i), good ? kGreen : kRed, .35f);
+    }
+}
+#endif
+
 // Pixel sink for LEDRing::apply() - maps a ring-local pixel index to the physical LED chain.
 // Moved here (the platform) from led.ring.cpp so the ring canvas stays hardware-free.
 static void set_led(Hardware& hw, const uint16_t ring, const uint16_t idx, const int color, const float brightness)
@@ -104,7 +133,11 @@ void CoreUI::render_leds()
     }
 
     _hw.leds.Clear();
+#if SPK_TERMINAL && TERM_USBDIAG
+    _draw_usb_diag();   // diagnostic build: the panel IS the readout; the normal UI is suppressed
+#else
     _draw_leds();
+#endif
     _hw.leds.Show();
 }
 void CoreUI::_draw_leds() 

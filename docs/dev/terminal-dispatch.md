@@ -141,6 +141,7 @@ Deck token is `A`/`B`; global params ignore it (pass `A`). Values are floats unl
 | `query mix` | `mix()` (:142) | `ok <f>` |
 | `query route` | `route()` (:143) | `ok <1/2/3>` |
 | `query gateout <deck>` | `gate_out_triggered(deck)` (:119) | `ok <0/1>` |
+| `query usb` | the `UsbDiag` bring-up snapshot (`src/terminal/usb_diag.h`) | `ok boot=<n> region=<n> clkcfg=<0/1> hsi48=<0/1> usbsel=<n> usb33den=<0/1> usb33rdy=<0/1> phy=<0/1> pullup=<0/1>` |
 | `query <other> <deck>` | forwarded to `handle_command` (:B) | engine-defined |
 | `caps` | `capabilities()` (:49) | `ok 0x<hex>` |
 | `mode test\|run` | sets `TermState::test_mode` (below) | `ok` |

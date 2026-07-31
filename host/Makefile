@@ -45,6 +45,12 @@ GC_CORE_SRC = $(wildcard $(ROOT)/src/engine/graincloud/*.cpp)
 GC_LIB_SRC  = $(GC_CORE_SRC) $(DSP_SRC) $(TRANSPORT_SRC) $(ENGINE_SRC) $(DAISYSP_SRC)
 # The edrums/reso/reverb engines live under src/engine/<name>/ (outside the wildcards above); add for tests.
 DELAY_SRC   = $(ROOT)/src/engine/delay/delay_engine.cpp
+# The terminal channel's hardware-free layers: codec (command.h/fmt), names/describe metadata, reply
+# formatting, and the dispatcher. terminal.cpp is deliberately absent - it owns daisy::UsbHandle and is
+# the only part that needs a device. The ring / TX FIFO / line assembler are header-only.
+TERMINAL_SRC = $(ROOT)/src/terminal/dispatch.cpp $(ROOT)/src/terminal/fmt.cpp \
+               $(ROOT)/src/terminal/names.cpp $(ROOT)/src/terminal/text_sink.cpp \
+               $(ROOT)/src/terminal/usb_diag.cpp
 # qdelay flavor: its feedback diffuser is the header-only src/dsp/diffuser.h, so just the engine .cpp.
 QDELAY_SRC  = $(ROOT)/src/engine/qdelay/qdelay_engine.cpp
 EDRUMS_SRC  = $(ROOT)/src/engine/edrums/edrums_engine.cpp
@@ -94,6 +100,7 @@ TEST_CHORUS  = $(BUILD)/test_chorus
 TEST_FILTER = $(BUILD)/test_filter
 TEST_VOICE   = $(BUILD)/test_voice
 TEST_DELAY   = $(BUILD)/test_delay
+TEST_TERMINAL = $(BUILD)/test_terminal
 TEST_QDELAY  = $(BUILD)/test_qdelay
 TEST_DIFFUSER = $(BUILD)/test_diffuser
 TEST_GRAINCLOUD_KERNEL = $(BUILD)/test_graincloud_kernel
@@ -105,7 +112,7 @@ TEST_CHUCK_PATCH = $(BUILD)/test_chuck_patch
 BENCH_REVERB     = $(BUILD)/bench_reverb
 BENCH_GRAINCLOUD = $(BUILD)/bench_graincloud
 
-.PHONY: all clean run bard-card-check test test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
+.PHONY: all clean run bard-card-check test test-terminal test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
 all: $(TARGET)
 
 $(TARGET): $(SRC) | $(BUILD)
@@ -184,6 +191,16 @@ $(TEST_DELAY): test_delay.cpp $(LIB_SRC) $(DELAY_SRC) $(ROOT)/src/engine/delay/d
 
 $(TEST_QDELAY): test_qdelay.cpp $(LIB_SRC) $(QDELAY_SRC) $(ROOT)/src/engine/qdelay/qdelay_engine.h $(ROOT)/src/dsp/diffuser.h | $(BUILD)
 	$(CXX) $(CXXFLAGS) test_qdelay.cpp $(LIB_SRC) $(QDELAY_SRC) -o $@
+
+# The SPK_TERMINAL command channel, off-target. Everything below the USB transport is hardware-free, so
+# the codec/dispatch/formatting layers compile and run on the desktop against a mock IEngine - only
+# src/terminal/terminal.cpp (which owns daisy::UsbHandle) is excluded. Needs -DSPK_TERMINAL=1 because
+# the whole feature, including the IEngine hooks it calls, is compiled out otherwise. Links version.cpp
+# for the `describe` banner (version.h carries host-safe fallbacks for the build-time defines).
+# No engine sources: the mock IS the engine under test here.
+$(TEST_TERMINAL): test_terminal.cpp $(TERMINAL_SRC) $(ROOT)/src/version.cpp \
+                  $(ROOT)/src/engine/terminal_io.h $(ROOT)/src/engine/iengine.h | $(BUILD)
+	$(CXX) $(CXXFLAGS) -Wno-unknown-pragmas -DSPK_TERMINAL=1 test_terminal.cpp $(TERMINAL_SRC) $(ROOT)/src/version.cpp -o $@
 
 # The diffuser is header-only (src/dsp/diffuser.h, no JUCE, no heap in the audio path), so its test
 # needs no other sources - just the include path.
@@ -269,7 +286,7 @@ run: $(TARGET)
 
 # `test` runs both engine harnesses. Both inject the transport via EngineContext (granular drives the
 # real platform Transport; edrums uses a small stub ITransport) - the post-transport-decoupling way.
-test: test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-softcut test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
+test: test-terminal test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-softcut test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
 
 test-granular: $(TEST)
 	./$(TEST)
@@ -291,6 +308,9 @@ test-reverb: $(TEST_REVERB)
 
 test-delay: $(TEST_DELAY)
 	./$(TEST_DELAY)
+
+test-terminal: $(TEST_TERMINAL)
+	./$(TEST_TERMINAL)
 
 test-qdelay: $(TEST_QDELAY)
 	./$(TEST_QDELAY)

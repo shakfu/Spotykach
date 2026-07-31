@@ -85,6 +85,75 @@ class AppImpl {
     }
 #endif
 
+#if SPK_TERMINAL && TERM_USBDIAG
+    // USB bring-up probe (build: make ENGINE=<e> TERMINAL=1 USBDIAG=1). When the port never enumerates
+    // there is no channel to report over, so the verdict goes to the panel LEDs (CoreUI::_draw_usb_diag,
+    // readable on a cased unit) and, redundantly, as a blink code on the Daisy onboard LED.
+    //
+    // NON-BLOCKING and non-exclusive: called once per Loop() iteration, it only drives the onboard LED
+    // (which the app otherwise never touches) off wall-clock milliseconds. The app runs normally -
+    // panel, audio, and crucially the boot-button DFU escape hatch (the 3s-held check below, and the
+    // press-release reset in Hardware::ProcessDigitalControls) all stay live. An earlier version of
+    // this parked in Init() instead and took the escape hatch with it; do not reintroduce that.
+    //
+    // The onboard-LED blink covers the first six checks only (ONE blink = bad, TWO = good, in the order
+    // a pullup depends on them: clocks configured, HSI48, USB clock source, VDD33_USB, transceiver
+    // powered, D+ pullup asserted). The panel shows all eleven bits at once - see _draw_usb_diag for
+    // the full legend, including the pad-ownership and host-activity bits that identified the wrong-port
+    // fault on 2026-07-31.
+    void usb_diag_tick() {
+        static constexpr int kMaxSeg = 6 * (2 * 2) + 6 + 1;   // worst case: 2 blinks/group + gaps
+        static uint16_t seg_ms[kMaxSeg];
+        static bool     seg_on[kMaxSeg];
+        static int      seg_n = 0;
+        static int      seg_i = 0;
+        static uint32_t seg_start = 0;
+        static bool     started = false;
+
+        // The panel readout: the cased Spotykach hides the onboard LED, so push the verdict to the
+        // WS2812s too (CoreUI::_draw_usb_diag renders it and suppresses the normal UI). Cheap enough to
+        // repush every iteration; the snapshot never changes after init().
+        {
+            const UsbDiag& u = _terminal.refresh_usb_diag();   // re-read; an init snapshot hides later damage
+            _ui.set_usb_diag(static_cast<uint16_t>(
+                  (u.clocks_configured    ? 1u : 0u) << 0
+                | (u.hsi48_ready          ? 1u : 0u) << 1
+                | (u.usb_clk_source == 3  ? 1u : 0u) << 2
+                | (u.usb33_ready          ? 1u : 0u) << 3
+                | (u.transceiver_on       ? 1u : 0u) << 4
+                | (u.pullup_asserted      ? 1u : 0u) << 5
+                | (u.vbus_sensing         ? 0u : 1u) << 6   // green when sensing is OFF
+                | (u.dp_af_ok             ? 1u : 0u) << 7
+                | (u.dm_af_ok             ? 1u : 0u) << 8
+                | (u.usb_reset_seen       ? 1u : 0u) << 9
+                | (u.sof_seen             ? 1u : 0u) << 10));
+        }
+
+        if (!started) {   // build the blink schedule once, from the snapshot init() captured
+            const auto& u = _terminal.usb_diag();
+            const bool  bits[6] = { u.clocks_configured, u.hsi48_ready, u.usb_clk_source == 3,
+                                    u.usb33_ready, u.transceiver_on, u.pullup_asserted };
+            for (bool good : bits) {
+                for (int i = 0; i < (good ? 2 : 1); i++) {
+                    seg_ms[seg_n] = 140; seg_on[seg_n++] = true;    // blink on
+                    seg_ms[seg_n] = 220; seg_on[seg_n++] = false;   // blink off
+                }
+                seg_ms[seg_n] = 700; seg_on[seg_n++] = false;       // gap between groups
+            }
+            seg_ms[seg_n] = 2500; seg_on[seg_n++] = false;          // gap between repeats
+            seg_start = daisy::System::GetNow();
+            started = true;
+        }
+
+        const uint32_t now = daisy::System::GetNow();
+        if (now - seg_start >= seg_ms[seg_i]) {
+            seg_start = now;
+            seg_i = (seg_i + 1) % seg_n;
+        }
+        _hw.seed.SetLed(seg_on[seg_i]);
+    }
+#endif
+
     void ProcessAudio(AudioHandle::InputBuffer  in,
                       AudioHandle::OutputBuffer out,
                       size_t                    size);
@@ -265,6 +334,9 @@ void AppImpl::Loop()
         // physical input path (knobs/CV/gate) so terminal-injected stimulus is the only engine driver.
         _terminal.process();
         _ui.set_input_frozen(_terminal.test_mode());
+#if TERM_USBDIAG
+        usb_diag_tick();   // blink the OTG_FS bring-up verdict on the onboard LED; non-blocking
+#endif
 #endif
 
         _ui.process();

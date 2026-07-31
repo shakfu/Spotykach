@@ -66,8 +66,17 @@ def find_port(explicit=None):
 
 
 def open_serial(port, timeout=1.0):
-    """Open the CDC port with DTR asserted. Returns a pyserial ``Serial``."""
-    return serial.Serial(port, BAUD, timeout=timeout, dtr=True)
+    """Open the CDC port with DTR asserted. Returns a pyserial ``Serial``.
+
+    ``dtr`` is a property, not a constructor keyword (passing it to ``Serial()``
+    raises ValueError), so it is set after the port is open. For this device it is
+    cosmetic anyway - the firmware's CDC control handler ignores line state
+    (``CDC_SET_CONTROL_LINE_STATE`` is a no-op in ``usbd_cdc_if.c``) - but some
+    hosts and USB-serial bridges gate output on it, so assert it explicitly.
+    """
+    ser = serial.Serial(port, BAUD, timeout=timeout)
+    ser.dtr = True
+    return ser
 
 
 def is_log(line):

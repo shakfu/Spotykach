@@ -16,6 +16,7 @@
 #include "terminal/term_state.h"   // TermState (shared with dispatch.cpp)
 #include "terminal/tx_fifo.h"
 #include "terminal/line_assembler.h"
+#include "terminal/usb_diag.h"     // UsbDiag - OTG_FS bring-up probe (docs/dev/terminal-impl.md)
 
 #include "hid/usb.h"               // daisy::UsbHandle
 
@@ -39,6 +40,14 @@ class Terminal : public ITextOut {
     // Read-only for the platform's `mode test` input isolation (app.cpp pushes it to CoreUI).
     bool test_mode() const { return _state.test_mode; }
 
+    // The OTG_FS bring-up snapshot taken during init(). Readable without a working USB port (the
+    // TERM_USBDIAG probe in app.cpp), and reported by `query usb` once the port does come up.
+    const UsbDiag& usb_diag() const { return _state.usb; }
+
+    // Same, but re-reading everything that can change after init (core state, D+/D- pad ownership,
+    // sticky host activity). Call from the main loop; see usb_diag.h for why a snapshot is not enough.
+    const UsbDiag& refresh_usb_diag() { usb_diag_refresh(_state.usb); return _state.usb; }
+
   private:
     void on_line(char* line, size_t len);   // tokenize + dispatch one complete line
     void flush_tx();                        // drain the TX FIFO, non-blocking
@@ -51,7 +60,15 @@ class Terminal : public ITextOut {
     TxFifo           _tx;
     TermState        _state;
     IEngine*         _engine = nullptr;
-    uint8_t          _scratch[64];   // one USB FS packet per flush; describe drains over iterations
+
+    // TX staging, ping-ponged. CDC_Transmit_FS returns OK once the packet is QUEUED; in non-DMA mode
+    // the HAL copies out of this buffer later, from the TX-FIFO-empty interrupt. The main loop runs far
+    // faster than a USB frame, so a single buffer would be refilled while the peripheral was still
+    // reading it. Two slots, swapped only on a successful transmit, make that impossible: a transmit
+    // only succeeds when TxState is clear, which proves the other slot's transfer has completed.
+    static constexpr size_t kScratch = 64;   // one USB FS packet per flush
+    uint8_t          _scratch[2][kScratch];
+    uint8_t          _slot = 0;              // the slot the next peek() stages into
 };
 
 }  // namespace spotykach

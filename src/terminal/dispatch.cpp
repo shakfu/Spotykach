@@ -170,6 +170,33 @@ void verb_query(const Command& c, Ctx& x) {
         if (c.argc < 3) { x.reply.err("no-arg"); return; }
         DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
         x.reply.ok_i32(x.engine.gate_out_triggered(d) ? 1 : 0);
+    } else if (!strcmp(s, "usb")) {
+        // The USB bring-up snapshot (usb_diag.h). Reaching this at all means enumeration worked, so it
+        // is a confirmation readout rather than a diagnosis - the diagnosis path is the TERM_USBDIAG
+        // panel probe. Key=value so the host can parse it without positional assumptions.
+        //
+        // Refresh first: the live fields (core state, pad ownership) and the sticky host-activity bits
+        // are otherwise frozen at what init() captured, which is before the host has enumerated - so
+        // sof/rst would always read 0 in a build without TERM_USBDIAG driving the refresh from Loop().
+        // We are on the main loop here, same as every other consumer, so this is safe.
+        usb_diag_refresh(x.state.usb);
+        const UsbDiag& u = x.state.usb;
+        TextSink& r = x.reply;
+        r.str("ok boot=");     r.append_i32(u.boot_version);
+        r.str(" region=");     r.append_i32(u.memory_region);
+        r.str(" clkcfg=");     r.append_i32(u.clocks_configured ? 1 : 0);
+        r.str(" hsi48=");      r.append_i32(u.hsi48_ready ? 1 : 0);
+        r.str(" usbsel=");     r.append_i32(u.usb_clk_source);
+        r.str(" usb33den=");   r.append_i32(u.usb33_detector ? 1 : 0);
+        r.str(" usb33rdy=");   r.append_i32(u.usb33_ready ? 1 : 0);
+        r.str(" phy=");        r.append_i32(u.transceiver_on ? 1 : 0);
+        r.str(" pullup=");     r.append_i32(u.pullup_asserted ? 1 : 0);
+        r.str(" vbussense=");  r.append_i32(u.vbus_sensing ? 1 : 0);
+        r.str(" dp=");         r.append_i32(u.dp_af_ok ? 1 : 0);
+        r.str(" dm=");         r.append_i32(u.dm_af_ok ? 1 : 0);
+        r.str(" rst=");        r.append_i32(u.usb_reset_seen ? 1 : 0);
+        r.str(" sof=");        r.append_i32(u.sof_seen ? 1 : 0);
+        r.str("\r\n");
     } else {
         // Unknown query name -> engine-specific (target B). handle_command returns true if recognized.
         CommandView view{ c.argv, c.argc };
@@ -232,6 +259,7 @@ void verb_describe(const Command&, Ctx& x) {
     r.line("query mix global");
     r.line("query route global");
     r.line("query gateout deck");
+    r.line("query usb global");
 
     r.str("caps ");
     r.append_hex(x.engine.capabilities());

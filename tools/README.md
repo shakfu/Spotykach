@@ -25,6 +25,7 @@ tools/
   conftest.py            # pytest fixtures: device, descriptor, test_mode
   test_generic.py        # cross-engine parameter sweep driven by describe
   test_tape.py           # example per-engine test
+  test_descriptor.py     # parser check against real firmware output - NO device needed
   requirements.txt       # pyserial>=3.5
 ```
 
@@ -61,6 +62,12 @@ cd tools && python -m pytest -q
 * With **no device attached**, port discovery raises `Timeout`; the `device`
   fixture turns that into `pytest.skip`, so the run no-ops rather than fails.
   CI without hardware is therefore safe.
+* `test_descriptor.py` runs **with or without** a device: it parses the exact
+  `describe` block the firmware emits, captured by the off-target C++ test
+  (`make -C host test-terminal` writes `host/build/describe_sample.txt`). That
+  keeps `parse_describe` honest against real device output instead of a
+  hand-written sample. It skips if the sample has never been generated, and it
+  does not need pyserial - `skdev.descriptor` imports standalone.
 
 The device port is auto-discovered by USB VID (`0x0483`, STMicroelectronics),
 with a per-platform device-glob fallback (`/dev/ttyACM*` on Linux,

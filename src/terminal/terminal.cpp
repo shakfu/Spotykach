@@ -27,16 +27,48 @@ static RxRing g_rx;
 #define SPK_TERMINAL_INIT_USB 1
 #endif
 
+// Whether to bring the VDD33_USB level detector up (and wait for USB33RDY) before UsbHandle::Init.
+// See usb_diag.h. Default on: it is strictly an ordering correction, and it is the cheapest test of
+// whether the missing D+ pullup is a transceiver-supply problem. Set 0 to restore libDaisy's order.
+#ifndef SPK_TERMINAL_USB33_PREINIT
+#define SPK_TERMINAL_USB33_PREINIT 1
+#endif
+
+// Which USB peripheral the channel lives on. Defined (with its default) in usb_diag.h so the probe and
+// the channel cannot disagree about which core they mean. Default = FS_EXTERNAL: the Spotykach's panel
+// USB-C is wired to OTG_HS (PB14/PB15), not to the Seed's own OTG_FS pins. `TERMPORT=int` for a bare
+// Seed or Pod.
+
+#if SPK_TERMINAL_PORT_EXTERNAL
+static constexpr auto kUsbPeriph = daisy::UsbHandle::FS_EXTERNAL;
+#else
+static constexpr auto kUsbPeriph = daisy::UsbHandle::FS_INTERNAL;
+#endif
+
 void Terminal::RxTrampoline(uint8_t* buf, uint32_t* len) {   // USB IRQ context
     g_rx.push(buf, static_cast<size_t>(*len));               // copy out, publish, return - nothing else
 }
 
 void Terminal::init(IEngine& engine) {
     _engine = &engine;
+
+    // Probe the clock/supply preconditions BEFORE the device is brought up, while they still reflect
+    // what the boot path left behind. See usb_diag.h for why this is not answerable from source alone.
+    usb_diag_capture_pre(_state.usb);
+
 #if SPK_TERMINAL_INIT_USB
-    _usb.Init(daisy::UsbHandle::FS_INTERNAL);   // no logger owns the internal port here; we do
+#if SPK_TERMINAL_USB33_PREINIT
+    // Validate the VDD33_USB transceiver supply before anything asserts DevConnect. libDaisy's
+    // UsbHandle::Init enables the level detector only AFTER InitFS() has already connected, and never
+    // waits for USB33RDY, so the core can be told to present a pullup before its supply is ready.
+    _state.usb.usb33_ready   = usb_supply_bringup();
+    _state.usb.usb33_detector = true;
 #endif
-    _usb.SetReceiveCallback(&Terminal::RxTrampoline, daisy::UsbHandle::FS_INTERNAL);
+    _usb.Init(kUsbPeriph);   // nothing else owns this port in this firmware; we do
+#endif
+    _usb.SetReceiveCallback(&Terminal::RxTrampoline, kUsbPeriph);
+
+    usb_diag_capture_post(_state.usb);   // transceiver powered? pullup presented to the host?
 }
 
 void Terminal::write(const char* s, size_t n) {
@@ -58,6 +90,11 @@ void Terminal::process() {
     if (!_engine) return;
 
     if (g_rx.take_overflow()) emit_err("overflow");   // report a dropped RX burst before the next line
+
+    // A reply was dropped because the TX FIFO was full. Report it rather than swallowing it: the host
+    // is synchronous (one command outstanding), so a silently lost reply reads as an unexplained
+    // timeout. If this enqueue does not fit either, TxFifo re-latches and we retry next iteration.
+    if (_tx.take_overflow()) emit_err("tx-overflow");
 
     uint8_t chunk[64];
     size_t  n;
@@ -81,13 +118,21 @@ void Terminal::process() {
 }
 
 void Terminal::flush_tx() {
-    // A dropped reply (TX FIFO was full) is unrecoverable mid-stream; clear the latch so it does not
-    // wedge. A connected, draining host never hits this - the FIFO holds a full describe dump.
-    _tx.take_overflow();
-
-    size_t n = _tx.peek(_scratch, sizeof(_scratch));
-    if (n && _usb.TransmitInternal(_scratch, n) == daisy::UsbHandle::Result::OK)
-        _tx.commit(n);   // advance only on a successful transmit; retry next process() otherwise
+    // Stage into the slot that is definitely not in flight (see terminal.h). A successful transmit
+    // means the stack accepted this slot AND had already finished with the other one, so it is only
+    // then that we advance the FIFO and swap. A busy return leaves both the FIFO and the in-flight
+    // slot untouched, so the next process() simply retries.
+    uint8_t* buf = _scratch[_slot];
+    size_t   n   = _tx.peek(buf, kScratch);
+#if SPK_TERMINAL_PORT_EXTERNAL
+    const auto res = n ? _usb.TransmitExternal(buf, n) : daisy::UsbHandle::Result::ERR;
+#else
+    const auto res = n ? _usb.TransmitInternal(buf, n) : daisy::UsbHandle::Result::ERR;
+#endif
+    if (n && res == daisy::UsbHandle::Result::OK) {
+        _tx.commit(n);
+        _slot ^= 1;
+    }
 }
 
 }  // namespace spotykach
