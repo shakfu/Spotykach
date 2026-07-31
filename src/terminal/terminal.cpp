@@ -7,6 +7,8 @@
 #include "terminal/rx_ring.h"
 #include "terminal/dispatch.h"
 
+#include "sys/system.h"   // daisy::System::GetNow - the `mode test` dead-man switch
+
 // Size-optimize the whole terminal service: it is control-plane glue (line parsing, dispatch,
 // formatting), not per-sample DSP, so -Os reclaims SRAM_EXEC. Same idiom as core.ui.*.cpp.
 #pragma GCC optimize("Os")
@@ -32,6 +34,14 @@ static RxRing g_rx;
 // whether the missing D+ pullup is a transceiver-supply problem. Set 0 to restore libDaisy's order.
 #ifndef SPK_TERMINAL_USB33_PREINIT
 #define SPK_TERMINAL_USB33_PREINIT 1
+#endif
+
+// How long `mode test` may go without a command before the platform takes its knobs back. Test mode
+// freezes physical input, so a harness that crashes or unplugs mid-run would otherwise leave the
+// instrument inert with no recovery short of a power cycle. Generous enough that a live session is
+// never interrupted - any command resets the timer - and short enough to be forgiving of a crash.
+#ifndef SPK_TERMINAL_TEST_MODE_TIMEOUT_MS
+#define SPK_TERMINAL_TEST_MODE_TIMEOUT_MS 30000
 #endif
 
 // Which USB peripheral the channel lives on. Defined (with its default) in usb_diag.h so the probe and
@@ -82,6 +92,7 @@ void Terminal::emit_err(const char* reason) {
 
 void Terminal::on_line(char* line, size_t len) {
     (void)len;
+    _state.last_cmd_ms = daisy::System::GetNow();   // feed the `mode test` dead-man switch
     TextSink sink(*this);
     dispatch_line(line, *_engine, sink, _state);
 }
@@ -95,6 +106,14 @@ void Terminal::process() {
     // is synchronous (one command outstanding), so a silently lost reply reads as an unexplained
     // timeout. If this enqueue does not fit either, TxFifo re-latches and we retry next iteration.
     if (_tx.take_overflow()) emit_err("tx-overflow");
+
+    // Dead-man switch: hand physical input back if a test session went silent (see term_state.h).
+    // Reverting is silent - the protocol is one reply per command, so an unsolicited line here would
+    // desynchronise a host that later reconnects.
+    if (_state.test_mode
+        && (daisy::System::GetNow() - _state.last_cmd_ms) > SPK_TERMINAL_TEST_MODE_TIMEOUT_MS) {
+        _state.test_mode = false;
+    }
 
     uint8_t chunk[64];
     size_t  n;

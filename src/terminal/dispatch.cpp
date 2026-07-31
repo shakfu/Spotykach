@@ -165,7 +165,10 @@ void verb_query(const Command& c, Ctx& x) {
     } else if (!strcmp(s, "mix")) {
         x.reply.ok_f32(x.engine.mix());
     } else if (!strcmp(s, "route")) {
-        x.reply.ok_i32(static_cast<int32_t>(x.engine.route()));
+        // Report the SELECTOR encoding `config route` accepts, not the raw Route enum - the two differ,
+        // and describe publishes only the selector labels. Without this, `config route A 0` reads back
+        // as 2 and a host cannot round-trip it.
+        x.reply.ok_i32(route_to_selector(x.engine.route()));
     } else if (!strcmp(s, "gateout")) {
         if (c.argc < 3) { x.reply.err("no-arg"); return; }
         DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
@@ -224,16 +227,29 @@ void verb_help(const Command&, Ctx& x) {
 void verb_describe(const Command&, Ctx& x) {
     TextSink& r = x.reply;
 
+    const IEngine::ParamMask  pmask = x.engine.live_params();
+    const IEngine::ConfigMask cmask = x.engine.live_configs();
+
+    // Has this engine actually narrowed its liveness masks, or is it still on the "all live" default?
+    // A host sweep must know: with the default, describe lists ids the engine never reads, so a
+    // read-back mismatch is descriptor noise rather than a defect. Reported so the harness can skip
+    // instead of emitting a wall of false failures.
+    const bool masked = (pmask != ~IEngine::ParamMask{0})
+                     || (cmask != static_cast<IEngine::ConfigMask>(~IEngine::ConfigMask{0}));
+
     r.str("descr engine=");
     r.str(infrasonic::engine_name());
     r.str(" version=");
     r.str(infrasonic::firmware_version());
+    r.str(" masked=");
+    r.append_i32(masked ? 1 : 0);
     r.str("\r\n");
 
-    const IEngine::ParamMask pmask = x.engine.live_params();
     for (uint32_t i = 0; i < static_cast<uint32_t>(ParamId::Count); ++i) {
         if (!(pmask & (1u << i))) continue;
         ParamId id = static_cast<ParamId>(i);
+        // Never advertise a param the platform keeps to itself - see param_is_platform_owned().
+        if (param_is_platform_owned(id)) continue;
         r.str("param ");
         r.str(param_name(id));
         r.str(param_is_global(id) ? " global " : " deck ");
@@ -242,7 +258,6 @@ void verb_describe(const Command&, Ctx& x) {
         r.str("\r\n");
     }
 
-    const IEngine::ConfigMask cmask = x.engine.live_configs();
     for (uint32_t i = 0; i < static_cast<uint32_t>(ConfigId::Count); ++i) {
         if (!(cmask & (1u << i))) continue;
         ConfigId id = static_cast<ConfigId>(i);

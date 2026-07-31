@@ -46,6 +46,25 @@ public:
 
     Capabilities capabilities() const override { return CapOwnDisplay | CapDualDeck; }
 
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md). set_param stores every id blindly
+    // into _param[], so without these the descriptor would advertise all 24 and a host sweep would
+    // "pass" on ids this engine never reads - asserting nothing. These are the ids process() consumes:
+    // POS=feedback, ENV=feedback tone, SIZE=division, SPEED, MIX, MODAMP=mod depth.
+    ParamMask live_params() const override {
+        return (1u << static_cast<uint32_t>(ParamId::Pos))
+             | (1u << static_cast<uint32_t>(ParamId::Env))
+             | (1u << static_cast<uint32_t>(ParamId::Size))
+             | (1u << static_cast<uint32_t>(ParamId::Speed))
+             | (1u << static_cast<uint32_t>(ParamId::Mix))
+             | (1u << static_cast<uint32_t>(ParamId::ModAmp));
+    }
+    ConfigMask live_configs() const override {
+        return static_cast<ConfigMask>((1u << static_cast<uint32_t>(ConfigId::Route))
+                                     | (1u << static_cast<uint32_t>(ConfigId::Mode)));
+    }
+#endif
+
     void  set_param(ParamId id, DeckRef::Ref deck, float value) override;
     float param(ParamId id, DeckRef::Ref deck) const override;
     void  set_mod_speed(DeckRef::Ref deck, float value, bool sync) override; // MODFREQ -> mod LFO rate

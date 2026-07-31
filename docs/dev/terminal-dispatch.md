@@ -139,7 +139,7 @@ Deck token is `A`/`B`; global params ignore it (pass `A`). Values are floats unl
 | `fx flux\|grit <deck> on\|off` | `set_fx(deck, kind, on)` (:96) | `ok` |
 | `query empty <deck>` | `audio_is_empty(deck)` (:122) | `ok <0/1>` |
 | `query mix` | `mix()` (:142) | `ok <f>` |
-| `query route` | `route()` (:143) | `ok <1/2/3>` |
+| `query route` | `route()` (:143), mapped to the **selector** encoding | `ok <0/1/2>` |
 | `query gateout <deck>` | `gate_out_triggered(deck)` (:119) | `ok <0/1>` |
 | `query usb` | the `UsbDiag` bring-up snapshot (`src/terminal/usb_diag.h`) | `ok boot=<n> region=<n> clkcfg=<0/1> hsi48=<0/1> usbsel=<n> usb33den=<0/1> usb33rdy=<0/1> phy=<0/1> pullup=<0/1>` |
 | `query <other> <deck>` | forwarded to `handle_command` (:B) | engine-defined |
@@ -188,6 +188,14 @@ The platform must consult it at exactly the points where physical input reaches 
 | knob/pot -> engine params in the UI tick | `src/app.cpp:296` (`_ui.tick()`) | the pot-apply pass that calls `set_param` |
 | CV jack reads -> engine | `src/app.cpp:297` (`_ui.read_cv()`) | the `cv_*` forwarding |
 | gate-in -> engine | `src/app.cpp:123` (`process_gate_in`) | the `on_gate_trigger` forwarding |
+| panel switches -> engine config | `src/ui/core.ui.cpp` (`_process_switches`) | the whole pass |
+
+The switch row is not optional, contrary to this spec's original "pads/switches can stay live
+(harmless)". Switches **assert** their position every iteration rather than reacting to a change, so an
+ungated pass overwrites any `config` the terminal sets within a millisecond - `config route A 0`
+followed by `query route` returns the switch's value, and `set_config` keeps reporting `changed=1`
+because the value really is changing back each pass. Found on hardware, 2026-07-31. Pads remain
+ungated: they are event-driven, so they only perturb a test if someone physically touches the panel.
 
 These are the only three sites; each is a single early-return guarded by `if (_terminal.test_mode())`. Pads/switches driven from the same UI can stay live (harmless) or be gated too - a follow-up detail, not a phase-1 blocker. This is the whole of the "test mode" mechanism: no output arbitration, no per-pin ownership.
 
@@ -212,15 +220,27 @@ A line-per-item block, machine-parseable, terminated by `end` so the host knows 
 
 ```
 > describe
-descr engine=tape version=0.9.3-tape
-param feedback deck 0..1
+descr engine=tape version=0.9.3-tape masked=1
 param size deck 0..1
-param tempo global 40..300
-config mode deck 0:slice 1:reel 2:drift
+param speed deck 0..1
+param crossfade global 0..1
+config route 0:stereo 1:dmono 2:genstereo
 query empty deck
 caps 0x00000133
 end
 ```
+
+Three corrections to the original sketch, all found by running it:
+
+- **`masked=<0|1>`** on the `descr` line reports whether the engine narrowed `live_params()`/
+  `live_configs()`. With `masked=0` the descriptor is the entire `ParamId` enum and a round-trip sweep
+  proves nothing, so the host harness skips instead of emitting false failures.
+- **No `tempo`.** `Tempo`, `KeyInterval` and `ModSpeed` are platform-owned - the first two live in the
+  Transport service, the third arrives via `set_mod_speed()` - so `set_param` never sees them and
+  advertising them made the sweep assert on values that went nowhere. With them gone, every advertised
+  param is uniformly `0..1`; the old `40..300` and `1..64` ranges were display units the setter never
+  took, which is precisely why they were wrong.
+- **`config` lines carry no scope token**, matching the parser (`config <name> <i:label>...`).
 
 Line tags (`descr`/`param`/`config`/`query`/`caps`/`end`) keep it greppable and let the host build its param map, ranges, and autocompletion without positional parsing. The `query` lines list the platform-known state names plus any an engine advertises (a later `describe` hook into `handle_command` can enumerate engine-specific queries; phase 1 lists the platform set).
 

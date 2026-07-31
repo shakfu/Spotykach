@@ -77,3 +77,32 @@ def test_round_trip_is_lossless_for_known_tags(descr):
     assert counted == len([ln for ln in raw if ln.strip()]), (
         "an unrecognized tag appeared in describe output; teach parse_describe about it"
     )
+
+
+def test_masked_flag_is_parsed(descr):
+    """The generic sweep gates on this, so a parse failure would silently disable it.
+
+    The sample is generated from a mock engine on the all-live default, so masked
+    is False here - the assertion that matters is that the field parsed at all.
+    """
+    assert isinstance(descr.masked, bool)
+
+
+def test_platform_owned_params_are_not_advertised(descr):
+    """Tempo/KeyInterval/ModSpeed never reach IEngine::set_param.
+
+    Advertising them made the generic sweep set values that went nowhere and then
+    assert on whatever the engine happened to store. See param_is_platform_owned().
+    """
+    for name in ("tempo", "keyinterval", "modspeed"):
+        assert name not in descr.params, "{} must not be advertised".format(name)
+
+
+def test_every_advertised_param_is_normalized(descr):
+    """With the platform-owned ids gone, the engine surface is uniformly 0..1.
+
+    A non-normalized range would mean an id whose set_param units differ from its
+    declared ones - exactly the defect that made tempo unusable.
+    """
+    for p in descr.params.values():
+        assert (p.lo, p.hi) == (0.0, 1.0), "{} declares {}..{}".format(p.name, p.lo, p.hi)

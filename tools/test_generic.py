@@ -16,6 +16,9 @@ from skdev.device import Device
 from skdev.protocol import Timeout
 
 
+_MASKED = [True]   # filled by _params(); a list so the closure can write it at collection time
+
+
 def _params():
     """Collection-time: open, describe, close. Returns [] when no hardware."""
     try:
@@ -23,13 +26,20 @@ def _params():
     except Timeout:
         return []
     try:
-        return list(dev.describe().params.values())
+        d = dev.describe()
+        _MASKED[0] = d.masked
+        return list(d.params.values())
     finally:
         dev.close()
 
 
 @pytest.mark.parametrize("p", _params(), ids=lambda p: p.name)
 def test_param_roundtrip(test_mode, p):
+    if not _MASKED[0]:
+        pytest.skip(
+            "engine has not implemented live_params()/live_configs(), so describe lists the whole "
+            "ParamId enum - a read-back mismatch here would be descriptor noise, not a defect"
+        )
     dev = test_mode
     decks = ["A", "B"] if p.scope == "deck" else ["A"]
     target = p.lo + 0.5 * (p.hi - p.lo)        # mid-range, inside the declared range

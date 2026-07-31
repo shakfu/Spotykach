@@ -46,6 +46,28 @@ public:
 
     Capabilities capabilities() const override { return CapOwnDisplay | CapDualDeck | CapAux | CapAltPos; }
 
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md) - the ids this engine actually
+    // consumes, so a host sweep exercises only real parameters. ModSpeed is deliberately absent: it
+    // arrives via set_mod_speed(), not set_param, and is platform-owned as far as describe is concerned.
+    ParamMask live_params() const override {
+        return (1u << static_cast<uint32_t>(ParamId::Pos))
+             | (1u << static_cast<uint32_t>(ParamId::Env))
+             | (1u << static_cast<uint32_t>(ParamId::Size))
+             | (1u << static_cast<uint32_t>(ParamId::Speed))
+             | (1u << static_cast<uint32_t>(ParamId::Mix))
+             | (1u << static_cast<uint32_t>(ParamId::ModAmp))
+             | (1u << static_cast<uint32_t>(ParamId::AltPos))
+             | (1u << static_cast<uint32_t>(ParamId::Aux))
+             | (1u << static_cast<uint32_t>(ParamId::Crossfade))
+             | (1u << static_cast<uint32_t>(ParamId::GritIntensity))
+             | (1u << static_cast<uint32_t>(ParamId::GritMix));
+    }
+    ConfigMask live_configs() const override {
+        return static_cast<ConfigMask>(1u << static_cast<uint32_t>(ConfigId::Route));
+    }
+#endif
+
     void  set_param(ParamId id, DeckRef::Ref d, float v) override;
     float param(ParamId id, DeckRef::Ref d) const override;
     void  set_mod_speed(DeckRef::Ref d, float v, bool sync) override; // MODFREQ -> tape wow/flutter rate

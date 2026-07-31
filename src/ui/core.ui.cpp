@@ -641,6 +641,14 @@ void CoreUI::_process_ui_queue()
 // Switchess ////////////////////////////////
 void CoreUI::_process_switches()
 {
+#if SPK_TERMINAL
+    // `mode test`: unlike knobs (pickup-gated) or CV/gate (edge-driven), the panel switches ASSERT
+    // their position on every iteration - so without this guard any config the terminal sets is
+    // overwritten within a millisecond, and `config route/mode/...` cannot be tested at all. Freezing
+    // is safe to release: on `mode run` the next pass re-applies the physical positions, so the panel
+    // silently takes back control.
+    if (_input_frozen) return;
+#endif
     // construct into 8-bit set from inverted bitmask state
     // (all inputs are inverted due to pullups)
     std::bitset<8> sr1 = ~_hw.GetShiftRegState(0);

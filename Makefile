@@ -516,8 +516,16 @@ all: check-boundary
 # USB-C CDC port via tools/skdev. Distinct from `test` (off-target host/ unit tests) - it needs real
 # hardware, and no-ops (pytest.skip) when no device is attached, so it is safe in a hardware-free CI.
 .PHONY: test-hw
+# Host-side Python for the on-target harness. Prefers the project venv (this repo uses uv, which
+# creates .venv), then uv itself, then a bare python3 - a plain `python3` is usually the SYSTEM
+# interpreter, which has neither pyserial nor pytest. Absolute path because the recipe cd's into tools/.
+# Override for anything unusual: `make test-hw PYTHON=/path/to/python`.
+PYTHON ?= $(shell if [ -x "$(CURDIR)/.venv/bin/python" ]; then echo "$(CURDIR)/.venv/bin/python"; \
+                  elif command -v uv >/dev/null 2>&1; then echo "uv run python"; \
+                  else echo python3; fi)
+
 test-hw:
-	cd tools && python3 -m pytest -q
+	cd tools && $(PYTHON) -m pytest -q
 
 # One-shot variant flash: clean -> build -> flash over DFU. Put the device in DFU mode first
 # (hold Reset ~3s until the bottom pad LEDs breathe white), then `make granular` / `make passthrough`.

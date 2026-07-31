@@ -534,7 +534,8 @@ void test_dispatch_observation() {
     check_eq(run(e, "query empty A"), "ok 0\r\n", "query empty A");
     check_eq(run(e, "query empty B"), "ok 1\r\n", "query empty B");
     check_eq(run(e, "query mix"), "ok 0.2500\r\n", "query mix");
-    check_eq(run(e, "query route"), "ok 3\r\n", "query route reports the Route enum");
+    check_eq(run(e, "query route"), "ok 2\r\n",
+             "query route reports the SELECTOR encoding config route accepts, not the Route enum");
     check_eq(run(e, "query gateout A"), "ok 1\r\n", "query gateout A");
     check_eq(run(e, "query gateout B"), "ok 0\r\n", "query gateout B");
     check_eq(run(e, "caps"), "ok 0x133\r\n", "caps reports the capability mask in hex");
@@ -616,6 +617,7 @@ void test_describe() {
         e.pmask = (1u << uint32_t(ParamId::Size)) | (1u << uint32_t(ParamId::Feedback));
         e.cmask = static_cast<IEngine::ConfigMask>(1u << uint32_t(ConfigId::Mode));
         const std::string d = describe_block(e);
+        check(contains(d, "masked=1"), "a narrowed mask reports masked=1");
         check(count_lines_with(d, "param ") == 2, "only live params are listed");
         check(count_lines_with(d, "config ") == 1, "only live configs are listed");
         check(contains(d, "param size deck 0..1\r\n"), "param line: name, scope, range");
@@ -629,16 +631,24 @@ void test_describe() {
         const std::string d = describe_block(e);
         check(d.rfind("descr engine=", 0) == 0, "block opens with the descr line");
         check(contains(d, "version="), "descr line carries the version");
+        check(contains(d, "masked=0"), "all-live masks report masked=0 so a host sweep can skip");
         check(d.size() >= 5 && d.compare(d.size() - 5, 5, "end\r\n") == 0,
               "block is terminated by `end` so the host knows it is complete");
         check(contains(d, "caps 0x133\r\n"), "caps line uses the same hex form as the caps verb");
-        check(count_lines_with(d, "param ") == int(ParamId::Count), "all-live mask lists every param");
+        // Three ids the platform never forwards to set_param must never be advertised, whatever the
+        // engine's mask says - otherwise a generic sweep sets them and asserts on a value that went
+        // nowhere. See param_is_platform_owned().
+        check(count_lines_with(d, "param ") == int(ParamId::Count) - 3,
+              "all-live mask lists every param EXCEPT the platform-owned ones");
+        check(!contains(d, "param tempo "),       "tempo is not advertised (Transport owns it)");
+        check(!contains(d, "param keyinterval "), "keyinterval is not advertised (Transport owns it)");
+        check(!contains(d, "param modspeed "),    "modspeed is not advertised (set_mod_speed is its path)");
+        check(contains(d, "param crossfade global "), "crossfade IS advertised - it does reach set_param");
         check(count_lines_with(d, "config ") == int(ConfigId::Count), "all-live mask lists every config");
         check(count_lines_with(d, "query ") == 5, "the platform query vocabulary is enumerated");
 
         // Scope tags: the descriptor is what tells a host whether to sweep one deck or two.
-        check(contains(d, "param tempo global "), "a global param is tagged global");
-        check(contains(d, "param crossfade global "), "crossfade is tagged global");
+        check(contains(d, "param clickmix global "), "a global param is tagged global");
         check(contains(d, "param pos deck "), "a per-deck param is tagged deck");
 
         // Every line must be CRLF-framed: the host reads by line and logs share the stream.

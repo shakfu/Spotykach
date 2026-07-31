@@ -74,6 +74,26 @@ const char* config_name(ConfigId id) {
     return i < static_cast<size_t>(ConfigId::Count) ? kConfigNames[i] : "";
 }
 
+bool param_is_platform_owned(ParamId id) {
+    switch (id) {
+        case ParamId::Tempo:
+        case ParamId::KeyInterval:
+        case ParamId::ModSpeed:
+            return true;
+        default:
+            return false;
+    }
+}
+
+int32_t route_to_selector(Route r) {
+    switch (r) {
+        case Route::Stereo:           return 0;
+        case Route::DoubleMono:       return 1;
+        case Route::GenerativeStereo: return 2;
+        default:                      return 0;
+    }
+}
+
 bool param_is_global(ParamId id) {
     switch (id) {
         case ParamId::Tempo:
@@ -88,13 +108,12 @@ bool param_is_global(ParamId id) {
     }
 }
 
-void param_range(ParamId id, float& lo, float& hi) {
-    // Only Tempo and KeyInterval are non-normalized; everything else is 0..1 (per the control doc).
-    switch (id) {
-        case ParamId::Tempo:       lo = 40.f;  hi = 300.f; break;
-        case ParamId::KeyInterval: lo = 1.f;   hi = 64.f;  break;   // 1/16 units (k1_16..k16_4)
-        default:                   lo = 0.f;   hi = 1.f;   break;
-    }
+void param_range(ParamId, float& lo, float& hi) {
+    // Everything the engine surface actually carries is normalized 0..1. The two ids that were not
+    // (Tempo 40..300, KeyInterval 1..64) are platform-owned and no longer advertised - and those display
+    // units were never the units set_param takes, which is precisely why advertising them was wrong.
+    lo = 0.f;
+    hi = 1.f;
 }
 
 const char* config_labels(ConfigId id) {

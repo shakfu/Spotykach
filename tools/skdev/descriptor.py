@@ -9,7 +9,7 @@ that block and :func:`parse_describe`, which turns the (log-filtered) lines into
 Wire format (one item per line, terminated by a bare ``end`` line, which the caller
 strips before handing lines here):
 
-    descr engine=<name> version=<ver>
+    descr engine=<name> version=<ver> masked=<0|1>
     param <name> <deck|global> <lo>..<hi>
     config <name> <int>:<label> <int>:<label> ...
     query <name> <deck|global>
@@ -41,6 +41,7 @@ class DeviceDescriptor:
     """The full parsed control surface reported by ``describe``."""
     engine: str = ""
     version: str = ""
+    masked: bool = False   # engine narrowed its live_params/live_configs (see parse_describe)
     params: dict = field(default_factory=dict)    # name -> ParamDesc
     configs: dict = field(default_factory=dict)   # name -> ConfigDesc
     queries: list = field(default_factory=list)   # ["empty", "mix", ...]
@@ -63,6 +64,10 @@ def parse_describe(lines):
         if tok[0] == "descr":
             kv = dict(t.split("=", 1) for t in tok[1:] if "=" in t)
             d.engine, d.version = kv.get("engine", ""), kv.get("version", "")
+            # masked=1 means the engine declared which ids it actually implements. With masked=0 the
+            # descriptor is the whole ParamId enum and a round-trip sweep proves nothing, so the
+            # generic test skips rather than reporting a wall of false failures.
+            d.masked = kv.get("masked", "0") == "1"
         elif tok[0] == "param":                   # param <name> <scope> <lo>..<hi>
             name, scope, rng = tok[1], tok[2], tok[3]
             lo, hi = (float(x) for x in rng.split(".."))
