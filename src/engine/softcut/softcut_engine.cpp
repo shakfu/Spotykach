@@ -284,8 +284,9 @@ void SoftcutEngine::process(const float* const* in, float** out, size_t size) {
         if (any_overdub) { out[0][k] = soft(l); out[1][k] = soft(r); }
         else             { out[0][k] = clamp1(l); out[1][k] = clamp1(r); }
     }
-    // kMaxFrames covers the platform block (256 == block_size today). If a larger block is ever
-    // configured, only [0,n) was written above - zero any tail so the output is silence, never garbage.
+    // kMaxFrames (256) covers the platform block with margin (96 for non-csound/chuck engines). If a
+    // larger block is ever configured, only [0,n) was written above - zero any tail so the output is
+    // silence, never garbage.
     for (size_t k = n; k < size; k++) { out[0][k] = 0.f; out[1][k] = 0.f; }
 
     // SD save: push the focused loop's frames into the per-deck record ring (the main loop drains them

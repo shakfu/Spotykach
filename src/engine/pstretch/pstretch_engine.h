@@ -182,7 +182,8 @@ private:
     float _stretch_n[2] = { 0.5f, 0.5f };   // SIZE
     float _diffuse_n[2] = { 1.0f, 1.0f };   // POS
     float _pitch_n[2]   = { 0.5f, 0.5f };   // PITCH (0.5 = unity)
-    float _tone[2]      = { 1.f, 1.f };     // ENV -> one-pole LP coef
+    float _tone_n[2]    = { 1.f, 1.f };     // ENV knob 0..1 (raw, for readback / pickup)
+    float _tone[2]      = { 1.f, 1.f };     // ENV -> one-pole LP coef (= _tone_n^2)
     float _lp[2]        = { 0.f, 0.f };     // tone filter state
     float _wet[2]       = { 1.f, 1.f };     // MIX (dry/wet)
     bool   _frozen[2]   = { false, false };
@@ -232,6 +233,7 @@ private:
     int       _nclips    = 0;
     bool      _rescan    = true;                  // scan /pstretch on the next prepare()
     int       _clip_sel[2] = { 0, 0 };            // selected clip index per deck
+    bool      _clip_dirty[2] = { false, false };  // Aux picked a new clip; re-open on Alt release (in prepare)
     float     _clip_n[2]   = { 0.f, 0.f };        // Aux knob (0..1) for readback
     bool      _aux_held[2] = { false, false };    // Alt held -> draw the clip selector
     // Alt+POS scrub (SD only): re-seek the stream playhead to a normalized position in the clip, debounced

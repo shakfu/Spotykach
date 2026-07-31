@@ -290,8 +290,9 @@ int main() {
         e.set_param(ParamId::Mix, DeckRef::A, 1.f);
         e.set_config(ConfigId::Mode, DeckRef::A, 2);           // deck A -> SD: opens clip 0 (one.raw)
         check(std::strstr(fake.last_path[0], "one.raw") != nullptr, "aux: SD opens the first clip by default");
-        e.set_param(ParamId::Aux, DeckRef::A, 0.9f);           // idx = floor(0.9*3) = 2 -> three.raw
-        check(std::strstr(fake.last_path[0], "three.raw") != nullptr, "aux: moving Aux re-opens the clip live");
+        e.set_param(ParamId::Aux, DeckRef::A, 0.9f);           // idx = floor(0.9*3) = 2 -> three.raw (previewed)
+        e.prepare();                                           // load-on-release: prepare() commits the deferred re-open
+        check(std::strstr(fake.last_path[0], "three.raw") != nullptr, "aux: Aux re-opens the clip on release");
         check(std::fabs(e.param(ParamId::Aux, DeckRef::A) - (2.f + 0.5f) / 3.f) < 1e-4f, "aux: readback slot");
         bool fin = true; const Stereo s = run(e, 300, drive, fin);
         check(fin && energy(s.l) > 0.f, "aux: still streaming after a clip change");

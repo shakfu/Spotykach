@@ -199,7 +199,7 @@ void PstretchEngine::set_param(ParamId id, DeckRef::Ref d, float v) {
     if (id == ParamId::Size)           { _stretch_n[i] = v; _voice[i].set_stretch(std::pow(64.f, v)); }
     else if (id == ParamId::Pos)       { _diffuse_n[i] = v; _voice[i].set_diffusion(v); }
     else if (id == ParamId::Speed)     { _pitch_n[i] = v; _voice[i].set_pitch(std::exp2((v - 0.5f) * 2.f)); }
-    else if (id == ParamId::Env)       { _tone[i] = v * v; }                       // 0 = dark, 1 = open
+    else if (id == ParamId::Env)       { _tone_n[i] = v; _tone[i] = v * v; }        // 0 = dark, 1 = open
     else if (id == ParamId::Mix)       { _wet[i] = v; }
     else if (id == ParamId::ModAmp)    { _mod_depth[i] = v; }                       // Glow -> LFO depth (0 = off)
     else if (id == ParamId::Crossfade) { _xfade = v; _recompute_xfade(); }
@@ -212,10 +212,9 @@ void PstretchEngine::set_param(ParamId id, DeckRef::Ref d, float v) {
             if (idx < 0) idx = 0;
             if (idx != _clip_sel[i]) {
                 _clip_sel[i] = idx;
-                if (_source[i] == Source::SD) {
-                    _open_clip(i);                             // change clips live on a streaming deck
-                    _scrub_opened[i] = 0.f; _scrub_pending[i] = false;   // new clip starts at frame 0
-                }
+                // Preview only: defer the (blocking stop + start_play) re-open to prepare() on Alt release,
+                // so scrubbing the selector doesn't churn the stream per crossing (mirrors _apply_scrub).
+                if (_source[i] == Source::SD) _clip_dirty[i] = true;
             }
         }
     }
@@ -235,7 +234,7 @@ float PstretchEngine::param(ParamId id, DeckRef::Ref d) const {
     if (id == ParamId::Size)  return _stretch_n[i];
     if (id == ParamId::Pos)   return _diffuse_n[i];
     if (id == ParamId::Speed) return _pitch_n[i];
-    if (id == ParamId::Env)   return _tone[i];
+    if (id == ParamId::Env)   return _tone_n[i];
     if (id == ParamId::Mix)   return _wet[i];
     if (id == ParamId::ModSpeed) return _mod_speed_n[i];   // Cycle knob pickup
     if (id == ParamId::ModAmp)   return _mod_depth[i];     // Glow knob pickup
@@ -335,6 +334,15 @@ void PstretchEngine::prepare() {
             for (int i = 0; i < 2; i++) {
                 const DeckRef::Ref d = (i == 0) ? DeckRef::A : DeckRef::B;
                 if (_source[i] == Source::SD && !_stream->is_playing(d)) _open_clip(i);
+            }
+        }
+        // Commit a deferred clip change on Alt release (load-on-release): a streaming deck re-opens the
+        // newly selected clip once here, instead of per selector crossing in set_param(Aux).
+        for (int i = 0; i < 2; i++) {
+            if (_clip_dirty[i] && !_aux_held[i] && _source[i] == Source::SD) {
+                _clip_dirty[i] = false;
+                _open_clip(i);
+                _scrub_opened[i] = 0.f; _scrub_pending[i] = false;   // new clip starts at frame 0
             }
         }
     }
