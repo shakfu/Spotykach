@@ -411,7 +411,10 @@ include $(SYSTEM_FILES_DIR)/Makefile
 # relink the wrong engine (undefined-reference to the other engine's vtable). app.cpp is the only TU
 # that includes engine_select.h, so make it depend on a stamp whose content is rewritten only when
 # ENGINE differs -> app.o rebuilds exactly on a switch, no manual `make clean` needed.
-build/app.o: build/.engine-stamp
+# version.o bakes the ENGINE name into the build banner (-DSPK_ENGINE_STR, see src/version.cpp), which
+# is equally invisible to make - without the stamp, `make ENGINE=x` over a stale build of engine y links
+# a binary that runs x but reports "engine=y" to `strings`/the boot log. Same stamp as app.o.
+build/app.o build/version.o: build/.engine-stamp
 # The SD-streaming platform TUs are also engine-flag-dependent: their bodies are guarded by
 # SPK_USE_STREAM (set by the streaming engines tape/shuttle, so non-streaming engines stay
 # byte-identical), so they must rebuild on an engine switch too - otherwise `make ENGINE=tape` over a

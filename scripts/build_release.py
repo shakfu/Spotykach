@@ -53,6 +53,11 @@ from pathlib import Path
 #   - chorus      : the simplest single-deck Faust demo (the dual-deck demos `filter`/`voice` ship instead).
 #   - gigaverb    : the lone gen~ demo - left out until it is tested / optimized further (it builds fine,
 #                   but sounded poor as a reverb voice and the better `reverb` engine covers reverb).
+#
+# NOTE on licensing: the project is MIT except `qdelay` and `glitch`, whose engines port GPLv3 code
+# (see their NOTICE.md / LICENSE). The BINARIES for those two engines are therefore distributed under
+# GPLv3, not MIT - a published release containing them must carry that notice and the corresponding
+# source offer. Every other artifact here is MIT.
 DEFAULT_ENGINES = [
     "bard",
     "chuck",
@@ -60,12 +65,16 @@ DEFAULT_ENGINES = [
     "delay",
     "filter",
     "edrums",
+    "glitch",
     "graincloud",
     "mosc",
+    "pstretch",
+    "qdelay",
     "radio",
     "reso",
     "reverb",
     "shuttle",
+    "softcut",
     "tape",
     "voice",
 ]
