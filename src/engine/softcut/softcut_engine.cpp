@@ -179,6 +179,17 @@ void SoftcutEngine::prepare() {
         const int i = idx(d);
         if (_rescan[i]) { _rescan[i] = false; for (int s = 0; s < kTapeSlots; s++) _slot_used[i][s] = _stream->exists(_path(d, s)); }
 
+        // Load-on-release (2b): once Alt is released and the deck is free, commit the previewed slot with a
+        // single f_open. Stays dirty (retried next pass) while a load/save is in flight, so it settles on
+        // the final selection instead of firing per scrub crossing.
+        if (_slot_dirty[i] && !_aux_held[i]) {
+            const int s = _active[i];
+            if (_save[i] == Save::Idle && _load[i][s] == Load::Idle && !_defining[i][s]) {
+                _slot_dirty[i] = false;
+                _request_load(d, s);
+            }
+        }
+
         for (int s = 0; s < kTracks; s++) {
             if (_load[i][s] == Load::Priming) {
                 const uint32_t target = _stream->loop_frames(d);
@@ -314,9 +325,13 @@ void SoftcutEngine::set_param(ParamId id, DeckRef::Ref d, float v) {
         case ParamId::FluxIntensity: _cut_n[i][s] = v; _apply_filter(i, s); break;     // flux+PITCH cutoff
         case ParamId::FluxMix:       _res_n[i][s] = v; _apply_filter(i, s); break;     // flux+MIX  reso
         case ParamId::Aux: {
+            if (_defining[i][s]) break;                       // don't reslot / load mid fresh-record (2a)
             const int sl = static_cast<int>(v * kTapeSlots);
             const int ns = sl < 0 ? 0 : (sl >= kTapeSlots ? kTapeSlots - 1 : sl);
-            if (ns != _tape_slot[i][s]) { _tape_slot[i][s] = ns; _request_load(d, s); }
+            // Preview only: scrubbing the selector updates the slot (and the ring::slots display) but does
+            // NOT load - start_play is a blocking f_open that fails-if-busy, so a load per crossing stutters
+            // the main loop and error-flashes on every mid-load crossing. prepare() commits it on release.
+            if (ns != _tape_slot[i][s]) { _tape_slot[i][s] = ns; _slot_dirty[i] = true; }
             break;
         }
         default: break;

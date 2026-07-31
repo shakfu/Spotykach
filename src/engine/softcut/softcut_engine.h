@@ -186,6 +186,7 @@ private:
     bool _want_reseed[2] = { false, false };
     bool _aux_held[2]    = { false, false };
     bool _rescan[2]      = { false, false };
+    bool _slot_dirty[2]  = { false, false };   // Alt+PITCH selected a new slot; load it on release (in prepare)
     uint32_t _err_until[2]    = { 0, 0 };
     uint32_t _last_trig_ms[2] = { 0, 0 };
     int  _swap_show[2]   = { 0, 0 };
