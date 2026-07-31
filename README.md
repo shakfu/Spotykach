@@ -44,6 +44,37 @@ Current engines include:
 
 18. [qdelay](docs/engines/qdelay.md): a dub/ambient **flavor of the delay** (inspired by [qdelay](https://github.com/tiagolr/qdelay)) — the same delay grammar (tempo-synced divisions, feedback, mix, PITCH, ENV tone, mod LFO, Freeze/Reverse pads, Stereo/DoubleMono/Ping-pong) with the character palette swapped to **Clean / Diffuse / Duck** (Reel/Slice/Drift switch). Diffuse runs the feedback through an 8-stage allpass diffuser (a JUCE-free port of qdelay's `Diffusor`) for a dense reverb-like wash; Duck attenuates the wet under the dry input so repeats bloom in the gaps. A normal **SRAM build** (the diffuser's buffers live in SDRAM)
 
+Four further engines live in the tree and build the same way, but are not (yet) part of the numbered list above: [bard](docs/engines/bard.md) (bookmark-navigated audiobook decks, SD-streamed), [glitch](docs/engines/glitch.md) (dual-deck lo-fi/circuit-bent noise voice, GPLv3), [pstretch](docs/engines/pstretch.md) (real-time PaulStretch ambient time-smear), and [graincloud](docs/engines/graincloud.md) (a granular-cloud variant of the looper).
+
+### At a glance
+
+| Engine | Type | SD card | Build | Authored in | Notes |
+| --- | --- | --- | --- | --- | --- |
+| [granular](docs/engines/granular.md) | Looper / sampler | Optional (save/load loops) | SRAM | C++ | Default build; the original firmware as an engine |
+| [graincloud](docs/engines/graincloud.md) | Looper / sampler | Optional (save/load loops) | SRAM (`-Os`) | C++ | Granular variant with a GrainflowLib cloud |
+| [tape](docs/engines/tape.md) | Looper / recorder | **Required** (streams) | SRAM | C++ | Two SD-streamed decks, no length cap |
+| [shuttle](docs/engines/shuttle.md) | Looper | Optional (load slots) | SRAM | C++ | Four in-SDRAM tracks, bipolar varispeed |
+| [softcut](docs/engines/softcut.md) | Looper (overdub) | Optional (load/save clips) | SRAM | C++ | Vendored monome softcut-lib, 4 voices |
+| [radio](docs/engines/radio.md) | Player / instrument | **Required** (streams) | SRAM | C++ | Dual virtual RadioMusic, `.raw`/`.wav` banks |
+| [bard](docs/engines/bard.md) | Player | **Required** (streams) | SRAM (`-Os`) | C++ | Audiobook decks; not yet hardware-tested |
+| [delay](docs/engines/delay.md) | Effect | — | SRAM | C++ | Clean / Tape / Shimmer characters |
+| [qdelay](docs/engines/qdelay.md) | Effect | — | SRAM | C++ | Clean / Diffuse / Duck; **GPLv3** |
+| [reverb](docs/engines/reverb.md) | Effect | — | SRAM (`-Os`) | Faust | Plate / hall / Greyhole, route-aware |
+| [gigaverb](docs/engines/gigaverb.md) | Effect | — | SRAM | gen~ | Tom Erbe's gigaverb via gen-dsp |
+| [chorus](docs/engines/chorus.md) | Effect | — | SRAM | Faust | Generated single-deck demo |
+| [filter](docs/engines/filter.md) | Effect | — | SRAM | Faust | Generated parallel (DoubleMono) demo |
+| [pstretch](docs/engines/pstretch.md) | Effect | Optional (file source) | SRAM | C++ | Clean-room PaulStretch, vendored FFT |
+| [edrums](docs/engines/edrums.md) | Instrument | — | SRAM | C++ | Four-voice Euclidean drum machine |
+| [reso](docs/engines/reso.md) | Instrument (+ resonator) | — | SRAM (`-Os`) | C++ | Mutable Instruments Rings DSP |
+| [mosc](docs/engines/mosc.md) | Instrument | — | **QSPI** | C++ | Dual 24-engine Plaits voice, vendored in-tree |
+| [glitch](docs/engines/glitch.md) | Instrument | — | SRAM | C++ | 12 Noisferatu algorithms; **GPLv3** |
+| [voice](docs/engines/voice.md) | Instrument | — | SRAM | Faust | Generated series (osc → filter) demo |
+| [csound](docs/engines/csound.md) | Instrument (scriptable) | Optional (`.csd` patches) | **QSPI** | C++ host + Csound | Needs a one-time `libcsound.a` cross-build |
+| [chuck](docs/engines/chuck.md) | Instrument (scriptable) | Optional (`.ck` patches) | **QSPI** | C++ host + ChucK | Needs a one-time `libchuck.a` cross-build |
+| [passthrough](docs/engines/passthrough.md) | Utility | — | SRAM | C++ | Minimal stereo passthrough |
+
+**Build** is where the code executes: *SRAM* is the normal `make ENGINE=<name>` build; *QSPI* engines are too large for the 186 KB execution SRAM and run from external flash via their own one-shot target (`make engine-<name>`). *SD card* marks whether the card is required at runtime, only used for optional load/save, or unused. `-Os` notes engines built size-optimized to fit.
+
 Engines can be authored in three ways:
 
 1. Using [C++](docs/engine-types/cpp.md) against `IEngine`
