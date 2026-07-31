@@ -19,7 +19,6 @@ inline float soft(float x) {
     return x * (27.f + x * x) / (27.f + 9.f * x * x);
 }
 inline float clamp1(float x) { return x < -1.f ? -1.f : (x > 1.f ? 1.f : x); }
-float kZero[256] = {};
 }
 
 // Bipolar capstan-rate map (shared shape with the shuttle engine). Knob splits at noon (v=0.5): a small
@@ -274,6 +273,9 @@ void SoftcutEngine::process(const float* const* in, float** out, size_t size) {
         if (any_overdub) { out[0][k] = soft(l); out[1][k] = soft(r); }
         else             { out[0][k] = clamp1(l); out[1][k] = clamp1(r); }
     }
+    // kMaxFrames covers the platform block (256 == block_size today). If a larger block is ever
+    // configured, only [0,n) was written above - zero any tail so the output is silence, never garbage.
+    for (size_t k = n; k < size; k++) { out[0][k] = 0.f; out[1][k] = 0.f; }
 
     // SD save: push the focused loop's frames into the per-deck record ring (the main loop drains them
     // to the card). Honor the ring's accepted byte count and resume next block - never block the ISR.
@@ -295,7 +297,10 @@ void SoftcutEngine::set_param(ParamId id, DeckRef::Ref d, float v) {
     const int i = idx(d);
     const int s = _active[i];                                 // knobs address the FOCUSED track
     switch (id) {
-        case ParamId::Speed:  _rate_n[i][s] = v; _voice[i][s].setRate(rate_from_knob(v)); break;
+        // Freeze the RECORD rate while a fresh take is defining (as POS/SIZE below are): the take then
+        // always records at 1x, so its length is wall-clock time, not integrated rate. The knob value is
+        // cached and the closed loop snaps back to unity in on_record_pad.
+        case ParamId::Speed:  _rate_n[i][s] = v; if (!_defining[i][s]) _voice[i][s].setRate(rate_from_knob(v)); break;
         // While a fresh take is recording (defining), the loop is held open at the full buffer so the
         // take can run the whole 10.9 s - don't let the live POS/SIZE knobs reshape it mid-record (they
         // would cap the take early). The knob values are still cached and applied once the loop closes.
@@ -412,7 +417,8 @@ void SoftcutEngine::on_record_pad(DeckRef::Ref d, bool reverse) {
         _size_n[i][s] = 1.f; _pos_n[i][s] = 0.f;             // the loop IS the take
         _apply_window(i, s);
         _voice[i][s].cutToPos(0.f);
-        _want_reseed[i] = true;                              // reseed POS/SIZE pickups to the new loop
+        _rate_n[i][s] = knob_for_rate(1.f); _voice[i][s].setRate(1.f);  // closed take plays at unity (record was 1x-locked)
+        _want_reseed[i] = true;                              // reseed POS/SIZE + PITCH pickups to the new loop
         return;
     }
     if (_overdub[i][s]) {                                    // overdub disarm
