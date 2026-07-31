@@ -51,6 +51,46 @@ public:
 
     Capabilities capabilities() const override;
 
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md). Derived from the set_param /
+    // set_config switches in granular_engine.cpp, which are authoritative: every id below reaches real
+    // work. Deliberately EXCLUDED, though the switch names them:
+    //   AltPos, Aux - explicit no-ops here ("granular doesn't claim CapAltPos / CapAux"), so a sweep
+    //                 would set them and assert on a value that went nowhere.
+    //   Tempo, KeyInterval, ModSpeed - platform-owned; the platform never routes them through
+    //                 set_param, so describe drops them regardless (see param_is_platform_owned).
+    // NOT yet verified on hardware.
+    ParamMask live_params() const override {
+        return (1u << static_cast<uint32_t>(ParamId::Pos))
+             | (1u << static_cast<uint32_t>(ParamId::FluxFb))
+             | (1u << static_cast<uint32_t>(ParamId::Env))
+             | (1u << static_cast<uint32_t>(ParamId::EnvSize))
+             | (1u << static_cast<uint32_t>(ParamId::Size))
+             | (1u << static_cast<uint32_t>(ParamId::Win))
+             | (1u << static_cast<uint32_t>(ParamId::PolySlice))
+             | (1u << static_cast<uint32_t>(ParamId::Speed))
+             | (1u << static_cast<uint32_t>(ParamId::FluxIntensity))
+             | (1u << static_cast<uint32_t>(ParamId::GritIntensity))
+             | (1u << static_cast<uint32_t>(ParamId::FluxMix))
+             | (1u << static_cast<uint32_t>(ParamId::GritMix))
+             | (1u << static_cast<uint32_t>(ParamId::Feedback))
+             | (1u << static_cast<uint32_t>(ParamId::Mix))
+             | (1u << static_cast<uint32_t>(ParamId::ModAmp))
+             | (1u << static_cast<uint32_t>(ParamId::ClickMix))
+             | (1u << static_cast<uint32_t>(ParamId::PanSpeed))
+             | (1u << static_cast<uint32_t>(ParamId::PanRange))
+             | (1u << static_cast<uint32_t>(ParamId::Crossfade));
+    }
+    ConfigMask live_configs() const override {
+        return static_cast<ConfigMask>((1u << static_cast<uint32_t>(ConfigId::Route))
+                                     | (1u << static_cast<uint32_t>(ConfigId::ModType))
+                                     | (1u << static_cast<uint32_t>(ConfigId::LfoShape))
+                                     | (1u << static_cast<uint32_t>(ConfigId::Mode))
+                                     | (1u << static_cast<uint32_t>(ConfigId::StartModOn))
+                                     | (1u << static_cast<uint32_t>(ConfigId::SizeModOn)));
+    }
+#endif
+
     // MIDI meaning (Phase 3c). The platform parses MIDI and clocks transport; the engine
     // decides what notes and transport mean for this instrument.
     // handle_midi_note: channel->deck, note->speed, trigger. Returns the triggered deck

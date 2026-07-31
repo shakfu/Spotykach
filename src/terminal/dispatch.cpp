@@ -200,87 +200,114 @@ void verb_seq(const Command& c, Ctx& x) {
 
 // --- observation L1 + forwarding ------------------------------------------------------------------
 
+// --- queries: one declared table per half ----------------------------------------------------------
+// Platform queries are a table of exactly the same shape an engine declares (EngineQuery), so dispatch
+// and `describe` walk one code path over both halves and cannot drift. See terminal-target-b.md.
+
+enum PQ : uint8_t {
+    PQ_EMPTY, PQ_MIX, PQ_ROUTE, PQ_GATEOUT, PQ_RECORDED, PQ_CAPACITY,
+    PQ_LAYOUT, PQ_SIZETEMPO, PQ_USB, PQ_RESEED, PQ_COUNT
+};
+
+const EngineQuery kPlatformQueries[] = {
+    { "empty",     QueryScope::Deck,   ValueKind::Bool,  nullptr, true },
+    { "mix",       QueryScope::Global, ValueKind::Float, nullptr, true },
+    { "route",     QueryScope::Global, ValueKind::Enum,  "0:stereo 1:dmono 2:genstereo", true },
+    { "gateout",   QueryScope::Deck,   ValueKind::Bool,  nullptr, true },
+    { "recorded",  QueryScope::Deck,   ValueKind::Int,   nullptr, true },
+    { "capacity",  QueryScope::Deck,   ValueKind::Int,   nullptr, true },
+    { "layout",    QueryScope::Deck,   ValueKind::Enum,  "0:single 1:slice 2:chord 3:none", true },
+    { "sizetempo", QueryScope::Deck,   ValueKind::Bool,  nullptr, true },
+    { "usb",       QueryScope::Global, ValueKind::Text,  nullptr, true },
+    // Latching: take_param_reseed returns true once and self-clears, so asking changes the answer.
+    // safe=false keeps it out of describe, and therefore out of any generic sweep.
+    { "reseed",    QueryScope::Deck,   ValueKind::Bool,  nullptr, false },
+};
+static_assert(sizeof(kPlatformQueries) / sizeof(kPlatformQueries[0]) == PQ_COUNT,
+              "kPlatformQueries out of sync with the PQ enum");
+
+// Append only the VALUE; the caller frames "ok " ... CRLF.
+void read_platform_query(uint8_t i, Ctx& x, DeckRef::Ref d) {
+    switch (i) {
+        case PQ_EMPTY:     x.reply.append_i32(x.engine.audio_is_empty(d) ? 1 : 0); break;
+        case PQ_MIX:       x.reply.append_f32(x.engine.mix()); break;
+        case PQ_ROUTE:     x.reply.append_i32(route_to_selector(x.engine.route())); break;
+        case PQ_GATEOUT:   x.reply.append_i32(x.engine.gate_out_triggered(d) ? 1 : 0); break;
+        case PQ_RECORDED:  x.reply.append_i32(static_cast<int32_t>(x.engine.audio_recorded_bytes(d))); break;
+        case PQ_CAPACITY:  x.reply.append_i32(static_cast<int32_t>(x.engine.audio_capacity_bytes(d))); break;
+        case PQ_LAYOUT:    x.reply.append_i32(static_cast<int32_t>(x.engine.deck_layout(d))); break;
+        case PQ_SIZETEMPO: x.reply.append_i32(x.engine.size_sets_tempo(d) ? 1 : 0); break;
+        case PQ_RESEED:    x.reply.append_i32(x.engine.take_param_reseed(d) ? 1 : 0); break;
+        case PQ_USB: {
+            usb_diag_refresh(x.state.usb);   // live, not the init snapshot
+            const UsbDiag& u = x.state.usb;
+            TextSink& r = x.reply;
+            r.str("boot=");      r.append_i32(u.boot_version);
+            r.str(" region=");   r.append_i32(u.memory_region);
+            r.str(" clkcfg=");   r.append_i32(u.clocks_configured ? 1 : 0);
+            r.str(" hsi48=");    r.append_i32(u.hsi48_ready ? 1 : 0);
+            r.str(" usbsel=");   r.append_i32(u.usb_clk_source);
+            r.str(" usb33den="); r.append_i32(u.usb33_detector ? 1 : 0);
+            r.str(" usb33rdy="); r.append_i32(u.usb33_ready ? 1 : 0);
+            r.str(" phy=");      r.append_i32(u.transceiver_on ? 1 : 0);
+            r.str(" pullup=");   r.append_i32(u.pullup_asserted ? 1 : 0);
+            r.str(" vbussense=");r.append_i32(u.vbus_sensing ? 1 : 0);
+            r.str(" dp=");       r.append_i32(u.dp_af_ok ? 1 : 0);
+            r.str(" dm=");       r.append_i32(u.dm_af_ok ? 1 : 0);
+            r.str(" rst=");      r.append_i32(u.usb_reset_seen ? 1 : 0);
+            r.str(" sof=");      r.append_i32(u.sof_seen ? 1 : 0);
+            break;
+        }
+        default: break;
+    }
+}
+
+// Resolve the deck a query needs from its declared scope. Engines write no deck handling at all.
+bool resolve_query_deck(QueryScope scope, const Command& c, Ctx& x, DeckRef::Ref& d) {
+    if (scope == QueryScope::Global) { d = DeckRef::A; return true; }
+    if (c.argc < 3)                  { x.reply.err("no-arg");  return false; }
+    if (!parse_deck(c.arg(2), d))    { x.reply.err("bad-deck"); return false; }
+    return true;
+}
+
 void verb_query(const Command& c, Ctx& x) {
     if (c.argc < 2) { x.reply.err("no-arg"); return; }
-    const char* s = c.arg(1);
-    if (!strcmp(s, "empty")) {
-        if (c.argc < 3) { x.reply.err("no-arg"); return; }
-        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
-        x.reply.ok_i32(x.engine.audio_is_empty(d) ? 1 : 0);
-    } else if (!strcmp(s, "mix")) {
-        x.reply.ok_f32(x.engine.mix());
-    } else if (!strcmp(s, "route")) {
-        // Report the SELECTOR encoding `config route` accepts, not the raw Route enum - the two differ,
-        // and describe publishes only the selector labels. Without this, `config route A 0` reads back
-        // as 2 and a host cannot round-trip it.
-        x.reply.ok_i32(route_to_selector(x.engine.route()));
-    } else if (!strcmp(s, "gateout")) {
-        if (c.argc < 3) { x.reply.err("no-arg"); return; }
-        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
-        x.reply.ok_i32(x.engine.gate_out_triggered(d) ? 1 : 0);
-    } else if (!strcmp(s, "recorded")) {
-        if (c.argc < 3) { x.reply.err("no-arg"); return; }
-        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
-        x.reply.ok_i32(static_cast<int32_t>(x.engine.audio_recorded_bytes(d)));
-    } else if (!strcmp(s, "capacity")) {
-        if (c.argc < 3) { x.reply.err("no-arg"); return; }
-        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
-        x.reply.ok_i32(static_cast<int32_t>(x.engine.audio_capacity_bytes(d)));
-    } else if (!strcmp(s, "layout")) {
-        if (c.argc < 3) { x.reply.err("no-arg"); return; }
-        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
-        x.reply.ok_i32(static_cast<int32_t>(x.engine.deck_layout(d)));
-    } else if (!strcmp(s, "sizetempo")) {
-        if (c.argc < 3) { x.reply.err("no-arg"); return; }
-        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
-        x.reply.ok_i32(x.engine.size_sets_tempo(d) ? 1 : 0);
-    } else if (!strcmp(s, "fit")) {
-        // Takes an ARGUMENT (the loop fraction), so it is deliberately NOT advertised in describe: the
-        // descriptor has no way to say "this query needs an extra parameter", and the generic sweep
-        // calls every advertised query with a deck alone. Reachable by name; see terminal-target-b.md.
+    const char* name = c.arg(1);
+
+    // `fit` takes an ARGUMENT, which the table shape cannot express (see terminal-target-b.md open
+    // question 6), so it is handled here and never advertised.
+    if (!strcmp(name, "fit")) {
         if (c.argc < 4) { x.reply.err("no-arg"); return; }
         DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
         float f;        if (!parse_f32(c.arg(3), f))  { x.reply.err("bad-arg");  return; }
         x.reply.ok_f32(x.engine.tempo_to_fit(d, f));
-    } else if (!strcmp(s, "reseed")) {
-        // A LATCHING read: returns true once and self-clears, so asking changes the answer. Not
-        // advertised - a generic sweep would silently consume the flag the platform is waiting for.
-        // The textbook unsafe query; see the safe-to-call discussion in terminal-target-b.md.
-        if (c.argc < 3) { x.reply.err("no-arg"); return; }
-        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
-        x.reply.ok_i32(x.engine.take_param_reseed(d) ? 1 : 0);
-    } else if (!strcmp(s, "usb")) {
-        // The USB bring-up snapshot (usb_diag.h). Reaching this at all means enumeration worked, so it
-        // is a confirmation readout rather than a diagnosis - the diagnosis path is the TERM_USBDIAG
-        // panel probe. Key=value so the host can parse it without positional assumptions.
-        //
-        // Refresh first: the live fields (core state, pad ownership) and the sticky host-activity bits
-        // are otherwise frozen at what init() captured, which is before the host has enumerated - so
-        // sof/rst would always read 0 in a build without TERM_USBDIAG driving the refresh from Loop().
-        // We are on the main loop here, same as every other consumer, so this is safe.
-        usb_diag_refresh(x.state.usb);
-        const UsbDiag& u = x.state.usb;
-        TextSink& r = x.reply;
-        r.str("ok boot=");     r.append_i32(u.boot_version);
-        r.str(" region=");     r.append_i32(u.memory_region);
-        r.str(" clkcfg=");     r.append_i32(u.clocks_configured ? 1 : 0);
-        r.str(" hsi48=");      r.append_i32(u.hsi48_ready ? 1 : 0);
-        r.str(" usbsel=");     r.append_i32(u.usb_clk_source);
-        r.str(" usb33den=");   r.append_i32(u.usb33_detector ? 1 : 0);
-        r.str(" usb33rdy=");   r.append_i32(u.usb33_ready ? 1 : 0);
-        r.str(" phy=");        r.append_i32(u.transceiver_on ? 1 : 0);
-        r.str(" pullup=");     r.append_i32(u.pullup_asserted ? 1 : 0);
-        r.str(" vbussense=");  r.append_i32(u.vbus_sensing ? 1 : 0);
-        r.str(" dp=");         r.append_i32(u.dp_af_ok ? 1 : 0);
-        r.str(" dm=");         r.append_i32(u.dm_af_ok ? 1 : 0);
-        r.str(" rst=");        r.append_i32(u.usb_reset_seen ? 1 : 0);
-        r.str(" sof=");        r.append_i32(u.sof_seen ? 1 : 0);
-        r.str("\r\n");
-    } else {
-        // Unknown query name -> engine-specific (target B). handle_command returns true if recognized.
-        CommandView view{ c.argv, c.argc };
-        if (!x.engine.handle_command(view, x.reply)) x.reply.err("unknown-verb");
+        return;
     }
+
+    for (uint8_t i = 0; i < PQ_COUNT; ++i) {          // platform names win over engine names
+        if (strcmp(name, kPlatformQueries[i].name)) continue;
+        DeckRef::Ref d;
+        if (!resolve_query_deck(kPlatformQueries[i].scope, c, x, d)) return;
+        x.reply.str("ok ");
+        read_platform_query(i, x, d);
+        x.reply.str("\r\n");
+        return;
+    }
+
+    const EngineQueryTable t = x.engine.engine_queries();
+    for (uint8_t i = 0; i < t.count; ++i) {
+        if (strcmp(name, t.items[i].name)) continue;
+        DeckRef::Ref d;
+        if (!resolve_query_deck(t.items[i].scope, c, x, d)) return;
+        x.reply.str("ok ");
+        x.engine.read_engine_query(i, d, x.reply);   // engine appends the value only
+        x.reply.str("\r\n");
+        return;
+    }
+
+    // Neither table: the free-form hook, for actions and anything odd.
+    CommandView view{ c.argv, c.argc };
+    if (!x.engine.handle_command(view, x.reply)) x.reply.err("unknown-verb");
 }
 
 // --- composite verbs: reset / preset ---------------------------------------------------------------
@@ -373,11 +400,39 @@ void verb_mode(const Command& c, Ctx& x) {
 }
 
 void verb_caps(const Command&, Ctx& x) {
-    x.reply.ok_hex(x.engine.capabilities());
+    // CapTerminal is derived, not hand-set: an engine that declares queries advertises the bit whether
+    // or not it remembered to. Nothing verifies a hand-set bit, so it would drift on first use.
+    Capabilities caps = x.engine.capabilities();
+    if (x.engine.engine_queries().count > 0) caps |= CapTerminal;
+    x.reply.ok_hex(caps);
 }
 
 void verb_help(const Command&, Ctx& x) {
     x.reply.line("ok verbs: set get query config cv gate midi pad fx seq reset preset mode caps describe help");
+}
+
+const char* kind_name(ValueKind k) {
+    switch (k) {
+        case ValueKind::Bool:  return "bool";
+        case ValueKind::Int:   return "int";
+        case ValueKind::Float: return "float";
+        case ValueKind::Enum:  return "enum";
+        default:               return "text";
+    }
+}
+
+// `query <name> <scope> <kind> [labels]`. The kind token is new; older hosts read name+scope and
+// ignore the rest, so this is backward compatible.
+void emit_queries(TextSink& r, const EngineQuery* q, uint8_t n) {
+    for (uint8_t i = 0; i < n; ++i) {
+        if (!q[i].safe) continue;
+        r.str("query ");
+        r.str(q[i].name);
+        r.str(q[i].scope == QueryScope::Deck ? " deck " : " global ");
+        r.str(kind_name(q[i].kind));
+        if (q[i].kind == ValueKind::Enum && q[i].labels) { r.str(" "); r.str(q[i].labels); }
+        r.str("\r\n");
+    }
 }
 
 void verb_describe(const Command&, Ctx& x) {
@@ -426,23 +481,19 @@ void verb_describe(const Command&, Ctx& x) {
 
     // Platform-known query vocabulary (phase 1 lists the platform set; an engine's own queries are
     // reachable via handle_command but not enumerated here).
-    r.line("query empty deck");
-    r.line("query mix global");
-    r.line("query route global");
-    r.line("query gateout deck");
-    r.line("query recorded deck");
-    r.line("query capacity deck");
-    r.line("query layout deck");
-    r.line("query sizetempo deck");
-    r.line("query usb global");
-    // NOT advertised, on purpose (both are reachable by name):
-    //   `fit`    - takes an argument, and the descriptor cannot express arity, so the generic sweep
-    //              (which calls each advertised query with a deck alone) would fail it.
-    //   `reseed` - a latching read: asking changes the answer, so a sweep would consume the flag.
-    // These are the two shapes the safe-to-call rule in terminal-target-b.md exists to keep out.
+    // Query vocabulary - platform and engine halves emitted identically, so a host cannot tell them
+    // apart and does not need to. ONLY `safe` entries appear: the generic sweep calls everything it can
+    // see, so anything it must not call blindly is simply never named. See terminal-target-b.md.
+    emit_queries(r, kPlatformQueries, PQ_COUNT);
+    const EngineQueryTable et = x.engine.engine_queries();
+    emit_queries(r, et.items, et.count);
 
     r.str("caps ");
-    r.append_hex(x.engine.capabilities());
+    {
+        Capabilities caps = x.engine.capabilities();
+        if (x.engine.engine_queries().count > 0) caps |= CapTerminal;
+        r.append_hex(caps);
+    }
     r.str("\r\n");
     r.line("end");
 }

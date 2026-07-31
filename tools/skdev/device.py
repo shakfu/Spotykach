@@ -24,7 +24,12 @@ from .descriptor import parse_describe
 class Device:
     """A connected sk-engines device speaking the phase-1 terminal protocol."""
 
-    def __init__(self, port=None, timeout=1.0, log_sink=None):
+    # Default read timeout. Generous on purpose: the channel is pumped from the main loop, so its
+    # latency is bounded by the SLOWEST main-loop consumer - a streaming engine (tape/radio/bard)
+    # scanning the SD card in prepare() can stall replies for a good fraction of a second.
+    DEFAULT_TIMEOUT = 3.0
+
+    def __init__(self, port=None, timeout=DEFAULT_TIMEOUT, log_sink=None):
         self.port = find_port(port)
         self.ser = open_serial(self.port, timeout)
         self.log_sink = log_sink          # callable(str) for captured [tag] lines, or None
@@ -34,7 +39,29 @@ class Device:
         self.ser.close()
 
     # --- framing -------------------------------------------------------------
+    def _drain_stale(self):
+        """Discard anything already waiting before sending a command.
+
+        The protocol is synchronous - one command in flight - so nothing should ever be pending here.
+        Anything that is, is either a late reply from a command that timed out, or an unsolicited
+        transport error (`err overflow` / `err tx-overflow`). Without this, a SINGLE timeout offsets
+        every subsequent reply for the life of the session: each command reads the previous one's
+        answer, and the failures surface far from the cause as nonsense parse errors.
+
+        Discarded text goes to ``log_sink`` when one is set, so it is dropped visibly rather than
+        silently.
+        """
+        pending = self.ser.in_waiting
+        if not pending:
+            return
+        stale = self.ser.read(pending).decode(errors="replace")
+        if self.log_sink:
+            for ln in stale.splitlines():
+                if ln:
+                    self.log_sink("[stale] " + ln)
+
     def _send(self, line):
+        self._drain_stale()
         self.ser.write((line + "\r\n").encode())
 
     def _readline(self):

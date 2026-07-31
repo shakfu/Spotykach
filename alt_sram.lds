@@ -9,8 +9,20 @@ MEMORY
 {
 	FLASH		(RX)  : ORIGIN = 0x08000000, LENGTH = 128K
 	DTCMRAM		(RWX) : ORIGIN = 0x20000000, LENGTH = 128K
-	SRAM_EXEC	(RWX) : ORIGIN = 0x24000000, LENGTH = 186K
-	SRAM		(RWX) : ORIGIN = 0x24000000 + 186K, LENGTH = 512K - 186K
+	/* The H750's 512K AXI SRAM, split between executable code and data.
+	 *
+	 * This was 186K/326K, which was NOT a hardware limit - it was this split. Code sat at 99%
+	 * while ~260K of the data region went unused, and several engines could not host the
+	 * SPK_TERMINAL channel at all. Rebalanced to 300K/212K on 2026-07-31: every engine now fits
+	 * with margin (worst code 69.9% granular+terminal, worst data 68.8% bard+terminal).
+	 *
+	 * Verified on hardware, not just at link time: a 214812 B image - 24K past the old ceiling -
+	 * boots and enumerates, so bootloader-spotykach-v2.bin copies well beyond the old region.
+	 * What is NOT established is the true upper bound; ">= 215K" is what was tested, not 300K.
+	 * An image approaching 300K should be flash-tested before being trusted.
+	 */
+	SRAM_EXEC	(RWX) : ORIGIN = 0x24000000, LENGTH = 300K
+	SRAM		(RWX) : ORIGIN = 0x24000000 + 300K, LENGTH = 512K - 300K
 	RAM_D2		(RWX) : ORIGIN = 0x30000000, LENGTH = 32K
 	RAM_D2CACHE	(RWX) : ORIGIN = 0x30000000 + 32K, LENGTH = 288K - 32K
 	RAM_D3		(RWX) : ORIGIN = 0x38000000, LENGTH = 64K

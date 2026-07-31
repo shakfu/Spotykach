@@ -42,12 +42,35 @@ def test_param_roundtrip(test_mode, p):
         )
     dev = test_mode
     decks = ["A", "B"] if p.scope == "deck" else ["A"]
-    target = p.lo + 0.5 * (p.hi - p.lo)        # mid-range, inside the declared range
+    span = p.hi - p.lo
+    lo_t, hi_t = p.lo + 0.25 * span, p.lo + 0.75 * span
+
     for d in decks:
-        dev.set_param(p.name, d, target)
-        got = dev.get_param(p.name, d)
-        assert abs(got - target) <= 1e-3 * (p.hi - p.lo) + 1e-4, \
-            "{}[{}] set {} got {}".format(p.name, d, target, got)
+        # Exact equality is the wrong assertion: plenty of params are legitimately QUANTIZED (tape's
+        # `aux` selects one of 8 SD slots, so 0.5 reads back 0.5625) and the descriptor has no way to
+        # declare a step. Instead assert the two properties that hold for continuous and quantized
+        # params alike, and that a dead param fails:
+        #
+        #   1. it TRACKS input   - two different targets must read back differently. A param whose
+        #                          getter is missing (returns a constant) fails here.
+        #   2. it is STABLE      - writing back what was just read must be a fixed point. Catches a
+        #                          getter and setter that disagree about scaling or units.
+        dev.set_param(p.name, d, lo_t)
+        r1 = dev.get_param(p.name, d)
+        dev.set_param(p.name, d, hi_t)
+        r2 = dev.get_param(p.name, d)
+
+        assert p.lo - 1e-4 <= r1 <= p.hi + 1e-4, "{}[{}] read {} outside {}..{}".format(
+            p.name, d, r1, p.lo, p.hi)
+        assert r1 != r2, (
+            "{}[{}] returned {} for both {} and {} - it does not track input "
+            "(a missing getter reads as a constant)".format(p.name, d, r1, lo_t, hi_t))
+
+        dev.set_param(p.name, d, r2)
+        r3 = dev.get_param(p.name, d)
+        assert abs(r3 - r2) <= 1e-3 * span + 1e-4, (
+            "{}[{}] is not a fixed point: wrote back its own reading {} and got {} - "
+            "getter and setter disagree".format(p.name, d, r2, r3))
 
 
 # --- L1 state queries ------------------------------------------------------------------------------
@@ -91,10 +114,23 @@ def test_query_answers(test_mode, name):
     as `err unknown-verb` the first time somebody typed it by hand.
     """
     dev = test_mode
-    scope = _describe_once().queries[name]
-    for deck in (["A", "B"] if scope == "deck" else [""]):
+    q = _describe_once().queries[name]
+    for deck in (["A", "B"] if q.scope == "deck" else [""]):
         out = dev.query(name, deck)
         assert out != "", "query {} {} answered ok with no value".format(name, deck)
+
+        # The reply must parse as the kind the descriptor declared. A device that advertises `int` and
+        # returns a word is a real defect, and without this the sweep would accept any string at all.
+        if q.kind == "bool":
+            assert out in ("0", "1"), "{} declares bool, returned {!r}".format(name, out)
+        elif q.kind == "int":
+            int(out)
+        elif q.kind == "float":
+            float(out)
+        elif q.kind == "enum":
+            assert int(out) in q.values, \
+                "{} returned {} which is not one of its declared labels {}".format(
+                    name, out, sorted(q.values))
 
 
 @pytest.mark.parametrize("name", _config_query_pairs(), ids=lambda n: n)
@@ -109,8 +145,7 @@ def test_config_query_round_trip(test_mode, name):
     """
     dev = test_mode
     desc = _describe_once()
-    scope = desc.queries[name]
-    deck = "A" if scope == "deck" else ""
+    deck = "A" if desc.queries[name].scope == "deck" else ""
     for value in sorted(desc.configs[name].values):
         dev.set_config(name, "A", value)
         got = dev.query(name, deck)

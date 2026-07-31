@@ -10,6 +10,7 @@ Wire format (one item per line, terminated by a bare ``end`` line, which the cal
 strips before handing lines here):
 
     descr engine=<name> version=<ver> masked=<0|1>
+    query  <name> <deck|global> <kind> [int:label ...]
     param <name> <deck|global> <lo>..<hi>
     config <name> <int>:<label> <int>:<label> ...
     query <name> <deck|global>
@@ -37,6 +38,15 @@ class ConfigDesc:
 
 
 @dataclass
+class QueryDesc:
+    """A readable state item: platform or engine, indistinguishable on the wire by design."""
+    name: str
+    scope: str            # "deck" | "global"
+    kind: str = "text"    # "bool" | "int" | "float" | "enum" | "text"
+    values: dict = field(default_factory=dict)   # Enum only: {int: label}
+
+
+@dataclass
 class DeviceDescriptor:
     """The full parsed control surface reported by ``describe``."""
     engine: str = ""
@@ -44,7 +54,7 @@ class DeviceDescriptor:
     masked: bool = False   # engine narrowed its live_params/live_configs (see parse_describe)
     params: dict = field(default_factory=dict)    # name -> ParamDesc
     configs: dict = field(default_factory=dict)   # name -> ConfigDesc
-    queries: dict = field(default_factory=dict)   # name -> "deck" | "global"
+    queries: dict = field(default_factory=dict)   # name -> QueryDesc
     caps: int = 0
 
 
@@ -77,10 +87,13 @@ def parse_describe(lines):
             # (the dispatch doc shows a scope, the tools sketch omits it - accept both).
             vals = {int(k): v for k, v in (p.split(":", 1) for p in tok[2:] if ":" in p)}
             d.configs[tok[1]] = ConfigDesc(tok[1], vals)
-        elif tok[0] == "query":                   # query <name> <scope>
-            # Scope matters to a caller: a deck-scoped query needs a deck argument. Older firmware
-            # emitted the name alone, so default to global rather than failing to parse.
-            d.queries[tok[1]] = tok[2] if len(tok) > 2 else "global"
+        elif tok[0] == "query":       # query <name> <scope> [kind] [i:label ...]
+            # Scope tells a caller whether to pass a deck; kind tells it how to parse the reply.
+            # Both are optional so older firmware (name+scope, or name alone) still parses.
+            scope = tok[2] if len(tok) > 2 else "global"
+            kind = tok[3] if len(tok) > 3 else "text"
+            vals = {int(k): v for k, v in (p.split(":", 1) for p in tok[4:] if ":" in p)}
+            d.queries[tok[1]] = QueryDesc(tok[1], scope, kind, vals)
         elif tok[0] == "caps":                    # caps 0x....
             d.caps = int(tok[1], 16)
     return d

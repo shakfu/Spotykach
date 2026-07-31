@@ -16,6 +16,35 @@
 
 namespace spotykach {
 
+// --- declared queries (target B) --------------------------------------------------------------------
+// See docs/dev/terminal-target-b.md. An engine declares WHAT it can report; the platform does the
+// matching, the deck validation, the reply framing and the `describe` emission - so an engine writes no
+// parser and cannot get the wire grammar wrong, and dispatch and description cannot drift apart.
+
+// How a host should parse a reply value.
+enum class ValueKind : uint8_t { Bool, Int, Float, Enum, Text };
+
+// Whether a query takes a deck. Deck -> the platform validates one and passes it; Global -> DeckRef::A.
+enum class QueryScope : uint8_t { Global, Deck };
+
+struct EngineQuery {
+    const char* name;    // must not collide with a platform query; the platform set wins
+    QueryScope  scope;
+    ValueKind   kind;
+    const char* labels;  // Enum only: "0:none 1:plain 2:faded"; nullptr otherwise
+    bool        safe;    // idempotent AND side-effect free.
+                         // Only `safe` entries are ADVERTISED in describe, which makes the generic
+                         // sweep correct by construction: it calls everything it can see, and can only
+                         // see what is safe to call. A latching read (one that self-clears, like
+                         // take_param_reseed) must declare false - it stays reachable by name, it is
+                         // simply never offered to a generic consumer.
+};
+
+struct EngineQueryTable {
+    const EngineQuery* items;
+    uint8_t            count;
+};
+
 // A read-only view over the tokenized command line the codec produced. argv[0] is the verb.
 struct CommandView {
     const char* const* argv;

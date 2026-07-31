@@ -176,6 +176,18 @@ public:
     // implements any should set CapTerminal in capabilities().
     virtual bool handle_command(const CommandView& /*cmd*/, TextSink& /*reply*/) { return false; }
 
+    // Engine-specific state, DECLARED rather than parsed (docs/dev/terminal-target-b.md). Return a
+    // static table describing what this engine can report; the platform matches the name, validates the
+    // deck from the declared scope, frames the reply, and emits the `safe` entries into `describe` - so
+    // a generic host discovers and sweeps engine state with no per-engine code, and `handle_command`
+    // above is left for side-effecting verbs that a host must NOT call speculatively.
+    //
+    // read_engine_query() answers by INDEX into that table: no casts back to the concrete type, no
+    // function pointers in flash, and a static_assert in the engine can catch table/enum drift.
+    // It must append only the VALUE - the platform writes "ok " and the CRLF.
+    virtual EngineQueryTable engine_queries() const { return { nullptr, 0 }; }
+    virtual void read_engine_query(uint8_t /*index*/, DeckRef::Ref, TextSink&) {}
+
     // Liveness masks for `describe`: a bitset over ParamId/ConfigId marking what this engine actually
     // implements, so the descriptor lists only real params (a generic round-trip sweep would else get
     // false failures on ignored params). Default "all live" - describe over-reports and the host sweep

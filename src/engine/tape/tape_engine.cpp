@@ -147,6 +147,10 @@ float TapeEngine::param(ParamId id, DeckRef::Ref d) const {
     if (id == ParamId::Speed) return _speed_n[i];
     if (id == ParamId::AltPos) return _pan[i];
     if (id == ParamId::Mix)   return _gain[i];
+    // Crossfade is global (deck-A slot). set_param stores it in _xfade and derives _gA/_gB; without
+    // this case `get param crossfade` reported 0 for a value the engine really holds. Found by the
+    // on-target sweep, 2026-07-31 - the UI only ever writes this param, so nothing else noticed.
+    if (id == ParamId::Crossfade) return _xfade;
     if (id == ParamId::Env)   return _env_n[i];
     if (id == ParamId::Aux)   return (static_cast<float>(_slot[i]) + 0.5f) / static_cast<float>(kSlots);
     if (id == ParamId::Pos)     return _fx_n[i][0]; // drive

@@ -188,31 +188,27 @@ Platform service under `src/terminal/`, parallel to `src/transport/` (added to t
 
 Enabling the channel links the **USB-device CDC stack + ~6 KB of terminal code = ~19-25 KB of SRAM_EXEC**, because a normal build never brings USB up (Logger off/external, no METER). SRAM_EXEC is only 186 KB and several engines already sit near the ceiling, so the channel does **not** fit everywhere:
 
-| Engine | Result | SRAM_EXEC |
-|---|---|---|
-| passthrough | fits (-O2) | lean |
-| qdelay | fits (-O2) | 95.45% (91.32% at -Os) |
-| glitch | fits (-Os) | 92.16% |
-| radio | fits (-Os) | 92.98% |
-| delay | fits (-O2) | 95.84% |
-| pstretch | fits (-Os) | 95.16% |
-| tape | fits (-Os) | **99.29%** - ~1.3 KB of headroom left |
-| shuttle | fits (-Os) | 98.79% |
-| softcut | **overflows** by 732 B (-Os) | needs QSPI-execute |
-| bard | **overflows** by 2876 B (-Os) | needs QSPI-execute |
-| reverb | **overflows** by 21504 B (-Os) | needs QSPI-execute |
-| granular, reso | **overflows** at -O2 and -Os | needs QSPI-execute |
-| mosc / csound / chuck | fits (QSPI-execute) | 0% SRAM_EXEC - but see the USB_MIDI conflict below |
+**Every engine now fits.** `SRAM_EXEC` was rebalanced from 186K to 300K on 2026-07-31 (see
+`alt_sram.lds`): the old ceiling was a linker-script split, not silicon, and it left ~260K idle in the
+data region while code sat at 99%. Measured with the terminal enabled:
 
-Measured 2026-07-31, re-measured after the composite verbs landed - which cost roughly 0.9% across the
-board. **tape is now at 99.29%**, about 1.3 KB from the ceiling: anything further added to the terminal
-will push it over, and it should move to a QSPI-execute build before that happens.
+| Engine | SRAM_EXEC | data SRAM | was (at 186K) |
+|---|---|---|---|
+| delay (-O2) | 59.42% | 45.49% | 95.84% |
+| tape (-Os) | 61.56% | 30.49% | 99.29% |
+| softcut (-Os) | 62.78% | 47.58% | **overflowed** |
+| bard (-Os) | 63.48% | 68.81% | **overflowed** |
+| reso (-Os) | 69.01% | 30.18% | **overflowed** |
+| reverb (-Os) | 69.54% | 33.99% | **overflowed** |
+| granular (-O2) | 69.93% | 35.41% | **overflowed at -O2 and -Os** |
 
- The sweep forced `OPT=-Os`, so a row marked "fits (-Os)" is a lower bound - the roomier ones may fit at the default -O2 too (qdelay does, at 95.45%); only the overflow rows are a hard verdict. Every engine listed carries `live_params()`/ `live_configs()` masks, including the ones that do not currently fit - the masks are compiled out without `SPK_TERMINAL` and become correct the moment such a build is made from QSPI.
+granular + terminal was flashed and verified on hardware (214812 B, 24K past the old ceiling), which is
+what proves the bootloader copies more than the old region - a link-time pass alone would not have.
 
-**QSPI-execute engines need `USB_MIDI=0`.** `USB_MIDI` defaults ON for `BOOT_QSPI`, and `MidiUsbHandler` claims the same OTG_HS core as the terminal - now a compile error rather than a silent conflict, but it does mean mosc/csound/chuck cannot have both without sharing the transport.
+The QSPI-execute engines (mosc/csound/chuck) still need `USB_MIDI=0`, since `MidiUsbHandler` claims the
+same OTG_HS core as the terminal.
 
-Rule of thumb: lean SRAM engines fit at -O2, near-full ones need `OPT=-Os`, and the tightest (granular, reso) can host it only from a QSPI-execute build. The linker says `region SRAM_EXEC overflowed by N bytes` when it won't fit - that is the signal to switch to `-Os` or QSPI, not a code fault. The terminal code itself is ~6 KB (`dispatch` 3.3 KB, `text_sink` 0.8 KB, `names` 0.8 KB, `terminal` 0.7 KB, `fmt` 0.3 KB); the rest is the USB stack and is not reducible.
+Historical rule of thumb, now mostly moot: engines needed `-Os` or a QSPI-execute build to host the channel. With the rebalanced split none of that applies - `-Os` remains worthwhile on the heavy engines for its own sake, not to make the terminal fit. The terminal code itself is ~6 KB (`dispatch` 3.3 KB, `text_sink` 0.8 KB, `names` 0.8 KB, `terminal` 0.7 KB, `fmt` 0.3 KB); the rest is the USB stack and is not reducible.
 
 ## Verification status
 

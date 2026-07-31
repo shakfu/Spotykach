@@ -1,6 +1,9 @@
 # Target B - engine-specific commands, redesigned
 
-Status: **design, unbuilt.** The `handle_command` hook shipped in phase 1 and has never been used by an engine. This proposes what would make it worth using. It supersedes nothing yet; the existing hook stays until something replaces it.
+Status: **B1 built (2026-07-31); B2/B3 unbuilt.** The declared query table, the platform-side matching /
+validation / framing / description, the `safe` rule and the host-side `kind` parsing all landed, with
+tape and radio as the first two users. `handle_command` remains for side-effecting verbs. What follows
+is the design as written; deviations and what is still open are marked at the end.
 
 Context: [`terminal-control.md`](terminal-control.md) (the two-target split), [`terminal-dispatch.md`](terminal-dispatch.md) (how dispatch works today), [`terminal-impl.md`](terminal-impl.md) (what actually landed).
 
@@ -219,3 +222,38 @@ Per query: ~12 B of table (two pointers, two bytes, padding) plus the name strin
 7. **Who audits the `safe` flag?** Nothing verifies it; a mis-declared entry silently becomes sweepable.
    Options: a naming convention, a review checklist, or accept it as the same class of trust already
    placed in `live_params()`. Worth a decision before the second engine adopts this, not the first.
+
+
+## What actually landed (B1, 2026-07-31)
+
+- `EngineQuery` / `EngineQueryTable` / `ValueKind` / `QueryScope` in `engine/terminal_io.h`; the two
+  virtuals `engine_queries()` and `read_engine_query()` on `IEngine`, both no-op by default.
+- **The platform queries became a table of the same shape** (`kPlatformQueries` in `dispatch.cpp`) with
+  its own index-based reader. That was not in the original sketch and is the change that made the rest
+  clean: `describe` now walks one code path over both halves, so the platform cannot drift from the
+  engine either. The `PQ_COUNT` static_assert guards the table/enum pairing on both sides.
+- Wire format `query <name> <scope> <kind> [labels]`, emitted for `safe` entries only. Backward
+  compatibility was verified in practice, not just claimed: a device running pre-`kind` firmware was
+  swept by the new host, which defaults the missing token to `text`.
+- `CapTerminal` is derived from a non-empty table rather than hand-set, in both `caps` and `describe`.
+- Two real users: **tape** (`slot`, `loopmode`, `speed` - the varispeed actually in effect, as opposed
+  to the PITCH knob value `get param speed` already reports) and **radio** (`station` - which station is
+  *actually* streaming, `-1` for none, so a test can assert a seek completed rather than that a knob
+  moved; plus `stations`, `bank`).
+- The platform's own latching read (`reseed`) now declares `safe = false` in the same table, so the rule
+  is enforced by one mechanism for both halves rather than by omission.
+
+Off-target coverage exercises every `ValueKind`, both scopes, a deliberate name collision with a
+platform query (platform wins), a `safe = false` entry (reachable by name, never advertised), and the
+derived `CapTerminal` bit.
+
+## Still open after B1
+
+- **B2 (actions).** Not built. `handle_command` is still the only route for side-effecting verbs, and
+  still undiscoverable - deliberately, since a generic host must not invoke them speculatively.
+- **Arity.** `query fit <deck> <fraction>` still cannot be advertised, because the table has no
+  arg-count field. Handled by omission, which costs discoverability.
+- **Nothing audits `safe`.** A mis-declared entry silently becomes sweepable. Same class of trust as
+  `live_params()`, but worth a convention before this spreads further.
+- **`Text` values with spaces.** `query usb` returns a key=value string, which works because hosts take
+  the whole remainder - but it breaks the one-token assumption a stricter parser might make.

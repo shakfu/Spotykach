@@ -168,6 +168,37 @@ struct MockEngine : IEngine {
         return false;
     }
 
+    // Target B: a declared table covering every ValueKind, both scopes, a name that COLLIDES with a
+    // platform query (the platform must win), and an unsafe entry that must never be advertised.
+    enum EQ : uint8_t { EQ_LOOP, EQ_STATE, EQ_ON, EQ_N, EQ_TXT, EQ_MIX, EQ_LATCH, EQ_COUNT };
+    static constexpr EngineQuery kEQ[] = {
+        { "loop_ms", QueryScope::Deck,   ValueKind::Float, nullptr, true },
+        { "state",   QueryScope::Global, ValueKind::Enum,  "0:stopped 1:playing", true },
+        { "armed",   QueryScope::Deck,   ValueKind::Bool,  nullptr, true },
+        { "grains",  QueryScope::Global, ValueKind::Int,   nullptr, true },
+        { "label",   QueryScope::Global, ValueKind::Text,  nullptr, true },
+        { "mix",     QueryScope::Global, ValueKind::Float, nullptr, true },   // collides on purpose
+        { "latch",   QueryScope::Deck,   ValueKind::Bool,  nullptr, false },  // never advertised
+    };
+    static_assert(sizeof(kEQ) / sizeof(kEQ[0]) == EQ_COUNT, "kEQ out of sync");
+
+    bool declare_queries = false;   // off by default: most tests want a bare engine
+    EngineQueryTable engine_queries() const override {
+        return declare_queries ? EngineQueryTable{ kEQ, EQ_COUNT } : EngineQueryTable{ nullptr, 0 };
+    }
+    void read_engine_query(uint8_t i, DeckRef::Ref d, TextSink& r) override {
+        switch (i) {
+            case EQ_LOOP:  r.append_f32(d == DeckRef::B ? 250.f : 125.f); break;
+            case EQ_STATE: r.append_i32(1); break;
+            case EQ_ON:    r.append_i32(d == DeckRef::A ? 1 : 0); break;
+            case EQ_N:     r.append_i32(42); break;
+            case EQ_TXT:   r.str("tape-a"); break;
+            case EQ_MIX:   r.append_f32(9.9f); break;   // must never be reached: platform wins
+            case EQ_LATCH: r.append_i32(1); break;
+            default: break;
+        }
+    }
+
     ParamMask  pmask = ~ParamMask{0};
     ConfigMask cmask = static_cast<ConfigMask>(~ConfigMask{0});
     ParamMask  live_params() const override { return pmask; }
@@ -673,6 +704,47 @@ void test_dispatch_errors() {
     check_eq(run(e, "   "), "", "whitespace-only line produces no reply");
 }
 
+void test_dispatch_target_b() {
+    std::printf("dispatch: target B (declared engine queries)\n");
+    MockEngine e;
+
+    // With no table, an engine query name is just an unknown verb.
+    check_eq(run(e, "query loop_ms A"), "err unknown-verb\r\n", "no table -> unknown");
+    check(!contains(run(e, "describe"), "query loop_ms"), "no table -> nothing advertised");
+    check_eq(run(e, "caps"), "ok 0x133\r\n", "no table -> CapTerminal not set");
+
+    e.declare_queries = true;
+
+    check_eq(run(e, "query loop_ms A"), "ok 125.0000\r\n", "deck-scoped engine query");
+    check_eq(run(e, "query loop_ms B"), "ok 250.0000\r\n", "the platform passes the right deck");
+    check_eq(run(e, "query state"),     "ok 1\r\n",        "global engine query needs no deck");
+    check_eq(run(e, "query armed A"),   "ok 1\r\n",        "bool kind");
+    check_eq(run(e, "query grains"),    "ok 42\r\n",       "int kind");
+    check_eq(run(e, "query label"),     "ok tape-a\r\n",   "text kind");
+
+    // The platform does the validation, so the engine writes none.
+    check_eq(run(e, "query loop_ms"),  "err no-arg\r\n",  "deck-scoped query without a deck");
+    check_eq(run(e, "query loop_ms Z"), "err bad-deck\r\n", "deck-scoped query with a bad deck");
+
+    // Platform names win, so an engine cannot shadow the reflective surface.
+    check_eq(run(e, "query mix"), "ok 0.2500\r\n", "a colliding engine name does NOT shadow the platform");
+
+    // CapTerminal is derived from the table, not hand-set.
+    check_eq(run(e, "caps"), "ok 0x533\r\n", "declaring queries advertises CapTerminal (0x400)");
+
+    const std::string d = run(e, "describe");
+    check(contains(d, "query loop_ms deck float\r\n"),  "engine query advertised with scope + kind");
+    check(contains(d, "query state global enum 0:stopped 1:playing\r\n"), "enum labels advertised");
+    check(contains(d, "query empty deck bool\r\n"),     "platform queries now carry a kind too");
+    check(!contains(d, "query latch"), "an unsafe entry is never advertised");
+    check(!contains(d, "query reseed"), "the platform's own latching read stays unadvertised");
+    check(count_lines_with(d, "query ") == 9 + 6,
+          "describe emits both halves: 9 safe platform + 6 safe engine");
+
+    // Unsafe entries stay reachable by name - they are simply not offered to a generic host.
+    check_eq(run(e, "query latch A"), "ok 1\r\n", "an unsafe query still answers when asked directly");
+}
+
 void test_dispatch_engine_verbs() {
     std::printf("dispatch: engine-specific verbs (target B)\n");
     MockEngine e;
@@ -778,6 +850,7 @@ int main() {
     test_dispatch_composites();
     test_dispatch_observation();
     test_dispatch_errors();
+    test_dispatch_target_b();
     test_dispatch_engine_verbs();
     test_describe();
 

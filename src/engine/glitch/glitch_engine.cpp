@@ -69,6 +69,11 @@ void GlitchEngine::set_param(ParamId id, DeckRef::Ref d, float v) {
 
 float GlitchEngine::param(ParamId id, DeckRef::Ref d) const {
     const int i = (d == DeckRef::A) ? 0 : 1;
+    // Crossfade is global (deck-A slot). set_param stores it and derives the A/B blend gains, but
+    // param() had no case, so `get param crossfade` reported 0 for a value the engine really holds.
+    // Found by the on-target sweep 2026-07-31 (six engines shared this omission); the UI only ever
+    // writes this param, so nothing else noticed.
+    if (id == ParamId::Crossfade) return _xfade;
     if (id == ParamId::Size)  return _p1[i];
     if (id == ParamId::Pos)   return _p2[i];
     if (id == ParamId::Speed) return _pitch[i];

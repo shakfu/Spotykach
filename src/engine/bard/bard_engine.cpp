@@ -616,6 +616,11 @@ void BardEngine::set_param(ParamId id, DeckRef::Ref d, float v) {
 
 float BardEngine::param(ParamId id, DeckRef::Ref d) const {
     const int i = idx(d);
+    // Crossfade is global (deck-A slot). set_param stores it and derives the A/B blend gains, but
+    // param() had no case, so `get param crossfade` reported 0 for a value the engine really holds.
+    // Found by the on-target sweep 2026-07-31 (six engines shared this omission); the UI only ever
+    // writes this param, so nothing else noticed.
+    if (id == ParamId::Crossfade) return _xfade;
     switch (id) {
         case ParamId::Speed:  return _book_n[i];
         case ParamId::Pos:    return _mark_n[i];

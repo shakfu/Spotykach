@@ -17,11 +17,11 @@ endif
 # engine vtable - build clean when switching TERMINAL (the engine-* one-shot targets already `make
 # clean`; pass TERMINAL=1 to them, e.g. `make engine-delay TERMINAL=1`).
 #
-# Footprint: enabling the channel links the USB-device CDC stack + ~6 KB of terminal code (~19-25 KB of
-# SRAM_EXEC total, since a normal build never brings USB up). Lean engines (passthrough, delay ~94%) fit
-# at -O2; QSPI-execute engines (mosc/csound/chuck) have unlimited room. A near-full -O2 engine may need
-# -Os to fit (e.g. `make ENGINE=tape TERMINAL=1 OPT=-Os` -> ~98%); the tightest engines (granular, reso)
-# only host it from a QSPI-execute build. The linker reports `region SRAM_EXEC overflowed` if it won't fit.
+# Footprint: enabling the channel costs ~28 KB of SRAM_EXEC (mostly the USB-device CDC stack, which a
+# normal build never links). Since SRAM_EXEC was rebalanced 186K -> 300K (see alt_sram.lds) EVERY engine
+# hosts it with margin - worst case granular at 69.9%. The old advice that granular/reso needed a
+# QSPI-execute build no longer applies. QSPI-execute engines (mosc/csound/chuck) additionally need
+# USB_MIDI=0, since MidiUsbHandler claims the same OTG_HS core.
 ifeq ($(TERMINAL), 1)
 C_DEFS += -DSPK_TERMINAL=1
 endif

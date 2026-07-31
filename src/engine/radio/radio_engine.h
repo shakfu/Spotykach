@@ -47,6 +47,29 @@ public:
     Capabilities capabilities() const override { return CapOwnDisplay | CapDualDeck | CapAux; }
 
 #if SPK_TERMINAL
+    // Engine-specific state (target B, docs/dev/terminal-target-b.md). `station` is the one that
+    // matters for testing: the knob selects a station, but this reports which one is ACTUALLY
+    // streaming (-1 = none), so a test can assert the seek completed rather than that the knob moved.
+    enum EQ : uint8_t { EQ_STATION, EQ_STATIONS, EQ_BANK, EQ_COUNT };
+    static constexpr EngineQuery kEngineQueries[] = {
+        { "station",  QueryScope::Deck, ValueKind::Int, nullptr, true },   // -1 = none open
+        { "stations", QueryScope::Deck, ValueKind::Int, nullptr, true },   // count found in the bank
+        { "bank",     QueryScope::Deck, ValueKind::Int, nullptr, true },
+    };
+    static_assert(sizeof(kEngineQueries) / sizeof(kEngineQueries[0]) == EQ_COUNT,
+                  "kEngineQueries out of sync with the EQ enum");
+
+    EngineQueryTable engine_queries() const override { return { kEngineQueries, EQ_COUNT }; }
+    void read_engine_query(uint8_t i, DeckRef::Ref d, TextSink& r) override {
+        const int k = (d == DeckRef::B) ? 1 : 0;
+        switch (i) {
+            case EQ_STATION:  r.append_i32(_open_station[k]); break;
+            case EQ_STATIONS: r.append_i32(_nst[k]); break;
+            case EQ_BANK:     r.append_i32(_bank[k]); break;
+            default: break;
+        }
+    }
+
     // Liveness masks for `describe` (docs/dev/terminal-dispatch.md): the ids this engine actually
     // consumes, so a host sweep exercises only real parameters instead of the whole ParamId enum.
     // Derived from the engine's own ParamId/ConfigId use; NOT yet verified on hardware.

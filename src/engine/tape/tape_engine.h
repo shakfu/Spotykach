@@ -47,6 +47,30 @@ public:
     Capabilities capabilities() const override { return CapOwnDisplay | CapDualDeck | CapAux | CapAltPos; }
 
 #if SPK_TERMINAL
+    // Engine-specific state (target B, docs/dev/terminal-target-b.md). These are things the generic
+    // IEngine surface cannot express: which SD slot a deck points at, which loop mode the ENV knob
+    // selected, and the varispeed actually in effect (as opposed to the PITCH knob value, which
+    // `get param speed` already reports). All three are plain reads - safe to sweep.
+    enum EQ : uint8_t { EQ_SLOT, EQ_LOOPMODE, EQ_SPEED, EQ_COUNT };
+    static constexpr EngineQuery kEngineQueries[] = {
+        { "slot",     QueryScope::Deck, ValueKind::Int,   nullptr, true },
+        { "loopmode", QueryScope::Deck, ValueKind::Enum,  "0:none 1:plain 2:faded 3:fripp", true },
+        { "speed",    QueryScope::Deck, ValueKind::Float, nullptr, true },
+    };
+    static_assert(sizeof(kEngineQueries) / sizeof(kEngineQueries[0]) == EQ_COUNT,
+                  "kEngineQueries out of sync with the EQ enum");
+
+    EngineQueryTable engine_queries() const override { return { kEngineQueries, EQ_COUNT }; }
+    void read_engine_query(uint8_t i, DeckRef::Ref d, TextSink& r) override {
+        const int k = (d == DeckRef::A) ? 0 : 1;   // tape's idiom, cf. TapeEngine::param
+        switch (i) {
+            case EQ_SLOT:     r.append_i32(_slot[k]); break;
+            case EQ_LOOPMODE: r.append_i32(static_cast<int32_t>(_loop_mode[k])); break;
+            case EQ_SPEED:    r.append_f32(_speed[k]); break;
+            default: break;
+        }
+    }
+
     // Liveness masks for `describe` (docs/dev/terminal-dispatch.md) - the ids this engine actually
     // consumes, so a host sweep exercises only real parameters. ModSpeed is deliberately absent: it
     // arrives via set_mod_speed(), not set_param, and is platform-owned as far as describe is concerned.
