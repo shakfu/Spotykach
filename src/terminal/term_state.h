@@ -8,6 +8,7 @@
 
 #include <cstdint>
 
+#include "terminal/preset.h"
 #include "terminal/usb_diag.h"
 
 namespace spotykach {
@@ -21,6 +22,8 @@ struct TermState {
     // power cycle. Terminal::process() reverts to `mode run` after this long without a command. Any
     // command resets it, so a live session is never interrupted.
     uint32_t last_cmd_ms = 0;     // System::GetNow() at the last dispatched line
+
+    PresetSlots presets;          // `preset save|load` snapshots (params only; see preset.h)
 };
 
 }  // namespace spotykach

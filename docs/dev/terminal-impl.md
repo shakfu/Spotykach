@@ -6,16 +6,9 @@ Everything is behind `SPK_TERMINAL` and costs **nothing** when off (verified: th
 
 ## HARDWARE BRING-UP — RESOLVED, PHASE 1 WORKING ON BOTH BOARDS (2026-07-31)
 
-**Root cause: the channel was on the wrong USB peripheral.** The Spotykach's panel USB-C is wired to
-**OTG_HS (PB14/PB15**, Seed pins D29/D30), not to the Seed's own OTG_FS pins (PA11/PA12). The app was
-bringing up `FS_INTERNAL` and driving two pins this board connects to nothing, so the host never saw an
-attach. The board's bootloader is libDaisy's `extdfu` variant, which serves DFU over OTG_HS - which is
-why DFU always enumerated on the very connector the app could not use. Fixed by defaulting
-`SPK_TERMINAL_PORT_EXTERNAL` to 1 (`TERMPORT=int` for a bare Seed/Pod).
+**Root cause: the channel was on the wrong USB peripheral.** The Spotykach's panel USB-C is wired to **OTG_HS (PB14/PB15**, Seed pins D29/D30), not to the Seed's own OTG_FS pins (PA11/PA12). The app was bringing up `FS_INTERNAL` and driving two pins this board connects to nothing, so the host never saw an attach. The board's bootloader is libDaisy's `extdfu` variant, which serves DFU over OTG_HS - which is why DFU always enumerated on the very connector the app could not use. Fixed by defaulting `SPK_TERMINAL_PORT_EXTERNAL` to 1 (`TERMPORT=int` for a bare Seed/Pod).
 
-Verified on hardware: `skterm.py` connects, `describe` parses (24 params, 6 configs), `query usb`
-returns, params round-trip. Also verified on a Daisy Pod with `TERMPORT=int`, whose USB connector
-genuinely is OTG_FS.
+Verified on hardware: `skterm.py` connects, `describe` parses (24 params, 6 configs), `query usb` returns, params round-trip. Also verified on a Daisy Pod with `TERMPORT=int`, whose USB connector genuinely is OTG_FS.
 
 `query usb` on the Spotykach, working:
 
@@ -26,71 +19,39 @@ ok boot=3 region=3 clkcfg=1 hsi48=1 usbsel=3 usb33den=1 usb33rdy=1 phy=1 pullup=
 
 ### Why this took two sessions, and what the tree was already saying
 
-The Makefile routes the logger to `LOGGER_EXTERNAL` **unconditionally**. That is a statement about
-which jack this hardware exposes, and it was read as an incidental detail: deviation #1 below observed
-it and concluded "nothing owns `FS_INTERNAL`, so the terminal must init it" - the opposite inference.
-`terminal-transport.md` was then written on the premise that the channel shares the *internal* port
-with the Logger. Every subsequent hypothesis (VBUS sensing, clock config, supply ordering, the
-bootloader handoff) was a search for a fault on a peripheral that was working perfectly.
+The Makefile routes the logger to `LOGGER_EXTERNAL` **unconditionally**. That is a statement about which jack this hardware exposes, and it was read as an incidental detail: deviation #1 below observed it and concluded "nothing owns `FS_INTERNAL`, so the terminal must init it" - the opposite inference. `terminal-transport.md` was then written on the premise that the channel shares the *internal* port with the Logger. Every subsequent hypothesis (VBUS sensing, clock config, supply ordering, the bootloader handoff) was a search for a fault on a peripheral that was working perfectly.
 
-Two boards also differ in ways that muddied the comparison: the Spotykach runs a v6.1+ bootloader
-(`boot=3`, so `clkcfg=1` - it configures its own clocks) while the Pod runs a pre-v6 one (`boot=0`,
-`clkcfg=0`, taking the `skip_clocks` path). Neither mattered in the end.
+Two boards also differ in ways that muddied the comparison: the Spotykach runs a v6.1+ bootloader (`boot=3`, so `clkcfg=1` - it configures its own clocks) while the Pod runs a pre-v6 one (`boot=0`, `clkcfg=0`, taking the `skip_clocks` path). Neither mattered in the end.
 
 ### What actually identified it
 
-A live, on-panel register readout. The decisive reading was a **completely healthy OTG_FS core** -
-clocks, supply, transceiver powered, `DCTL.SDIS` clear, and both pads still in AF10 - with **zero host
-activity**. A controller doing everything right into total silence means the wire is not there. That
-combination is the signature of a disconnected port, and no single-bit pass/fail experiment could have
-produced it.
+A live, on-panel register readout. The decisive reading was a **completely healthy OTG_FS core** - clocks, supply, transceiver powered, `DCTL.SDIS` clear, and both pads still in AF10 - with **zero host activity**. A controller doing everything right into total silence means the wire is not there. That combination is the signature of a disconnected port, and no single-bit pass/fail experiment could have produced it.
 
 Two lessons worth keeping:
 
-- **An init-time snapshot is not enough.** The first probe captured state once in `Terminal::init()`
-  and could not have detected anything that changed afterwards. It had to become a live re-read
-  (`usb_diag_refresh`, called every main loop) before it could be trusted.
-- **`sof` is the reliable host-activity bit; `rst` is not.** The bus reset is transient and the ISR
-  clears `GINTSTS` long before the main loop samples it, so `usb_reset_seen` reads 0 even on a fully
-  working link (see the capture above). Judge "is the host talking to us" by `sof`.
+- **An init-time snapshot is not enough.** The first probe captured state once in `Terminal::init()` and could not have detected anything that changed afterwards. It had to become a live re-read (`usb_diag_refresh`, called every main loop) before it could be trusted.
+
+- **`sof` is the reliable host-activity bit; `rst` is not.** The bus reset is transient and the ISR clears `GINTSTS` long before the main loop samples it, so `usb_reset_seen` reads 0 even on a fully working link (see the capture above). Judge "is the host talking to us" by `sof`.
 
 ### A build-system trap that cost a hardware debugging cycle (fixed 2026-07-31)
 
-After the port fix, `TERMINAL=1` builds came up with a **frozen, garbled panel** (both rings stuck
-amber, panel button dead) while the terminal channel itself answered `query usb` normally. The port was
-blamed first; it was innocent - `TERMPORT=int` reproduced it too.
+After the port fix, `TERMINAL=1` builds came up with a **frozen, garbled panel** (both rings stuck amber, panel button dead) while the terminal channel itself answered `query usb` normally. The port was blamed first; it was innocent - `TERMPORT=int` reproduced it too.
 
-Root cause: this project builds under **GNU Make 3.81** (what macOS ships), which compares mtimes at
-whole-second resolution. The `.terminal-stamp` mechanism relies on the stamp becoming *newer* than the
-objects that depend on it, so any object compiled in the same second the stamp was rewritten was judged
-up to date and skipped. A flag toggle therefore produced a **partial** rebuild whose stale subset
-depended on timing - hence intermittent.
+Root cause: this project builds under **GNU Make 3.81** (what macOS ships), which compares mtimes at whole-second resolution. The `.terminal-stamp` mechanism relies on the stamp becoming *newer* than the objects that depend on it, so any object compiled in the same second the stamp was rewritten was judged up to date and skipped. A flag toggle therefore produced a **partial** rebuild whose stale subset depended on timing - hence intermittent.
 
-That is fatal here because these flags change **type layout**, not just behaviour: `SPK_TERMINAL` adds
-`_input_frozen` to `CoreUI`, `_terminal` to `AppImpl` and three virtuals to `IEngine`; `TERM_USBDIAG`
-adds another `CoreUI` member. Linking stale against fresh objects puts every later member at the wrong
-offset. A fresh `app.o` kept the channel working while a stale `core.ui.leds.o` rendered the panel from
-garbage - which is exactly the symptom, and why it looked like a USB fault rather than a build fault.
+That is fatal here because these flags change **type layout**, not just behaviour: `SPK_TERMINAL` adds `_input_frozen` to `CoreUI`, `_terminal` to `AppImpl` and three virtuals to `IEngine`; `TERM_USBDIAG` adds another `CoreUI` member. Linking stale against fresh objects puts every later member at the wrong offset. A fresh `app.o` kept the channel working while a stale `core.ui.leds.o` rendered the panel from garbage - which is exactly the symptom, and why it looked like a USB fault rather than a build fault.
 
-Fixed by making a stamp change **delete the objects** (`rm -f build/*.o`) rather than relying on mtime
-ordering, and by making all three stamps prerequisites of `$(OBJECTS)` so the recipes run before any
-compilation and cannot race a `-j` build. Toggling any of TERMINAL / USBDIAG / TERMPORT now forces a
-full rebuild, which is what the flags actually require.
+Fixed by making a stamp change **delete the objects** (`rm -f build/*.o`) rather than relying on mtime ordering, and by making all three stamps prerequisites of `$(OBJECTS)` so the recipes run before any compilation and cannot race a `-j` build. Toggling any of TERMINAL / USBDIAG / TERMPORT now forces a full rebuild, which is what the flags actually require.
 
-The general lesson: a stamp file that encodes a flag is only safe if the flag cannot change type
-layout, or if the recipe deletes rather than out-dates. The Makefile's old advice ("toggling TERMINAL is
-a clean build") was correct and the stamp quietly undermined it by making a partial rebuild look valid.
+The general lesson: a stamp file that encodes a flag is only safe if the flag cannot change type layout, or if the recipe deletes rather than out-dates. The Makefile's old advice ("toggling TERMINAL is a clean build") was correct and the stamp quietly undermined it by making a partial rebuild look valid.
 
 ### Diagnostics that remain in the tree
 
-- `USBDIAG=1` - the panel/onboard-LED readout (`AppImpl::usb_diag_tick`, `CoreUI::_draw_usb_diag`).
-  Worth keeping: it is the only way to get an answer out of a cased unit whose channel is down.
-- `SPK_TERMINAL_USB33_PREINIT` (default on) - a genuine ordering correction to libDaisy, which enables
-  the VDD33_USB detector only *after* `USBD_Start` has already connected and never waits for
-  `USB33RDY`.
-- `VBUSOFF=1` - **now dead scaffolding.** It targets an OTG_FS problem that never existed, and libDaisy
-  already configures OTG_HS with `vbus_sensing_enable = DISABLE` (`vbussense=0` above, with the
-  override not run). Candidate for removal.
+- `USBDIAG=1` - the panel/onboard-LED readout (`AppImpl::usb_diag_tick`, `CoreUI::_draw_usb_diag`). Worth keeping: it is the only way to get an answer out of a cased unit whose channel is down.
+
+- `SPK_TERMINAL_USB33_PREINIT` (default on) - a genuine ordering correction to libDaisy, which enables the VDD33_USB detector only *after* `USBD_Start` has already connected and never waits for `USB33RDY`.
+
+- `VBUSOFF=1` - **now dead scaffolding.** It targets an OTG_FS problem that never existed, and libDaisy already configures OTG_HS with `vbus_sensing_enable = DISABLE` (`vbussense=0` above, with the override not run). Candidate for removal.
 
 ### HISTORICAL - the blocking bug as first characterized (2026-07-03), resolved above
 
@@ -215,10 +176,7 @@ Platform service under `src/terminal/`, parallel to `src/transport/` (added to t
 
 ## Deviations from the design specs (and why)
 
-1. **The terminal owns the CDC device itself; there is no Logger coexistence to manage.** (The port
-   choice in this item was WRONG - see the resolved section above; the channel is on `FS_EXTERNAL`.
-   Note also that `INFS_LOG=1` is set only under `DEBUG=1`, so a normal build has no logger at all and
-   never brings up a second OTG core.) The transport spec's central premise was "the Logger already owns USB-C (internal)", so the terminal must attach only its RX callback and not re-init. But the **Makefile forces `-DINFS_LOG_TARGET=daisy::LOGGER_EXTERNAL`** (overriding `common.h`'s `LOGGER_INTERNAL` default), so the Logger - when present at all (`INFS_LOG`/`DEBUG`) - is on the *external* port. Nothing owns `FS_INTERNAL`, so `Terminal::init()` calls `Init(FS_INTERNAL)` unconditionally (`SPK_TERMINAL_INIT_USB`, default 1). Consequence: replies flow on USB-C, any logs flow on the external port - separate streams, so the host reply stream is clean. The `is_log` (`[`-prefix) filter still works; it just never fires. If a build ever puts the Logger back on the internal port, set `SPK_TERMINAL_INIT_USB=0`.
+1. **The terminal owns the CDC device itself; there is no Logger coexistence to manage.** (The port choice in this item was WRONG - see the resolved section above; the channel is on `FS_EXTERNAL`. Note also that `INFS_LOG=1` is set only under `DEBUG=1`, so a normal build has no logger at all and never brings up a second OTG core.) The transport spec's central premise was "the Logger already owns USB-C (internal)", so the terminal must attach only its RX callback and not re-init. But the **Makefile forces `-DINFS_LOG_TARGET=daisy::LOGGER_EXTERNAL`** (overriding `common.h`'s `LOGGER_INTERNAL` default), so the Logger - when present at all (`INFS_LOG`/`DEBUG`) - is on the *external* port. Nothing owns `FS_INTERNAL`, so `Terminal::init()` calls `Init(FS_INTERNAL)` unconditionally (`SPK_TERMINAL_INIT_USB`, default 1). Consequence: replies flow on USB-C, any logs flow on the external port - separate streams, so the host reply stream is clean. The `is_log` (`[`-prefix) filter still works; it just never fires. If a build ever puts the Logger back on the internal port, set `SPK_TERMINAL_INIT_USB=0`.
 
 2. **`describe` config lines carry no scope token.** The dispatch spec's rendered example shows `config mode deck 0:slice ...`, but its own `parse_describe` sketch reads `tok[2:]` as `int:label` pairs (no scope). Firmware emits the parser-consistent form: `config <name> <i:label>...`. `param` and `query` lines *do* carry scope (`deck`/`global`). The host `parse_describe` was additionally made tolerant of both forms. Verified: a sample of the firmware's exact output round-trips through `parse_describe`.
 
@@ -236,9 +194,9 @@ Enabling the channel links the **USB-device CDC stack + ~6 KB of terminal code =
 | qdelay | fits (-O2) | 95.45% (91.32% at -Os) |
 | glitch | fits (-Os) | 92.16% |
 | radio | fits (-Os) | 92.98% |
-| delay | fits (-O2) | 94.96% |
+| delay | fits (-O2) | 95.84% |
 | pstretch | fits (-Os) | 95.16% |
-| tape | fits (-Os) | 98.41% |
+| tape | fits (-Os) | **99.29%** - ~1.3 KB of headroom left |
 | shuttle | fits (-Os) | 98.79% |
 | softcut | **overflows** by 732 B (-Os) | needs QSPI-execute |
 | bard | **overflows** by 2876 B (-Os) | needs QSPI-execute |
@@ -246,15 +204,13 @@ Enabling the channel links the **USB-device CDC stack + ~6 KB of terminal code =
 | granular, reso | **overflows** at -O2 and -Os | needs QSPI-execute |
 | mosc / csound / chuck | fits (QSPI-execute) | 0% SRAM_EXEC - but see the USB_MIDI conflict below |
 
-Measured 2026-07-31. The sweep forced `OPT=-Os`, so a row marked "fits (-Os)" is a lower bound - the
-roomier ones may fit at the default -O2 too (qdelay does, at 95.45%); only the overflow rows are a hard
-verdict. Every engine listed carries `live_params()`/
-`live_configs()` masks, including the ones that do not currently fit - the masks are compiled out
-without `SPK_TERMINAL` and become correct the moment such a build is made from QSPI.
+Measured 2026-07-31, re-measured after the composite verbs landed - which cost roughly 0.9% across the
+board. **tape is now at 99.29%**, about 1.3 KB from the ceiling: anything further added to the terminal
+will push it over, and it should move to a QSPI-execute build before that happens.
 
-**QSPI-execute engines need `USB_MIDI=0`.** `USB_MIDI` defaults ON for `BOOT_QSPI`, and
-`MidiUsbHandler` claims the same OTG_HS core as the terminal - now a compile error rather than a silent
-conflict, but it does mean mosc/csound/chuck cannot have both without sharing the transport.
+ The sweep forced `OPT=-Os`, so a row marked "fits (-Os)" is a lower bound - the roomier ones may fit at the default -O2 too (qdelay does, at 95.45%); only the overflow rows are a hard verdict. Every engine listed carries `live_params()`/ `live_configs()` masks, including the ones that do not currently fit - the masks are compiled out without `SPK_TERMINAL` and become correct the moment such a build is made from QSPI.
+
+**QSPI-execute engines need `USB_MIDI=0`.** `USB_MIDI` defaults ON for `BOOT_QSPI`, and `MidiUsbHandler` claims the same OTG_HS core as the terminal - now a compile error rather than a silent conflict, but it does mean mosc/csound/chuck cannot have both without sharing the transport.
 
 Rule of thumb: lean SRAM engines fit at -O2, near-full ones need `OPT=-Os`, and the tightest (granular, reso) can host it only from a QSPI-execute build. The linker says `region SRAM_EXEC overflowed by N bytes` when it won't fit - that is the signal to switch to `-Os` or QSPI, not a code fault. The terminal code itself is ~6 KB (`dispatch` 3.3 KB, `text_sink` 0.8 KB, `names` 0.8 KB, `terminal` 0.7 KB, `fmt` 0.3 KB); the rest is the USB stack and is not reducible.
 

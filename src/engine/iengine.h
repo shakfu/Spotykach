@@ -183,6 +183,12 @@ public:
     // ConfigId has 6 < 8, so uint32_t/uint8_t suffice.)
     using ParamMask  = uint32_t;
     using ConfigMask = uint8_t;
+    // The value `reset` writes for this param. Default 0.5 - the midpoint of the normalized range:
+    // deterministic, which is what a test baseline needs, but not necessarily musical. An engine with
+    // real neutral values should override (a delay whose feedback default is 0.5 will self-oscillate
+    // less alarmingly at 0.2). Only ever called from the terminal, never from the audio path.
+    virtual float      param_default(ParamId) const { return 0.5f; }
+
     virtual ParamMask  live_params()  const { return ~ParamMask{0}; }
     virtual ConfigMask live_configs() const { return static_cast<ConfigMask>(~ConfigMask{0}); }
 #endif

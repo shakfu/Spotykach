@@ -111,7 +111,9 @@ Elsewhere:
 Edited:
 
 - `src/engine/istreamdeck.h` - `write_text`, `seek_play` (both defaulted).
+
 - `src/hw/stream_deck.{h,cpp}` - both implementations, plus a `raw_src` flag marking whether the live play source is frame-seekable.
+
 - `src/engine/engine_select.h`, `Makefile`, `CMakeLists.txt`, `Makefile.cmake`, `host/Makefile` - register `bard` with `SPK_USE_STREAM` and `-Os`.
 
 ## Design notes worth keeping

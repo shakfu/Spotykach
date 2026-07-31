@@ -82,6 +82,8 @@ struct MockEngine : IEngine {
         params[static_cast<size_t>(id)][d == DeckRef::B ? 1 : 0] = v;
         rec("set_param %s %d %.4f", param_name(id), int(d), v);
     }
+    // A non-0.5 default, so a reset is distinguishable from "everything happened to be 0.5".
+    float param_default(ParamId) const override { return 0.25f; }
     float param(ParamId id, DeckRef::Ref d) const override {
         return params[static_cast<size_t>(id)][d == DeckRef::B ? 1 : 0];
     }
@@ -124,6 +126,27 @@ struct MockEngine : IEngine {
     void clear_buffer(DeckRef::Ref d) override { rec("clear_buffer %d", int(d)); }
     void set_fx(DeckRef::Ref d, FxKind k, bool on) override {
         rec("set_fx %d %s %d", int(d), k == FxKind::Flux ? "flux" : "grit", on ? 1 : 0);
+    }
+    void toggle_fx_lock(DeckRef::Ref d, FxKind k) override {
+        rec("toggle_fx_lock %d %s", int(d), k == FxKind::Flux ? "flux" : "grit");
+    }
+    GritReseed toggle_grit_mode(DeckRef::Ref d) override {
+        rec("toggle_grit_mode %d", int(d));
+        return { 0.25f, 0.75f };
+    }
+    void on_seq_toggle_arm(DeckRef::Ref d) override { rec("on_seq_toggle_arm %d", int(d)); }
+    void clear_sequence(DeckRef::Ref d) override    { rec("clear_sequence %d", int(d)); }
+    void disarm_track(DeckRef::Ref d) override      { rec("disarm_track %d", int(d)); }
+
+    size_t audio_recorded_bytes(DeckRef::Ref) override { return 4096; }
+    size_t audio_capacity_bytes(DeckRef::Ref) override { return 65536; }
+    DeckLayout deck_layout(DeckRef::Ref) override      { return DeckLayout::slice; }   // == 1
+    bool size_sets_tempo(DeckRef::Ref) override        { return true; }
+    float tempo_to_fit(DeckRef::Ref, float fraction) override { return 120.f * fraction; }
+    // Latching, exactly like the real thing: true once, then false.
+    bool reseed_pending = true;
+    bool take_param_reseed(DeckRef::Ref) override {
+        const bool r = reseed_pending; reseed_pending = false; return r;
     }
 
     bool empty_a = false;
@@ -524,6 +547,61 @@ void test_dispatch_stimulus() {
     check_eq(e.last(), "set_fx 0 flux 1", "fx flux binding");
     check_eq(run(e, "fx grit B off"), "ok\r\n", "fx off reply");
     check_eq(e.last(), "set_fx 1 grit 0", "fx grit binding");
+    check_eq(run(e, "fx lock flux A"), "ok\r\n", "fx lock reply");
+    check_eq(e.last(), "toggle_fx_lock 0 flux", "fx lock binding");
+    check_eq(run(e, "fx gritmode B"), "ok intensity=0.2500 mix=0.7500\r\n",
+             "an action CAN return values - gritmode reports the reseed pair");
+    check_eq(e.last(), "toggle_grit_mode 1", "fx gritmode binding");
+
+    check_eq(run(e, "seq trig A"), "ok\r\n", "seq trig reply");
+    check_eq(e.last(), "on_seq_trigger 0", "seq trig binding (synonym of pad seq)");
+    check_eq(run(e, "seq arm B"), "ok\r\n", "seq arm reply");
+    check_eq(e.last(), "on_seq_toggle_arm 1", "seq arm binding");
+    check_eq(run(e, "seq clear A"), "ok\r\n", "seq clear reply");
+    check_eq(e.last(), "clear_sequence 0", "seq clear binding");
+    check_eq(run(e, "seq disarm A"), "ok\r\n", "seq disarm reply");
+    check_eq(e.last(), "disarm_track 0", "seq disarm binding");
+    check_eq(run(e, "seq nosuch A"), "err bad-arg\r\n", "unknown seq action");
+}
+
+// --- composite verbs: reset / preset ---------------------------------------------------------------
+
+void test_dispatch_composites() {
+    std::printf("dispatch: composites (reset / preset)\n");
+    MockEngine e;
+    // Narrow the mask so the counts below are exact and readable: 2 deck params + 1 global.
+    e.pmask = (1u << uint32_t(ParamId::Size))
+            | (1u << uint32_t(ParamId::Feedback))
+            | (1u << uint32_t(ParamId::Crossfade));   // global -> deck A slot only
+
+    // 2 deck params x 2 decks + 1 global x 1 = 5 writes.
+    check_eq(run(e, "reset"), "ok 5\r\n", "reset writes every advertised param, globals once");
+    check_eq(run(e, "get param size A"), "ok 0.2500\r\n", "reset used the engine's declared default");
+    check_eq(run(e, "get param size B"), "ok 0.2500\r\n", "reset covered deck B");
+
+    check_eq(run(e, "reset A"), "ok 3\r\n", "reset <deck> touches one deck (plus globals)");
+    check_eq(run(e, "reset Z"), "err bad-deck\r\n", "reset rejects a bad deck");
+
+    // Snapshot, perturb, restore - the whole point of the pair. These MUST share one TermState: the
+    // slots live there (one Terminal, one state, for the life of the firmware), so the convenience
+    // run() overload - which makes a fresh state per call - would silently lose the saved slot.
+    TermState st;
+    check_eq(run(e, st, "preset save 0"), "ok 5\r\n", "preset save captures the advertised params");
+    check_eq(run(e, st, "set param size A 0.9"), "ok\r\n", "perturb");
+    check_eq(run(e, st, "get param size A"), "ok 0.9000\r\n", "perturbed");
+    check_eq(run(e, st, "preset load 0"), "ok 5\r\n", "preset load restores");
+    check_eq(run(e, st, "get param size A"), "ok 0.2500\r\n", "the perturbation was undone");
+
+    check_eq(run(e, st, "preset load 1"), "ok 0\r\n", "loading a never-saved slot restores nothing");
+    check_eq(run(e, st, "preset save 9"), "err bad-arg\r\n", "slot out of range");
+    check_eq(run(e, st, "preset nosuch 0"), "err bad-arg\r\n", "unknown preset action");
+    check_eq(run(e, st, "preset save"), "err no-arg\r\n", "preset needs a slot");
+
+    // A masked-out param must be untouched by either composite - they operate on what describe shows.
+    e.params[static_cast<size_t>(ParamId::Pos)][0] = 0.77f;
+    run(e, "reset");
+    check_eq(run(e, "get param pos A"), "ok 0.7700\r\n",
+             "reset leaves params outside the liveness mask alone");
 }
 
 void test_dispatch_observation() {
@@ -554,6 +632,17 @@ void test_dispatch_observation() {
     check_eq(run(e, st, "mode wat"), "err bad-arg\r\n", "unknown mode rejected");
 
     check(contains(run(e, "help"), "describe"), "help lists the verb set");
+
+    check_eq(run(e, "query recorded A"),  "ok 4096\r\n",  "query recorded");
+    check_eq(run(e, "query capacity A"),  "ok 65536\r\n", "query capacity");
+    check_eq(run(e, "query layout A"),    "ok 1\r\n",     "query layout reports the DeckLayout enum");
+    check_eq(run(e, "query sizetempo A"), "ok 1\r\n",     "query sizetempo");
+    check_eq(run(e, "query fit A 0.5"),   "ok 60.0000\r\n", "query fit takes an argument");
+    check_eq(run(e, "query fit A"),       "err no-arg\r\n", "query fit without its argument errors");
+
+    // The latching read: asking changes the answer. This is why it must never be advertised.
+    check_eq(run(e, "query reseed A"), "ok 1\r\n", "reseed reports a pending reseed");
+    check_eq(run(e, "query reseed A"), "ok 0\r\n", "reseed self-cleared - the read had a side effect");
 }
 
 void test_dispatch_errors() {
@@ -645,7 +734,14 @@ void test_describe() {
         check(!contains(d, "param modspeed "),    "modspeed is not advertised (set_mod_speed is its path)");
         check(contains(d, "param crossfade global "), "crossfade IS advertised - it does reach set_param");
         check(count_lines_with(d, "config ") == int(ConfigId::Count), "all-live mask lists every config");
-        check(count_lines_with(d, "query ") == 5, "the platform query vocabulary is enumerated");
+        check(count_lines_with(d, "query ") == 9, "the platform query vocabulary is enumerated");
+        for (const char* q : { "query recorded deck", "query capacity deck",
+                               "query layout deck", "query sizetempo deck" })
+            check(contains(d, q), "the new safe state queries are advertised");
+        // The safe-to-call rule, enforced: a parameterized query and a latching one stay out of the
+        // descriptor, so the generic sweep - which calls everything it can see - cannot reach them.
+        check(!contains(d, "query fit"),    "fit is not advertised (takes an argument)");
+        check(!contains(d, "query reseed"), "reseed is not advertised (latching read)");
 
         // Scope tags: the descriptor is what tells a host whether to sweep one deck or two.
         check(contains(d, "param clickmix global "), "a global param is tagged global");
@@ -679,6 +775,7 @@ int main() {
     test_coercion();
     test_formatting();
     test_dispatch_stimulus();
+    test_dispatch_composites();
     test_dispatch_observation();
     test_dispatch_errors();
     test_dispatch_engine_verbs();

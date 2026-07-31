@@ -255,6 +255,17 @@ def test_param_roundtrip(test_mode, p):
 
 Because `describe` lists only params the engine's `live_params()` mask marks live, this sweep never sets an ignored param, so a read-back mismatch is a real defect - not descriptor noise. Tolerance accounts for on-device value quantization (e.g. the granular MValue grid); tighten per-engine if a build stores exact floats.
 
+### L1 query coverage (added after first hardware use)
+
+The param sweep only proves values go in and come back. Two more describe-driven tests cover the observation half, with no per-engine knowledge:
+
+- **`test_query_answers`** - every query the descriptor advertises must answer without an error reply, on every deck its scope claims. Catches a `describe` that lists a query the dispatcher does not implement, which would otherwise only appear as `err unknown-verb` the first time somebody typed it.
+
+- **`test_config_query_round_trip`** - for any config with a same-named query, setting each declared value must be observable through that query **in the same encoding**. This is the regression guard for a real defect: `config route` spoke the selector encoding (0=Stereo) while `query route` returned the raw `Route` enum (Stereo=2), so route could not be round-tripped and `describe` gave a host no way to learn the difference. It was found by hand at the REPL; this finds it automatically, for any config/query pair.
+
+`parse_describe` now keeps each query's scope (`queries` is `name -> "deck"|"global"`) so a caller
+knows whether to pass a deck.
+
 ### `test_tape.py` - example per-engine test
 
 ```python

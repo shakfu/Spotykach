@@ -2,19 +2,7 @@
 
 Status: **built and hardware-verified (2026-07-31)** - but see the port correction below. This specifies layer [1] of the terminal channel (see [`terminal-control.md`](terminal-control.md)) - the bidirectional byte pipe over USB-C CDC: the RX producer (interrupt callback), the lock-free ring, the non-blocking TX path, and how the service coexists with the Daisy Logger on the one shared CDC device. It stops at raw bytes; the line codec and command dispatch (layers [2]/[3]) are a separate spec and are only stubbed here as the `LineSink` seam.
 
-> **CORRECTION (2026-07-31, verified on hardware).** This spec's founding premise - that the channel
-> lives on the Daisy Seed's internal USB (OTG_FS, PA11/PA12) and must therefore share it with the
-> Logger - is **wrong for the Spotykach**. That board's panel USB-C is wired to **OTG_HS on PB14/PB15**
-> (Seed pins D29/D30), and it runs libDaisy's `extdfu` bootloader, which serves DFU over that same
-> core. Nothing is connected to PA11/PA12. The terminal now defaults to `FS_EXTERNAL`
-> (`SPK_TERMINAL_PORT_EXTERNAL`, `TERMPORT=int` for a bare Seed or Pod).
->
-> The evidence was in the tree from the start and was misread twice: the Makefile routes the logger to
-> `LOGGER_EXTERNAL` unconditionally, which says which jack this hardware actually exposes.
-> `terminal-impl.md` deviation #1 saw that override and concluded "nothing owns `FS_INTERNAL`, so the
-> terminal must init it" - the opposite of what it implied. Read the rest of this spec with the port
-> substituted; the layering, ring, TX discipline and Logger-coexistence reasoning are all unaffected,
-> since OTG_HS runs in the same embedded full-speed device mode.
+> **CORRECTION (2026-07-31, verified on hardware).** This spec's founding premise - that the channel > lives on the Daisy Seed's internal USB (OTG_FS, PA11/PA12) and must therefore share it with the > Logger - is **wrong for the Spotykach**. That board's panel USB-C is wired to **OTG_HS on PB14/PB15** > (Seed pins D29/D30), and it runs libDaisy's `extdfu` bootloader, which serves DFU over that same > core. Nothing is connected to PA11/PA12. The terminal now defaults to `FS_EXTERNAL` > (`SPK_TERMINAL_PORT_EXTERNAL`, `TERMPORT=int` for a bare Seed or Pod). > > The evidence was in the tree from the start and was misread twice: the Makefile routes the logger to > `LOGGER_EXTERNAL` unconditionally, which says which jack this hardware actually exposes. > `terminal-impl.md` deviation #1 saw that override and concluded "nothing owns `FS_INTERNAL`, so the > terminal must init it" - the opposite of what it implied. Read the rest of this spec with the port > substituted; the layering, ring, TX discipline and Logger-coexistence reasoning are all unaffected, > since OTG_HS runs in the same embedded full-speed device mode.
 
 ## libDaisy facts that constrain the design
 

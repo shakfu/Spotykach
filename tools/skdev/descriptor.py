@@ -44,7 +44,7 @@ class DeviceDescriptor:
     masked: bool = False   # engine narrowed its live_params/live_configs (see parse_describe)
     params: dict = field(default_factory=dict)    # name -> ParamDesc
     configs: dict = field(default_factory=dict)   # name -> ConfigDesc
-    queries: list = field(default_factory=list)   # ["empty", "mix", ...]
+    queries: dict = field(default_factory=dict)   # name -> "deck" | "global"
     caps: int = 0
 
 
@@ -78,7 +78,9 @@ def parse_describe(lines):
             vals = {int(k): v for k, v in (p.split(":", 1) for p in tok[2:] if ":" in p)}
             d.configs[tok[1]] = ConfigDesc(tok[1], vals)
         elif tok[0] == "query":                   # query <name> <scope>
-            d.queries.append(tok[1])
+            # Scope matters to a caller: a deck-scoped query needs a deck argument. Older firmware
+            # emitted the name alone, so default to global rather than failing to parse.
+            d.queries[tok[1]] = tok[2] if len(tok) > 2 else "global"
         elif tok[0] == "caps":                    # caps 0x....
             d.caps = int(tok[1], 16)
     return d

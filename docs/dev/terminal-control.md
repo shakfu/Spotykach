@@ -65,6 +65,60 @@ Thread-safe by construction - the receive callback does the minimum, everything 
 
 The layer-[1] byte pipe - RX interrupt callback, the SPSC ring, non-blocking TX, and Logger coexistence on the one shared CDC device - is specified in detail in [`terminal-transport.md`](terminal-transport.md).
 
+## The command model: params, queries and actions
+
+"Stimulus and observation" below is the shape of the channel, but three different kinds of thing travel
+over it and they behave differently enough to be worth naming.
+
+| | Param / config | Query | Action |
+|---|---|---|---|
+| What it is | a value the engine **holds** | a value the engine **computes** | an operation the engine **performs** |
+| Direction | read and write | read only | write only, in the property sense |
+| Idempotent | yes - setting twice = setting once | yes - reading twice = same answer | usually not |
+| Backed by | `set_param`/`param`, `set_config` | `audio_is_empty`, `route`, `mix` | `on_gate_trigger`, `on_record_pad`, `clear_buffer` |
+| Example | `set param size A 0.5` | `query empty A` | `gate A` |
+
+The two axes that separate them: **is there a stored value behind it**, and **does calling it change
+anything**. A param has a value and no side effect. A query has no stored value of its own - it is
+derived - and no side effect. An action has no value and exists *for* its side effect.
+
+### Actions can return values
+
+They do already:
+
+```
+pad play A          -> ok empty=1     # did the play pad find an empty deck?
+config mode A 1     -> ok 1           # did that actually change the value?
+```
+
+Both are "do the thing, and tell me something about what just happened". So a reply is **not** what
+distinguishes an action from a query, and reasoning as though it were leads to the wrong design.
+
+### What actually distinguishes them: repeatability
+
+- A **query's** answer describes state that exists independently of your asking. Ask twice, get the same
+  answer. Asking is free.
+- An **action's** answer describes *the transition it just caused*. Ask twice and the second answer may
+  differ **because** you asked the first time - `config mode A 1` returns `1` then `0`; `pad play A` may
+  report a different `empty` because the first press started playback.
+
+That is the only property the tooling actually needs: **can a generic host call this blindly, in any
+order, without consequences?** The descriptor-driven sweep in `tools/test_generic.py` rests entirely on
+that question - it calls every advertised query, and never an action. Everything else here is taxonomy.
+
+### The blurry cases in this codebase
+
+- **`set_config` returning `changed`** is a setter whose *effect* is idempotent but whose *return* is
+  not. That is why `test_config_query_round_trip` asserts via `query route` rather than on the `changed`
+  flag: the flag is a transition report, not state.
+- **`IEngine::take_param_reseed()`** returns true once and self-clears - a read with a side effect, i.e.
+  a latching query. If it were ever advertised, a sweep would silently consume it.
+- **`toggle_grit_mode()`** is an action that returns the resulting state, so it reads like a getter.
+
+These are why [`terminal-target-b.md`](terminal-target-b.md) ends up tagging entries by whether they are
+**safe to call** rather than sorting them into categories: the category is a judgment call, the safety
+property is the thing the sweep needs, and the two do not always agree.
+
 ## Stimulus and observation
 
 ### Stimulus - drive the full IEngine input surface (target A)
@@ -91,6 +145,8 @@ Stimulus is easy; observation is the design question. Three levels, increasing i
 - **L2 - audio-property tap.** Raw audio cannot stream over CDC cheaply, so an on-device analyzer (a signal sibling of the CPU `Meter`) computes RMS / peak / DC / NaN-Inf / zero-crossing over N blocks at a probe point and reports text: `measure rms 100 -> 0.187`. Tests silence, level, blow-ups, crude pitch. This is the only way to assert actual audio behaviour.
 
 ### Engine-specific verbs (target B)
+
+> Shipped, unused. See [`terminal-target-b.md`](terminal-target-b.md) for the redesign that would make > it worth using.
 
 One new virtual on `IEngine`, consistent with the interface-lift philosophy ("an engine overrides only what it supports", `src/engine/iengine.h:24`):
 

@@ -32,6 +32,14 @@ def descriptor(device):
 
 
 @pytest.fixture
-def test_mode(device):                                  # per-test input isolation
+def test_mode(device):
+    """Per-test isolation: frozen physical input AND a known parameter baseline.
+
+    ``mode test`` stops knobs/CV/gate/switches from perturbing the engine, but on its own it leaves
+    whatever the previous test wrote in place - which is how a suite ends up passing in isolation and
+    failing in sequence. ``reset`` drives every advertised param to the engine's declared default, so
+    each test starts from the same state regardless of what ran before it.
+    """
     with device.test_mode():
+        device.reset()
         yield device

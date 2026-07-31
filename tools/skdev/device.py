@@ -88,6 +88,19 @@ class Device:
     def fx(self, kind, deck, on):
         self.cmd("fx {} {} {}".format(kind, deck, "on" if on else "off"))
 
+    # --- composites ----------------------------------------------------------
+    def reset(self, deck=""):
+        """Drive every advertised param to the engine's default. Returns the count written."""
+        return int(self.cmd("reset {}".format(deck).rstrip()))
+
+    def preset_save(self, slot=0):
+        """Snapshot the advertised params into an in-RAM slot. Returns the count captured."""
+        return int(self.cmd("preset save {}".format(slot)))
+
+    def preset_load(self, slot=0):
+        """Restore a slot. Returns the count restored; 0 if the slot was never saved."""
+        return int(self.cmd("preset load {}".format(slot)))
+
     # --- observation (L0/L1) -------------------------------------------------
     def query(self, name, deck=""):
         return self.cmd("query {} {}".format(name, deck).rstrip())

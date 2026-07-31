@@ -137,6 +137,16 @@ Deck token is `A`/`B`; global params ignore it (pass `A`). Values are floats unl
 | `pad seq <deck>` | `on_seq_trigger(deck)` (:107) | `ok` |
 | `pad stop\|clear <deck>` | `stop_if_generating/clear_buffer(deck)` (:100-101) | `ok` |
 | `fx flux\|grit <deck> on\|off` | `set_fx(deck, kind, on)` (:96) | `ok` |
+| `fx lock <flux\|grit> <deck>` | `toggle_fx_lock(deck, kind)` | `ok` |
+| `fx gritmode <deck>` | `toggle_grit_mode(deck)` | `ok intensity=<f> mix=<f>` |
+| `seq trig\|arm\|clear\|disarm <deck>` | `on_seq_trigger` / `on_seq_toggle_arm` / `clear_sequence` / `disarm_track` | `ok` |
+| `query recorded\|capacity <deck>` | `audio_recorded_bytes` / `audio_capacity_bytes` | `ok <int>` |
+| `query layout <deck>` | `deck_layout(deck)` | `ok <0-3>` (single/slice/chord/none) |
+| `query sizetempo <deck>` | `size_sets_tempo(deck)` | `ok <0/1>` |
+| `query fit <deck> <fraction>` | `tempo_to_fit(deck, f)` - **not advertised**, takes an argument | `ok <f>` |
+| `query reseed <deck>` | `take_param_reseed(deck)` - **not advertised**, latching | `ok <0/1>` |
+| `reset [deck]` | every advertised param -> `param_default(id)` | `ok <count written>` |
+| `preset save\|load <slot>` | snapshot/restore the advertised params, in RAM | `ok <count>` |
 | `query empty <deck>` | `audio_is_empty(deck)` (:122) | `ok <0/1>` |
 | `query mix` | `mix()` (:142) | `ok <f>` |
 | `query route` | `route()` (:143), mapped to the **selector** encoding | `ok <0/1/2>` |
@@ -148,9 +158,48 @@ Deck token is `A`/`B`; global params ignore it (pass `A`). Values are floats unl
 | `describe` | platform tables + `live_params()`/`live_configs()` (below) | descriptor block |
 | `help` | lists verbs | `ok` + lines |
 
+`seq trig` and `pad seq` are synonyms - the latter predates the `seq` verb and is kept.
+
+### Composite verbs
+
+`reset` and `preset` are the two commands that do many things at once. Both operate on exactly the set
+`describe` advertises - live per the engine's mask, minus the platform-owned ids - so what a host can
+see is what a composite touches. Both reply with a count, so a harness can assert they did something
+rather than silently matching nothing.
+
+`reset` exists for **test isolation**: `mode test` stops the panel perturbing the engine but leaves the
+previous test's writes in place, which is how a suite ends up passing in isolation and failing in
+sequence. `tools/conftest.py` now resets in the `test_mode` fixture. The per-param default comes from
+`IEngine::param_default()`, which defaults to 0.5 - deterministic, which is what a baseline needs, but
+not necessarily musical; engines with real neutral values should override it.
+
+`preset` is **params only, in RAM, non-persistent**. Non-persistent because a test wants to snapshot and
+restore many times per run and should not wear flash to do it. Params only because of a genuine gap in
+the engine contract: `param()` can read a parameter back, but `set_config` is **write-only** - there is
+no config getter on `IEngine`, so configs cannot be captured at all. Restoring a slot that was never
+saved replies `ok 0` rather than erroring, which keeps the error taxonomy fixed.
+
+What neither does is apply its writes **atomically**. Commands dispatch on the main loop while the audio
+ISR runs, so a block can start midway through a reset and render with some params applied. Nothing has
+been bitten by this, and fixing it would need engine cooperation (a defer/commit flag or double-buffered
+param sets), so it is noted rather than built.
+
+**Two queries are deliberately absent from `describe`**, though both are reachable by name. `fit` takes
+an argument and the descriptor cannot express arity, so the generic sweep - which calls every advertised
+query with a deck alone - would fail it. `reseed` is a *latching* read: it returns true once and
+self-clears, so asking changes the answer and a sweep would consume the flag the platform is waiting
+for. These are the two shapes the safe-to-call rule in [`terminal-target-b.md`](terminal-target-b.md)
+exists to exclude, and they are the reason it is a per-entry property rather than a category.
+
+`IEngine::set_aux_active` is **not** exposed: the UI pushes it every `process()` for a `CapAux` engine
+(`core.ui.cpp:186-190`), so a terminal write would be overwritten within a millisecond - the same trap
+as the panel switches, and not worth a fourth freeze point for a display hint.
+
 `config route` is global; the others in that verb are per-deck. `set_config` returns whether the value changed, echoed so a test can assert idempotence.
 
 ### Target B - engine-specific verbs and L1 state
+
+> **Unused as of 2026-07-31, and see [`terminal-target-b.md`](terminal-target-b.md) for why.** No engine > implements this hook. The mechanism below works, but it is invisible to `describe`, makes every engine > re-implement matching/validation/error replies, and carries no type information - so the generic sweep > cannot see it and every use would need per-engine host code. That doc proposes a declared query table > alongside this hook, which keeps the escape hatch while making engine state discoverable and > sweepable.
 
 One new virtual (declared in the control doc), no-op default:
 
@@ -190,12 +239,7 @@ The platform must consult it at exactly the points where physical input reaches 
 | gate-in -> engine | `src/app.cpp:123` (`process_gate_in`) | the `on_gate_trigger` forwarding |
 | panel switches -> engine config | `src/ui/core.ui.cpp` (`_process_switches`) | the whole pass |
 
-The switch row is not optional, contrary to this spec's original "pads/switches can stay live
-(harmless)". Switches **assert** their position every iteration rather than reacting to a change, so an
-ungated pass overwrites any `config` the terminal sets within a millisecond - `config route A 0`
-followed by `query route` returns the switch's value, and `set_config` keeps reporting `changed=1`
-because the value really is changing back each pass. Found on hardware, 2026-07-31. Pads remain
-ungated: they are event-driven, so they only perturb a test if someone physically touches the panel.
+The switch row is not optional, contrary to this spec's original "pads/switches can stay live (harmless)". Switches **assert** their position every iteration rather than reacting to a change, so an ungated pass overwrites any `config` the terminal sets within a millisecond - `config route A 0` followed by `query route` returns the switch's value, and `set_config` keeps reporting `changed=1` because the value really is changing back each pass. Found on hardware, 2026-07-31. Pads remain ungated: they are event-driven, so they only perturb a test if someone physically touches the panel.
 
 These are the only three sites; each is a single early-return guarded by `if (_terminal.test_mode())`. Pads/switches driven from the same UI can stay live (harmless) or be gated too - a follow-up detail, not a phase-1 blocker. This is the whole of the "test mode" mechanism: no output arbitration, no per-pin ownership.
 
@@ -233,13 +277,10 @@ end
 Three corrections to the original sketch, all found by running it:
 
 - **`masked=<0|1>`** on the `descr` line reports whether the engine narrowed `live_params()`/
-  `live_configs()`. With `masked=0` the descriptor is the entire `ParamId` enum and a round-trip sweep
-  proves nothing, so the host harness skips instead of emitting false failures.
-- **No `tempo`.** `Tempo`, `KeyInterval` and `ModSpeed` are platform-owned - the first two live in the
-  Transport service, the third arrives via `set_mod_speed()` - so `set_param` never sees them and
-  advertising them made the sweep assert on values that went nowhere. With them gone, every advertised
-  param is uniformly `0..1`; the old `40..300` and `1..64` ranges were display units the setter never
-  took, which is precisely why they were wrong.
+  `live_configs()`. With `masked=0` the descriptor is the entire `ParamId` enum and a round-trip sweep proves nothing, so the host harness skips instead of emitting false failures.
+
+- **No `tempo`.** `Tempo`, `KeyInterval` and `ModSpeed` are platform-owned - the first two live in the Transport service, the third arrives via `set_mod_speed()` - so `set_param` never sees them and advertising them made the sweep assert on values that went nowhere. With them gone, every advertised param is uniformly `0..1`; the old `40..300` and `1..64` ranges were display units the setter never took, which is precisely why they were wrong.
+
 - **`config` lines carry no scope token**, matching the parser (`config <name> <i:label>...`).
 
 Line tags (`descr`/`param`/`config`/`query`/`caps`/`end`) keep it greppable and let the host build its param map, ranges, and autocompletion without positional parsing. The `query` lines list the platform-known state names plus any an engine advertises (a later `describe` hook into `handle_command` can enumerate engine-specific queries; phase 1 lists the platform set).

@@ -193,12 +193,19 @@ The toolkit exists but almost nobody calls it: `src/engine/indicators.h` is `#in
 ### 7.3 Systemic findings — the same code reinvented
 
 1. **Selector ring reinvented 9×** — reso(models), mosc(engines), bard(shelves), softcut(slots), radio(banks), glitch(algos), pstretch(clips), csound(patches), chuck(patches). csound↔chuck are byte-identical. → `ring::selector` / `ring::slots`.
+
 2. **`led::route_leds` copied ~8×** — bard, softcut, radio, glitch, pstretch, mosc, delay, qdelay each ship the identical white L/C/R block.
+
 3. **Transport-colour ladder reinvented ~7×** — softcut, bard, delay, qdelay, pstretch, csound, chuck. → `transport_view` + `led::transport`.
+
 4. **Value-pickup feedback: zero own-display adoption** (except tape/shuttle). The single biggest expressive gap — even `softcut`(`CapPitchPickup`) and `pstretch`(scrub) skip it. → `ring::value`.
+
 5. **Idle = dark** — only `softcut` breathes (by hand); every other stopped panel is indistinguishable from powered-off. → `motion::breathe_standby`.
+
 6. **Clock indicator never lit off the granular path** — `reso`(CapTransport), `delay`/`qdelay`(tempo-synced), `edrums`(sequences off clock) all show no `clock_in`. → `led::clock`.
+
 7. **Palette re-declared in every engine**; `0x00c0ff`/`0x00aaff`/`0x00a0ff` recur as near-misses for `pal::kCyan`, and reso's mode hues drift from the canonical set. → `pal::`.
+
 8. **`alt` and `spot` LEDs: used by no engine at all.**
 
 ### 7.4 Migration worklist (ranked by leverage)
@@ -206,10 +213,15 @@ The toolkit exists but almost nobody calls it: `src/engine/indicators.h` is `#in
 The audit itself is desk/host work (done). Applying and confirming the LED changes on the panel is **hardware-gated** and folds into the P2 bench session.
 
 1. **`led::route_leds` + `pal::` sweep** — trivial, mechanical, hits 8 engines, kills the colour drift.
+
 2. **`ring::selector` / `ring::slots`** — retire 9 hand-rolled selectors (csound/chuck share one).
+
 3. **`ring::value` pickup feedback** — highest expressive win; start with the engines that already track pickup (`softcut`, `pstretch`, `reso`).
+
 4. **`motion::breathe_standby`** idle glow everywhere idle==dark; **`led::transport`** for the 7 transport ladders.
+
 5. **`led::clock`** for reso/delay/qdelay/edrums; **`led::cycle`** for the LFO/mod engines.
+
 6. **Faust floor:** a mode-hued idle breathe + play dot when `meter=false`.
 
 `bard` is both the richest hand-roller and a clean migration candidate (selector + route + `pal::` + `led::cycle` all drop in).

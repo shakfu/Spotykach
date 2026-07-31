@@ -7,6 +7,7 @@
 #include "terminal/command.h"
 #include "terminal/fmt.h"
 #include "terminal/names.h"
+#include "terminal/preset.h"
 #include "version.h"
 
 #include <cstring>
@@ -141,15 +142,59 @@ void verb_pad(const Command& c, Ctx& x) {
     }
 }
 
+// Parse "flux"/"grit" into an FxKind. Returns false for anything else.
+bool parse_fx_kind(const char* s, FxKind& out) {
+    if      (!strcmp(s, "flux")) { out = FxKind::Flux; return true; }
+    else if (!strcmp(s, "grit")) { out = FxKind::Grit; return true; }
+    return false;
+}
+
 void verb_fx(const Command& c, Ctx& x) {
+    if (c.argc < 3) { x.reply.err("no-arg"); return; }
+
+    // `fx lock <flux|grit> <deck>` - toggle the fx lock (the pad-hold gesture on the panel).
+    if (!strcmp(c.arg(1), "lock")) {
+        if (c.argc < 4) { x.reply.err("no-arg"); return; }
+        FxKind fk;       if (!parse_fx_kind(c.arg(2), fk)) { x.reply.err("bad-arg");  return; }
+        DeckRef::Ref d;  if (!parse_deck(c.arg(3), d))     { x.reply.err("bad-deck"); return; }
+        x.engine.toggle_fx_lock(d, fk);
+        x.reply.ok();
+        return;
+    }
+
+    // `fx gritmode <deck>` - cycle the grit sub-effect. An ACTION that returns values: the platform
+    // normally uses them to reseed its MValue pickup after the switch, so a test wants them too.
+    if (!strcmp(c.arg(1), "gritmode")) {
+        DeckRef::Ref d;  if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
+        const GritReseed g = x.engine.toggle_grit_mode(d);
+        x.reply.str("ok intensity=");
+        x.reply.append_f32(g.intensity);
+        x.reply.str(" mix=");
+        x.reply.append_f32(g.mix);
+        x.reply.str("\r\n");
+        return;
+    }
+
+    // `fx flux|grit <deck> on|off`
     if (c.argc < 4) { x.reply.err("no-arg"); return; }
-    DeckRef::Ref d;  if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
-    bool on;         if (!parse_onoff(c.arg(3), on)) { x.reply.err("bad-arg"); return; }
-    FxKind fk;
-    if      (!strcmp(c.arg(1), "flux")) fk = FxKind::Flux;
-    else if (!strcmp(c.arg(1), "grit")) fk = FxKind::Grit;
-    else { x.reply.err("bad-arg"); return; }
+    FxKind fk;       if (!parse_fx_kind(c.arg(1), fk))  { x.reply.err("bad-arg");  return; }
+    DeckRef::Ref d;  if (!parse_deck(c.arg(2), d))      { x.reply.err("bad-deck"); return; }
+    bool on;         if (!parse_onoff(c.arg(3), on))    { x.reply.err("bad-arg");  return; }
     x.engine.set_fx(d, fk, on);
+    x.reply.ok();
+}
+
+// `seq trig|arm|clear|disarm <deck>` - the step-sequencer surface. `pad seq <deck>` predates this and
+// remains a synonym for `seq trig`.
+void verb_seq(const Command& c, Ctx& x) {
+    if (c.argc < 3) { x.reply.err("no-arg"); return; }
+    DeckRef::Ref d;  if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
+    const char* s = c.arg(1);
+    if      (!strcmp(s, "trig"))   x.engine.on_seq_trigger(d);
+    else if (!strcmp(s, "arm"))    x.engine.on_seq_toggle_arm(d);
+    else if (!strcmp(s, "clear"))  x.engine.clear_sequence(d);
+    else if (!strcmp(s, "disarm")) x.engine.disarm_track(d);
+    else { x.reply.err("bad-arg"); return; }
     x.reply.ok();
 }
 
@@ -173,6 +218,37 @@ void verb_query(const Command& c, Ctx& x) {
         if (c.argc < 3) { x.reply.err("no-arg"); return; }
         DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
         x.reply.ok_i32(x.engine.gate_out_triggered(d) ? 1 : 0);
+    } else if (!strcmp(s, "recorded")) {
+        if (c.argc < 3) { x.reply.err("no-arg"); return; }
+        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
+        x.reply.ok_i32(static_cast<int32_t>(x.engine.audio_recorded_bytes(d)));
+    } else if (!strcmp(s, "capacity")) {
+        if (c.argc < 3) { x.reply.err("no-arg"); return; }
+        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
+        x.reply.ok_i32(static_cast<int32_t>(x.engine.audio_capacity_bytes(d)));
+    } else if (!strcmp(s, "layout")) {
+        if (c.argc < 3) { x.reply.err("no-arg"); return; }
+        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
+        x.reply.ok_i32(static_cast<int32_t>(x.engine.deck_layout(d)));
+    } else if (!strcmp(s, "sizetempo")) {
+        if (c.argc < 3) { x.reply.err("no-arg"); return; }
+        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
+        x.reply.ok_i32(x.engine.size_sets_tempo(d) ? 1 : 0);
+    } else if (!strcmp(s, "fit")) {
+        // Takes an ARGUMENT (the loop fraction), so it is deliberately NOT advertised in describe: the
+        // descriptor has no way to say "this query needs an extra parameter", and the generic sweep
+        // calls every advertised query with a deck alone. Reachable by name; see terminal-target-b.md.
+        if (c.argc < 4) { x.reply.err("no-arg"); return; }
+        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
+        float f;        if (!parse_f32(c.arg(3), f))  { x.reply.err("bad-arg");  return; }
+        x.reply.ok_f32(x.engine.tempo_to_fit(d, f));
+    } else if (!strcmp(s, "reseed")) {
+        // A LATCHING read: returns true once and self-clears, so asking changes the answer. Not
+        // advertised - a generic sweep would silently consume the flag the platform is waiting for.
+        // The textbook unsafe query; see the safe-to-call discussion in terminal-target-b.md.
+        if (c.argc < 3) { x.reply.err("no-arg"); return; }
+        DeckRef::Ref d; if (!parse_deck(c.arg(2), d)) { x.reply.err("bad-deck"); return; }
+        x.reply.ok_i32(x.engine.take_param_reseed(d) ? 1 : 0);
     } else if (!strcmp(s, "usb")) {
         // The USB bring-up snapshot (usb_diag.h). Reaching this at all means enumeration worked, so it
         // is a confirmation readout rather than a diagnosis - the diagnosis path is the TERM_USBDIAG
@@ -207,6 +283,86 @@ void verb_query(const Command& c, Ctx& x) {
     }
 }
 
+// --- composite verbs: reset / preset ---------------------------------------------------------------
+
+// The params a host may meaningfully write: live per the engine's mask, and not platform-owned. Exactly
+// the set `describe` advertises, so `reset` and `preset` operate on what a host can actually see.
+template <typename F>
+void for_each_live_param(IEngine& e, F&& f) {
+    const IEngine::ParamMask m = e.live_params();
+    for (uint32_t i = 0; i < static_cast<uint32_t>(ParamId::Count); ++i) {
+        if (!(m & (1u << i))) continue;
+        const ParamId id = static_cast<ParamId>(i);
+        if (param_is_platform_owned(id)) continue;
+        f(id);
+    }
+}
+
+// Apply `fn(id, deck)` over a param's decks, honouring scope: a global param lives in the deck-A slot
+// only, so writing it per-deck would double-write it (and, on an engine that stores blindly, leave a
+// stale value in the B slot). `only` == DeckRef::Count means "every deck".
+template <typename F>
+int32_t for_each_deck(ParamId id, DeckRef::Ref only, F&& fn) {
+    if (param_is_global(id)) {
+        if (only == DeckRef::Count || only == DeckRef::A) { fn(id, DeckRef::A); return 1; }
+        return 0;
+    }
+    if (only != DeckRef::Count) { fn(id, only); return 1; }
+    fn(id, DeckRef::A);
+    fn(id, DeckRef::B);
+    return 2;
+}
+
+// `reset [deck]` - drive every advertised param to the engine's declared default. The point is a KNOWN
+// BASELINE: without it each test inherits whatever the previous one wrote, which is how suites end up
+// passing in isolation and failing in sequence. Replies with the number of params written so a harness
+// can assert it did something.
+void verb_reset(const Command& c, Ctx& x) {
+    DeckRef::Ref only = DeckRef::Count;   // Count == both decks
+    if (c.argc >= 2 && !parse_deck(c.arg(1), only)) { x.reply.err("bad-deck"); return; }
+
+    int32_t n = 0;
+    for_each_live_param(x.engine, [&](ParamId id) {
+        const float d = x.engine.param_default(id);
+        n += for_each_deck(id, only, [&](ParamId p, DeckRef::Ref deck) { x.engine.set_param(p, deck, d); });
+    });
+    x.reply.ok_i32(n);
+}
+
+// `preset save|load <slot>` - snapshot and restore the advertised params, in RAM (see preset.h).
+// Params only: there is no config getter on IEngine, so configs cannot be captured.
+// `load` of a slot that was never saved replies `ok 0` rather than erroring - "restored nothing" is a
+// legitimate answer and keeps the error taxonomy fixed.
+void verb_preset(const Command& c, Ctx& x) {
+    if (c.argc < 3) { x.reply.err("no-arg"); return; }
+    int32_t slot;
+    if (!parse_i32(c.arg(2), slot) || slot < 0 || slot >= PresetSlots::kSlots) {
+        x.reply.err("bad-arg"); return;
+    }
+    PresetSlots::Slot& s = x.state.presets.slots[slot];
+    int32_t n = 0;
+
+    if (!strcmp(c.arg(1), "save")) {
+        for_each_live_param(x.engine, [&](ParamId id) {
+            n += for_each_deck(id, DeckRef::Count, [&](ParamId p, DeckRef::Ref deck) {
+                s.v[static_cast<size_t>(p)][deck == DeckRef::B ? 1 : 0] = x.engine.param(p, deck);
+            });
+        });
+        s.valid = true;
+        x.reply.ok_i32(n);
+    } else if (!strcmp(c.arg(1), "load")) {
+        if (!s.valid) { x.reply.ok_i32(0); return; }
+        for_each_live_param(x.engine, [&](ParamId id) {
+            n += for_each_deck(id, DeckRef::Count, [&](ParamId p, DeckRef::Ref deck) {
+                x.engine.set_param(p, deck, s.v[static_cast<size_t>(p)][deck == DeckRef::B ? 1 : 0]);
+            });
+        });
+        x.reply.ok_i32(n);
+    } else {
+        x.reply.err("bad-arg");
+    }
+}
+
 // --- platform meta ---------------------------------------------------------------------------------
 
 void verb_mode(const Command& c, Ctx& x) {
@@ -221,7 +377,7 @@ void verb_caps(const Command&, Ctx& x) {
 }
 
 void verb_help(const Command&, Ctx& x) {
-    x.reply.line("ok verbs: set get query config cv gate midi pad fx mode caps describe help");
+    x.reply.line("ok verbs: set get query config cv gate midi pad fx seq reset preset mode caps describe help");
 }
 
 void verb_describe(const Command&, Ctx& x) {
@@ -274,7 +430,16 @@ void verb_describe(const Command&, Ctx& x) {
     r.line("query mix global");
     r.line("query route global");
     r.line("query gateout deck");
+    r.line("query recorded deck");
+    r.line("query capacity deck");
+    r.line("query layout deck");
+    r.line("query sizetempo deck");
     r.line("query usb global");
+    // NOT advertised, on purpose (both are reachable by name):
+    //   `fit`    - takes an argument, and the descriptor cannot express arity, so the generic sweep
+    //              (which calls each advertised query with a deck alone) would fail it.
+    //   `reseed` - a latching read: asking changes the answer, so a sweep would consume the flag.
+    // These are the two shapes the safe-to-call rule in terminal-target-b.md exists to keep out.
 
     r.str("caps ");
     r.append_hex(x.engine.capabilities());
@@ -288,6 +453,7 @@ const Verb kVerbs[] = {
     { "config",   verb_config   }, { "cv",    verb_cv    }, { "gate",  verb_gate     },
     { "midi",     verb_midi     }, { "pad",   verb_pad   }, { "fx",    verb_fx       },
     { "mode",     verb_mode     }, { "caps",  verb_caps  }, { "help",  verb_help     },
+    { "seq",      verb_seq      }, { "reset", verb_reset }, { "preset", verb_preset },
     { "describe", verb_describe },
 };
 
