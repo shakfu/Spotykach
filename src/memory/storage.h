@@ -11,9 +11,13 @@
 #include "config.h"
 #include "nocopy.h"
 
+#include "abi_tag.h"
+
 namespace spotykach {
 
+SPK_ABI_BEGIN   // must match iengine.h's tag or this declares a DIFFERENT type (see abi_tag.h)
 class IEngine; // platform's audio storage port (deck buffer save/load), via IEngine::audio_*
+SPK_ABI_END
 
 static const std::string kConfig = "SK/config.txt";
 static const std::string kMemory = "SK/MEM";

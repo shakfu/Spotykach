@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 
+#include "abi_tag.h"                // SPK_ABI_BEGIN/END - IEngine's vtable changes with SPK_TERMINAL
 #include "engine/engine_context.h"  // EngineContext (contract; type-clean since item 5b)
 #include "engine/deck_ref.h"      // DeckRef (the A/B selector every method takes)
 #include "engine/mode.h"          // Route, ClockSource (contract-owned, items 5b/5c)
@@ -18,6 +19,7 @@
 #endif
 
 namespace spotykach {
+SPK_ABI_BEGIN   // IEngine gains virtuals under SPK_TERMINAL; see abi_tag.h
 
 // IEngine is the contract between the fixed hardware/UI platform and a swappable DSP engine.
 // A "firmware variant" is a different IEngine implementation behind the same platform.
@@ -185,5 +187,7 @@ public:
     virtual ConfigMask live_configs() const { return static_cast<ConfigMask>(~ConfigMask{0}); }
 #endif
 };
+
+SPK_ABI_END
 
 };

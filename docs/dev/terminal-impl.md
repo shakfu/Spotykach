@@ -233,12 +233,28 @@ Enabling the channel links the **USB-device CDC stack + ~6 KB of terminal code =
 | Engine | Result | SRAM_EXEC |
 |---|---|---|
 | passthrough | fits (-O2) | lean |
-| delay | fits (-O2) | ~94% |
-| tape | overflow at -O2 -> fits at `-Os` | ~98% (-Os) |
-| shuttle | overflow at -O2 (by 8396 B) -> fits at `-Os` | 98.07% (-Os) |
-| mosc (and csound/chuck) | fits (QSPI-execute) | 0% SRAM_EXEC (code in QSPI) |
-| granular | overflow at -O2 **and** -Os | 98% before terminal |
-| reso | overflow at -O2 and -Os | Rings DSP already large |
+| qdelay | fits (-O2) | 95.45% (91.32% at -Os) |
+| glitch | fits (-Os) | 92.16% |
+| radio | fits (-Os) | 92.98% |
+| delay | fits (-O2) | 94.96% |
+| pstretch | fits (-Os) | 95.16% |
+| tape | fits (-Os) | 98.41% |
+| shuttle | fits (-Os) | 98.79% |
+| softcut | **overflows** by 732 B (-Os) | needs QSPI-execute |
+| bard | **overflows** by 2876 B (-Os) | needs QSPI-execute |
+| reverb | **overflows** by 21504 B (-Os) | needs QSPI-execute |
+| granular, reso | **overflows** at -O2 and -Os | needs QSPI-execute |
+| mosc / csound / chuck | fits (QSPI-execute) | 0% SRAM_EXEC - but see the USB_MIDI conflict below |
+
+Measured 2026-07-31. The sweep forced `OPT=-Os`, so a row marked "fits (-Os)" is a lower bound - the
+roomier ones may fit at the default -O2 too (qdelay does, at 95.45%); only the overflow rows are a hard
+verdict. Every engine listed carries `live_params()`/
+`live_configs()` masks, including the ones that do not currently fit - the masks are compiled out
+without `SPK_TERMINAL` and become correct the moment such a build is made from QSPI.
+
+**QSPI-execute engines need `USB_MIDI=0`.** `USB_MIDI` defaults ON for `BOOT_QSPI`, and
+`MidiUsbHandler` claims the same OTG_HS core as the terminal - now a compile error rather than a silent
+conflict, but it does mean mosc/csound/chuck cannot have both without sharing the transport.
 
 Rule of thumb: lean SRAM engines fit at -O2, near-full ones need `OPT=-Os`, and the tightest (granular, reso) can host it only from a QSPI-execute build. The linker says `region SRAM_EXEC overflowed by N bytes` when it won't fit - that is the signal to switch to `-Os` or QSPI, not a code fault. The terminal code itself is ~6 KB (`dispatch` 3.3 KB, `text_sink` 0.8 KB, `names` 0.8 KB, `terminal` 0.7 KB, `fmt` 0.3 KB); the rest is the USB stack and is not reducible.
 

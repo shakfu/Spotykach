@@ -1,6 +1,6 @@
 # Terminal host tooling spec (phase 1)
 
-Status: **implementation-ready spec, unbuilt.** Specifies the host side of the terminal channel: a Python client library, a pytest harness that drives real hardware, and `skterm.py`, an interactive REPL. All three speak the phase-1 line protocol in [`terminal-dispatch.md`](terminal-dispatch.md) over the USB-C CDC port from [`terminal-transport.md`](terminal-transport.md).
+Status: **built and hardware-verified (2026-07-31).** `make test-hw` runs against a flashed device; the sketches below are the design, not the shipped source - read `tools/` for that. Specifies the host side of the terminal channel: a Python client library, a pytest harness that drives real hardware, and `skterm.py`, an interactive REPL. All three speak the phase-1 line protocol in [`terminal-dispatch.md`](terminal-dispatch.md) over the USB-C CDC port from [`terminal-transport.md`](terminal-transport.md).
 
 This is **on-target** tooling - it talks to a flashed device over serial. It is therefore distinct from `host/` (off-target C++ unit tests compiled for the build machine, run by `make test`) and belongs under a separate `make test-hw` target that is skipped when no device is attached. `make test` stays hardware-free.
 

@@ -62,6 +62,28 @@ public:
     float param(ParamId id, DeckRef::Ref d) const override;
     bool  set_config(ConfigId id, DeckRef::Ref, int value) override;     // routing switch -> per-track pan
     Route route() const override { return _route; }
+
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md): the ids this engine actually
+    // consumes, so a host sweep exercises only real parameters instead of the whole ParamId enum.
+    // Derived from the engine's own ParamId/ConfigId use; NOT yet verified on hardware.
+    ParamMask live_params() const override {
+        return (1u << static_cast<uint32_t>(ParamId::Pos))
+             | (1u << static_cast<uint32_t>(ParamId::Size))
+             | (1u << static_cast<uint32_t>(ParamId::Speed))
+             | (1u << static_cast<uint32_t>(ParamId::Mix))
+             | (1u << static_cast<uint32_t>(ParamId::ModAmp))
+             | (1u << static_cast<uint32_t>(ParamId::AltPos))
+             | (1u << static_cast<uint32_t>(ParamId::Aux))
+             | (1u << static_cast<uint32_t>(ParamId::Crossfade))
+             | (1u << static_cast<uint32_t>(ParamId::Env))
+             | (1u << static_cast<uint32_t>(ParamId::FluxIntensity))
+             | (1u << static_cast<uint32_t>(ParamId::FluxMix));
+    }
+    ConfigMask live_configs() const override {
+        return static_cast<ConfigMask>(1u << static_cast<uint32_t>(ConfigId::Route));
+    }
+#endif
     void  set_aux_active(DeckRef::Ref d, bool held) override;            // Alt held -> show slot selector
     void  set_mod_speed(DeckRef::Ref d, float v, bool sync) override;    // MODFREQ -> rate slew time
     bool  take_param_reseed(DeckRef::Ref d) override;                    // Play-snap / Rev-swap takeover

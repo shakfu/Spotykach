@@ -1,6 +1,6 @@
 # Terminal control channel (USB-C)
 
-Status: **design sketch, unbuilt.** No code exists yet. This documents a proposed general capability - a bidirectional text/command channel over the Daisy Seed's USB-C port - usable across all engines for runtime control and, primarily, for **testing engine features and properties from a host script**. Everything is gated behind a compile-time flag and costs nothing when off.
+Status: **built and hardware-verified (2026-07-31).** See [`terminal-impl.md`](terminal-impl.md) for what landed, the bring-up history and the deviations. This documents the capability - a bidirectional text/command channel over the Daisy Seed's USB-C port - usable across all engines for runtime control and, primarily, for **testing engine features and properties from a host script**. Everything is gated behind a compile-time flag and costs nothing when off.
 
 Scope note: this is about testing **engines**, not the physical board. The hardware is assumed working; the goal is to recreate QA software that exercises an engine's control surface, state, and (optionally) its audio output - deterministically, without knobs, patch cables, or MIDI gear.
 
@@ -161,11 +161,15 @@ Everything under `#if SPK_TERMINAL`, following the `SPK_USE_STREAM` / `METER` pa
 
 | Flag | Adds |
 |------|------|
-| `SPK_TERMINAL` | channel + SPSC ring + line-ASCII codec + flat id<->name table + target A stimulus/get + target B hook + L0/L1 + `mode test` input isolation + `describe` introspection |
-| `SPK_TERMINAL_MEASURE` | L2 audio-property analyzer + `measure` verb |
-| `SPK_TERMINAL_STIM` | built-in test-signal source (`stim signal ...`) for through-processing engines |
-| `SPK_TERMINAL_OSC` | OSC + SLIP codec (behind the same dispatcher) |
-| `SPK_TERMINAL_REFLECT` | opt-**out**: defaults on with `SPK_TERMINAL`; unset it to drop the `describe` descriptor tables on a flash-tight build |
+| `TERMINAL=1` (`SPK_TERMINAL`) | the whole channel: transport + SPSC ring + line codec + name tables + target A stimulus + L0/L1 observation + target B hook + `mode test` input isolation + `describe` |
+| `TERMPORT=int` | put the channel on OTG_FS (PA11/PA12, a bare Seed/Pod's own USB). **Default is external** - OTG_HS on PB14/PB15, where the Spotykach's rear USB-C is wired |
+| `USBDIAG=1` | USB bring-up readout on the panel LEDs + onboard LED (`query usb` reports the same as text without it) |
+| `USB_MIDI=1` | **incompatible** - `MidiUsbHandler` claims the same OTG_HS core; a compile error, not a silent conflict |
+| `SPK_TERMINAL_MEASURE` | *(phase 2, unbuilt)* L2 audio-property analyzer + `measure` verb |
+| `SPK_TERMINAL_STIM` | *(phase 3, unbuilt)* built-in test-signal source for through-processing engines |
+| `SPK_TERMINAL_OSC` | *(later, unbuilt)* OSC + SLIP codec behind the same dispatcher |
+
+`SPK_TERMINAL_REFLECT` no longer exists: the descriptor tables proved cheap enough to keep unconditional, so `describe` is always present. Footprint and which engines can host the channel are in [`terminal-impl.md`](terminal-impl.md).
 
 ## Phasing
 
@@ -177,13 +181,15 @@ Everything under `#if SPK_TERMINAL`, following the `SPK_USE_STREAM` / `METER` pa
 
 - **Later.** `SPK_TERMINAL_OSC` (music-rig codec).
 
-## Open decisions
+## Open decisions - all resolved
 
-1. **Test depth for phase 1.** Confirmed default: L0/L1 (control + state, no audio). `measure` (L2) and `stim` (signal injection) are phased behind sub-flags. Revisit if audio assertions are wanted sooner.
+1. **Test depth for phase 1.** L0/L1 (control + state, no audio), as planned. `measure` and `stim` remain phased behind sub-flags and are still unbuilt.
 
-2. **Log routing.** Resolved to a compile flag by the transport spec: log routing *is* the existing `INFS_LOG`. `INFS_LOG=1` gives a unified console (the Logger brings up the CDC and boot-trace lines share the stream - recommended); `INFS_LOG=0` makes the terminal own bring-up and the port carries replies only. No libDaisy edits either way. Default recommendation: `SPK_TERMINAL` implies `INFS_LOG=1`.
+2. **Log routing.** Moot in practice: `INFS_LOG=1` is set only under `DEBUG=1`, so a normal build has no logger and nothing contends for the port.
 
-3. **Reflection timing.** Resolved: `describe` is **in phase 1**. Named addressing plus the structured descriptor both ship day-one, so generic cross-engine sweeps work immediately. The residual per-engine work is the `live_params()`/`live_configs()` masks (two constants each); until an engine supplies them it defaults to "all live" (describe over-reports and sweeps must tolerate ignored params). `SPK_TERMINAL_REFLECT` survives only as a flash-tight opt-out.
+3. **Reflection timing.** `describe` shipped in phase 1 and the per-engine `live_params()`/`live_configs()` masks are what make a generic sweep meaningful - the `descr` line reports `masked=0|1` so a host can skip engines still on the default.
+
+4. **Which USB port** - not foreseen, and the one that cost two sessions. The channel belongs on whichever peripheral the board's jack is wired to, which on the Spotykach is OTG_HS. See [`terminal-impl.md`](terminal-impl.md).
 
 ## Alternative framing: USB-MIDI
 

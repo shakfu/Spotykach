@@ -8,6 +8,7 @@
 #include <bitset>
 #include <array>
 
+#include "abi_tag.h"              // SPK_ABI_BEGIN/END - CoreUI's layout changes with SPK_TERMINAL
 #include "../common.h"
 #include "config.h"              // shared tempo range helpers (tempo_abs_to_norm) - was via core.h
 #include "engine/color.h"
@@ -36,6 +37,7 @@ static constexpr std::array<float, 7> kSpeedSteps = {
     1.f             // 24
 };
 
+SPK_ABI_BEGIN   // CoreUI gains members under SPK_TERMINAL / TERM_USBDIAG; see abi_tag.h
 class CoreUI {
 public:
     CoreUI(Hardware&, IEngine&, Transport&, Settings&, Storage&);
@@ -257,5 +259,6 @@ private:
     bool _clock_source_changed;
     bool _tap_was_tapped;
 };
+SPK_ABI_END
 
 };

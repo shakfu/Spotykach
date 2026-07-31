@@ -1,6 +1,6 @@
 # Terminal codec + dispatch spec (phase 1)
 
-Status: **implementation-ready spec, unbuilt.** Specifies layers [2] (line codec) and [3] (dispatch / `IEngine` binding) of the terminal channel - what turns a received line into an `IEngine` call and a reply. It sits on top of [`terminal-transport.md`](terminal-transport.md) (which delivers whole lines via `LineSink` and accepts reply bytes via `Terminal::write`) and realizes the stimulus/observation model in [`terminal-control.md`](terminal-control.md). Everything here is `#if SPK_TERMINAL`.
+Status: **built and hardware-verified (2026-07-31).** Corrections found by running it are marked inline. Specifies layers [2] (line codec) and [3] (dispatch / `IEngine` binding) of the terminal channel - what turns a received line into an `IEngine` call and a reply. It sits on top of [`terminal-transport.md`](terminal-transport.md) (which delivers whole lines via `LineSink` and accepts reply bytes via `Terminal::write`) and realizes the stimulus/observation model in [`terminal-control.md`](terminal-control.md). Everything here is `#if SPK_TERMINAL`.
 
 ## What phase 1 covers
 

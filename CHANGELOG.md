@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **On-target engine testing over USB-C (`TERMINAL=1`) — hardware-verified.** A bidirectional text/command channel on the rear USB-C CDC port lets a host script drive an engine into a known state, exercise a feature and assert on a property read back, with no knobs, patch cables or MIDI gear. The whole `IEngine` input surface is addressable by name (`set param`, `config`, `cv`, `gate`, `midi`, `pad`, `fx`), state is readable (`query empty|mix|route|gateout|usb`), and `mode test` freezes the physical input path so injected stimulus is the only thing driving the engine. `describe` emits the device's own control surface so a host configures itself instead of hardcoding per-engine knowledge. Zero cost when off - the terminal TUs compile to 0 bytes and the default binary is unchanged. ([`docs/dev/terminal-control.md`](docs/dev/terminal-control.md), [`docs/dev/terminal-impl.md`](docs/dev/terminal-impl.md))
+
+- **`make test-hw` — the on-target counterpart to `make test`.** A pytest harness (`tools/`) plus a `skdev` client library and `skterm.py` REPL drive a flashed device over serial. `test_generic.py` is driven entirely by `describe`, so one file sweeps every engine build; with no device attached the run skips cleanly, so it is safe in a hardware-free pipeline. First real run: delay's six declared params round-tripped across both decks. ([`docs/dev/terminal-tools.md`](docs/dev/terminal-tools.md))
+
+- **Off-target coverage of everything below the USB transport.** `host/test_terminal.cpp` exercises the tokenizer, line assembler, SPSC ring, TX FIFO, value coercion, float formatting (integer decomposition - the firmware links no `_printf_float`), every verb's `IEngine` binding and exact reply bytes, the error taxonomy, and `describe`, against a recording mock engine under `make test`. It also writes the real `describe` block to `build/describe_sample.txt`, which `tools/test_descriptor.py` parses through the actual host parser - closing the firmware/host loop without a device.
+
+- **Per-engine liveness masks (`live_params()` / `live_configs()`) for delay and tape.** `describe` lists only what an engine actually implements, and the `descr` line reports `masked=0|1` so a host sweep can skip engines still on the "all live" default rather than emitting false failures.
+
+- **USB bring-up diagnostic (`USBDIAG=1`).** Renders eleven checks - clocks, HSI48, USB clock source, VDD33_USB, transceiver, D+ pullup, VBUS sensing, both D-/D+ pads' alternate function, bus reset, SOF - on the panel LEDs and as a blink code on the Daisy onboard LED, plus `query usb` as text. Built because a cased unit hides the onboard LED and SWD pads, and the channel that would normally report on itself was the thing that was down. Off by default; the build stays fully runnable.
+
+### Fixed
+
+- **The terminal was on the wrong USB peripheral.** The Spotykach's rear USB-C is wired to **OTG_HS** (PB14/PB15), not the Seed's own OTG_FS pins - as `hw/hardware.cpp` and the Makefile's unconditional `INFS_LOG_TARGET=LOGGER_EXTERNAL` both already implied. The channel had been driving two pins this board connects to nothing, which is why DFU always enumerated on a connector the app could not use. `SPK_TERMINAL_PORT_EXTERNAL` now defaults on; build a bare Seed or Pod with `TERMPORT=int`.
+
+- **Build-flag changes could produce a silently corrupt binary.** Under GNU Make 3.81 (what macOS ships) mtimes compare at whole-second resolution, so a stamp rewritten in the same second an object was compiled did not out-date it - toggling `TERMINAL` gave a *partial* rebuild whose stale subset depended on timing. Because these flags change type layout (`CoreUI`, `AppImpl`, the `IEngine` vtable), the result was mismatched member offsets: a frozen, garbled panel with a working command channel. Stamp recipes now delete the objects outright and are prerequisites of every object.
+
+- **TX staging buffer was reused while a transfer was in flight.** `CDC_Transmit_FS` returns OK once a packet is *queued*; in non-DMA mode the HAL copies from the caller's buffer later, from the FIFO-empty interrupt. The main loop refilled it well inside a USB frame, corrupting multi-packet replies. Now ping-ponged, swapping only on a successful transmit.
+
+- **Dropped replies were silently swallowed**, so a full TX FIFO cost the host a whole reply and read as an unexplained timeout. Now reported as `err tx-overflow`.
+
+- **`describe` advertised parameters that never reach an engine.** `Tempo` and `KeyInterval` live in the Transport service and `ModSpeed` arrives via `set_mod_speed()`, so a generic sweep set values that went nowhere and asserted on whatever the engine happened to store. They are no longer advertised (still addressable), which also removes the only non-normalized ranges - their declared display units were never the units `set_param` takes.
+
+- **`config route` and `query route` spoke different encodings**, so `config route A 0` read back as `2` and route could not be round-tripped. `query route` now reports the selector encoding `config` accepts and `describe` publishes.
+
+- **`mode test` did not freeze the panel switches.** Unlike knobs, CV and gate, switches *assert* their position every iteration, so any config the terminal set was overwritten within a millisecond - making every panel-owned `ConfigId` untestable. Now gated with the other three consult points; `mode run` hands control back automatically.
+
+- **`mode test` had no way out if a harness died**, leaving knobs, CV and gate frozen with no recovery short of a power cycle. Now reverts after 30 s without a command (`SPK_TERMINAL_TEST_MODE_TIMEOUT_MS`); any command resets the timer.
+
+- **`TERMINAL=1` with `USB_MIDI=1` is now a compile error.** `MidiUsbHandler` claims the same OTG_HS core as the default terminal port, and `USB_MIDI` defaults on for every `BOOT_QSPI` build - two USB device stacks on one peripheral.
+
+- **Host tooling had never been executed and did not work.** `serial.Serial(..., dtr=True)` raises (`dtr` is a property, not a constructor keyword) so nothing could connect; `readline.parse_and_bind("tab: complete")` is silently ignored by the libedit backend macOS ships; `skdev.descriptor` could not be imported without pyserial, breaking device-free collection; and `make test-hw` invoked the system `python3`, which has neither pyserial nor pytest. All fixed, the last via a `PYTHON` variable that prefers the project venv.
+
+- **`query usb` reported init-time state as live.** The refresh only ran under `USBDIAG`, so in a normal build the host-activity bits could never read anything but zero - the worst possible failure for a field whose job is answering "is the host talking to us".
+
 ## [0.6.0]
 
 ### Added

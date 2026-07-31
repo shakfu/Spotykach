@@ -1,6 +1,6 @@
 # Terminal transport spec (phase 1)
 
-Status: **implementation-ready spec, unbuilt.** This specifies layer [1] of the terminal channel (see [`terminal-control.md`](terminal-control.md)) - the bidirectional byte pipe over USB-C CDC: the RX producer (interrupt callback), the lock-free ring, the non-blocking TX path, and how the service coexists with the Daisy Logger on the one shared CDC device. It stops at raw bytes; the line codec and command dispatch (layers [2]/[3]) are a separate spec and are only stubbed here as the `LineSink` seam.
+Status: **built and hardware-verified (2026-07-31)** - but see the port correction below. This specifies layer [1] of the terminal channel (see [`terminal-control.md`](terminal-control.md)) - the bidirectional byte pipe over USB-C CDC: the RX producer (interrupt callback), the lock-free ring, the non-blocking TX path, and how the service coexists with the Daisy Logger on the one shared CDC device. It stops at raw bytes; the line codec and command dispatch (layers [2]/[3]) are a separate spec and are only stubbed here as the `LineSink` seam.
 
 > **CORRECTION (2026-07-31, verified on hardware).** This spec's founding premise - that the channel
 > lives on the Daisy Seed's internal USB (OTG_FS, PA11/PA12) and must therefore share it with the

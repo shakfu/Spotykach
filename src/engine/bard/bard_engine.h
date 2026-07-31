@@ -74,6 +74,33 @@ public:
     bool  set_config(ConfigId id, DeckRef::Ref d, int value) override;
     Route route() const override { return _route; }
 
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md): the ids this engine actually
+    // consumes, so a host sweep exercises only real parameters instead of the whole ParamId enum.
+    // Derived from the engine's own ParamId/ConfigId use; NOT yet verified on hardware.
+    ParamMask live_params() const override {
+        return (1u << static_cast<uint32_t>(ParamId::Pos))
+             | (1u << static_cast<uint32_t>(ParamId::Size))
+             | (1u << static_cast<uint32_t>(ParamId::Speed))
+             | (1u << static_cast<uint32_t>(ParamId::Mix))
+             | (1u << static_cast<uint32_t>(ParamId::ModAmp))
+             | (1u << static_cast<uint32_t>(ParamId::AltPos))
+             | (1u << static_cast<uint32_t>(ParamId::Aux))
+             | (1u << static_cast<uint32_t>(ParamId::Crossfade))
+             | (1u << static_cast<uint32_t>(ParamId::Env))
+             | (1u << static_cast<uint32_t>(ParamId::Feedback))
+             | (1u << static_cast<uint32_t>(ParamId::FluxIntensity))
+             | (1u << static_cast<uint32_t>(ParamId::FluxMix))
+             | (1u << static_cast<uint32_t>(ParamId::GritIntensity))
+             | (1u << static_cast<uint32_t>(ParamId::GritMix));
+    }
+    ConfigMask live_configs() const override {
+        return static_cast<ConfigMask>((1u << static_cast<uint32_t>(ConfigId::Route))
+                                     | (1u << static_cast<uint32_t>(ConfigId::Mode))
+                                     | (1u << static_cast<uint32_t>(ConfigId::ModType)));
+    }
+#endif
+
     void  cv_voct(DeckRef::Ref d, float value) override;      // BOOK CV
     void  cv_size_pos(DeckRef::Ref d, float value) override;  // BOOKMARK CV
     void  cv_mix(DeckRef::Ref d, float value) override;       // volume CV

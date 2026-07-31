@@ -52,6 +52,24 @@ public:
     // effect on knob delivery (both decks' knobs are sent regardless), but advertises the engine's nature.
     Capabilities capabilities() const override { return CapOwnDisplay | CapDualDeck; }
 
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md): the ids this engine actually
+    // consumes, so a host sweep exercises only real parameters instead of the whole ParamId enum.
+    // Derived from the engine's own ParamId/ConfigId use; NOT yet verified on hardware.
+    ParamMask live_params() const override {
+        return (1u << static_cast<uint32_t>(ParamId::Pos))
+             | (1u << static_cast<uint32_t>(ParamId::Size))
+             | (1u << static_cast<uint32_t>(ParamId::Speed))
+             | (1u << static_cast<uint32_t>(ParamId::Mix))
+             | (1u << static_cast<uint32_t>(ParamId::ModAmp))
+             | (1u << static_cast<uint32_t>(ParamId::Env));
+    }
+    ConfigMask live_configs() const override {
+        return static_cast<ConfigMask>((1u << static_cast<uint32_t>(ConfigId::Route))
+                                     | (1u << static_cast<uint32_t>(ConfigId::Mode)));
+    }
+#endif
+
     void  set_param(ParamId id, DeckRef::Ref deck, float value) override;
     float param(ParamId id, DeckRef::Ref deck) const override;
     bool  set_config(ConfigId id, DeckRef::Ref deck, int value) override; // Mode -> voice; Route -> topology
