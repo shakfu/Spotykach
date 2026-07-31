@@ -118,6 +118,10 @@ C_DEFS += -DSPK_ENGINE_GLITCH
 ENGINE_SOURCES = src/engine/glitch/glitch_engine.cpp
 else ifeq ($(ENGINE), pstretch)
 C_DEFS += -DSPK_ENGINE_PSTRETCH
+# pstretch needs ~291K of SRAM DATA for its FFT working set - nearly twice the next worst engine - so
+# it uses the data-favoured split (200K code / 312K data) rather than dragging the default down for
+# every other engine. Measured 2026-07-31; see alt_sram.lds.
+LDSCRIPT = alt_sram_data.lds
 # Real-time clean-room PaulStretch ambient time-smear. Self-contained DSP: a vendored radix-2 FFT
 # (engine/pstretch/fft.h), no CMSIS-DSP. Per-voice input rings + FFT scratch live in the SDRAM arena.
 # The Phase-2 SD-file source streams clips from the card via the shared streaming service (stream_deck.cpp
@@ -392,7 +396,9 @@ CMSIS_DSP_SRC_DIR = ${LIBDAISY_DIR}/Drivers/CMSIS-DSP/Source
 
 # Daisy Bootloader - SRAM Linkage
 APP_TYPE = BOOT_SRAM
-LDSCRIPT = alt_sram.lds
+# `?=` so an engine block above can select a different split (see pstretch). A command-line
+# LDSCRIPT= still wins over both, which is how the QSPI-execute engines work.
+LDSCRIPT ?= alt_sram.lds
 BOOT_BIN = bootloader-spotykach-v2.bin
 
 # USB MIDI (device MIDI on the rear USB-C) pulls libDaisy's USB-device + MIDI-class code (~3 KB) into

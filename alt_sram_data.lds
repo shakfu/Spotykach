@@ -9,7 +9,14 @@ MEMORY
 {
 	FLASH		(RX)  : ORIGIN = 0x08000000, LENGTH = 128K
 	DTCMRAM		(RWX) : ORIGIN = 0x20000000, LENGTH = 128K
-	/* The H750's 512K AXI SRAM, split between executable code and data.
+	/* DATA-FAVOURED variant of alt_sram.lds: 200K code / 312K data.
+	 *
+	 * For engines whose static buffers dominate. pstretch needs ~291K of SRAM data for its FFT
+	 * working set - nearly twice the next worst engine - which would otherwise force the DEFAULT
+	 * split down to a size that starves every terminal build of code space. Selected per engine via
+	 * LDSCRIPT in the Makefile; see alt_sram.lds for the measurements.
+	 *
+	 * The H750's 512K AXI SRAM, split between executable code and data.
 	 *
 	 * This was 186K/326K, which was NOT a hardware limit - it was this split. Code sat at 99%
 	 * while ~260K of the data region went unused, and several engines could not host the
@@ -24,8 +31,8 @@ MEMORY
 	 * What is NOT established is the true upper bound; ">= 215K" is what was tested, not 300K.
 	 * An image approaching 300K should be flash-tested before being trusted.
 	 */
-	SRAM_EXEC	(RWX) : ORIGIN = 0x24000000, LENGTH = 260K
-	SRAM		(RWX) : ORIGIN = 0x24000000 + 260K, LENGTH = 512K - 260K
+	SRAM_EXEC	(RWX) : ORIGIN = 0x24000000, LENGTH = 200K
+	SRAM		(RWX) : ORIGIN = 0x24000000 + 200K, LENGTH = 512K - 200K
 	RAM_D2		(RWX) : ORIGIN = 0x30000000, LENGTH = 32K
 	RAM_D2CACHE	(RWX) : ORIGIN = 0x30000000 + 32K, LENGTH = 288K - 32K
 	RAM_D3		(RWX) : ORIGIN = 0x38000000, LENGTH = 64K
