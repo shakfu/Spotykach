@@ -1,4 +1,6 @@
 #pragma once
+
+#include <cstddef>   // size_t (transitive-include hygiene; host build)
 #ifndef INFS_BIQUADFILTERS_H
 #define INFS_BIQUADFILTERS_H
 

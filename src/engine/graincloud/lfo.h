@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
 
 #ifndef LFO_H
 #define LFO_H

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
 
 #include "dev/sdram.h"
 #include "daisy_seed.h"

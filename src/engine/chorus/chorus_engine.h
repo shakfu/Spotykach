@@ -2,6 +2,7 @@
 // Edit the manifest (chorus.json), not this file; then re-run the generator / `make faust-engine`.
 // Chorus - stereo chorus
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
 
 #include "engine/faust/faust_fx.h"
 #include "engine/chorus/faust_kernel_chorus.h"

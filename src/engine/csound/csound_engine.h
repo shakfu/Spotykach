@@ -1,6 +1,8 @@
 // SYNTHUX ACADEMY /////////////////////////////////////////
 // SPOTYKACH ///////////////////////////////////////////////
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
+#include <cstddef>   // size_t (transitive-include hygiene; host build)
 
 #include "engine/iengine.h"
 #include "engine/csound/csound_midi.h"     // MIDI note->event mapping + the lock-free pending-note ring

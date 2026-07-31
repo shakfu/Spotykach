@@ -1,4 +1,6 @@
 #pragma once
+
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
 #include "common.h"
 #include "nocopy.h"
 #include <array>

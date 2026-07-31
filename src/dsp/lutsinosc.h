@@ -1,4 +1,6 @@
 #pragma once
+#include <cstddef>   // size_t (transitive-include hygiene; host build)
+#include <cmath>   // std::math (transitive-include hygiene; host build)
 
 #include <array>
 #include <algorithm>

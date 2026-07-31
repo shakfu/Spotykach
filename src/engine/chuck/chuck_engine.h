@@ -1,6 +1,8 @@
 // SYNTHUX ACADEMY /////////////////////////////////////////
 // SPOTYKACH ///////////////////////////////////////////////
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
+#include <cstddef>   // size_t (transitive-include hygiene; host build)
 
 #include "engine/iengine.h"
 #include "engine/chuck/chuck_patch.h"        // kMaxChuckSlots (bank size) + the SD .ck selector

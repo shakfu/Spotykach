@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
+#include <cmath>   // std::math (transitive-include hygiene; host build)
 
 #include "daisysp.h"
 #include <array>

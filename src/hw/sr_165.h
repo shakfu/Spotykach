@@ -23,6 +23,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE
 */
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
+#include <cstddef>   // size_t (transitive-include hygiene; host build)
 
 #include "../common.h"
 

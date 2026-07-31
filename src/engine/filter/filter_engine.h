@@ -2,6 +2,7 @@
 // Edit the manifest (filter.json), not this file; then re-run the generator / `make faust-engine`.
 // Dual filter - independent resonant low-pass per deck
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
 
 #include "engine/faust/faust_fx.h"
 #include "engine/filter/faust_kernel_filter.h"

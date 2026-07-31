@@ -22,6 +22,7 @@
 //
 // -----------------------------------------------------------------------------
 #pragma once
+#include <cmath>   // std::math (transitive-include hygiene; host build)
 
 #include <algorithm>
 

@@ -2,6 +2,7 @@
 // Edit the manifest (voice.json), not this file; then re-run the generator / `make faust-engine`.
 // Voice - drone oscillator (deck A) into a resonant filter (deck B)
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
 
 #include "engine/faust/faust_chain.h"
 #include "engine/voice/faust_kernel_osc.h"

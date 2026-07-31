@@ -1,6 +1,8 @@
 // SYNTHUX ACADEMY /////////////////////////////////////////
 // SPOTYKACH ///////////////////////////////////////////////
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
+#include <cstddef>   // size_t (transitive-include hygiene; host build)
 
 // The SPK_TERMINAL service: a bidirectional text/command channel over the Daisy USB-C CDC port, used
 // primarily to test engine features from a host script. See docs/dev/terminal-control.md for the why

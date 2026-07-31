@@ -22,6 +22,8 @@
 // v1 path (mono/stereo/0-in marshalling) byte-for-byte: the per-deck arrays are size 1 and collapse away.
 
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
+#include <cstddef>   // size_t (transitive-include hygiene; host build)
 
 #include "engine/iengine.h"
 #include "engine/engine_params.h"

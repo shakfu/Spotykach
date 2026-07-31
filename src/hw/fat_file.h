@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
 
 #include <daisy_seed.h>          // FatFs FIL / f_* via libDaisy
 #include "memory/byte_file.h"

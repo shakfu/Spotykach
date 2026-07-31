@@ -18,6 +18,8 @@
 // stage's zones at init(), the wrapper never has to special-case which kernel a knob reaches.
 
 #pragma once
+#include <cstdint>   // uint*_t (transitive-include hygiene; host build)
+#include <cstddef>   // size_t (transitive-include hygiene; host build)
 
 #include "engine/iengine.h"
 #include "engine/engine_params.h"

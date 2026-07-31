@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "engine/pstretch/pstretch_engine.h"
@@ -22,6 +23,17 @@ namespace {
 int g_failures = 0;
 void check(bool cond, const char* msg) {
     if (!cond) { std::printf("  FAIL: %s\n", msg); g_failures++; }
+}
+
+// An engine sub-allocates raw pointers from ctx.arena and holds them for its lifetime (on device the
+// arena is the persistent SDRAM block). The HostArena backing it must therefore outlive the engine -
+// scoping it to just the init() call (a lambda/brace block) frees it and dangles the engine's buffers
+// (pstretch's ~1 MB ring is mmap-backed, so the freed pages unmap -> segfault on the next process()).
+// Pool the arenas for the whole run so a context's memory never dies under an engine still in use.
+std::vector<std::unique_ptr<host::HostArena>> g_arenas;
+spotykach::EngineContext pooled_ctx(host::TimeSource& time) {
+    g_arenas.push_back(std::make_unique<host::HostArena>());
+    return host::make_context(*g_arenas.back(), time);
 }
 
 struct Stereo { std::vector<float> l, r; };
@@ -148,7 +160,7 @@ int main() {
 
     // --- B. PstretchEngine through IEngine -------------------------------------------------------------
     host::TimeSource time;
-    auto make = [&](PstretchEngine& e) { host::HostArena a; EngineContext c = host::make_context(a, time); e.init(c); };
+    auto make = [&](PstretchEngine& e) { EngineContext c = pooled_ctx(time); e.init(c); };
 
     // A 220 Hz sine drive table.
     float drive[4096];
@@ -247,7 +259,7 @@ int main() {
     {
         FakeStream fake;
         PstretchEngine e;
-        { host::HostArena a; EngineContext c = host::make_context(a, time); c.stream = &fake; e.init(c); }
+        { EngineContext c = pooled_ctx(time); c.stream = &fake; e.init(c); }
         e.set_config(ConfigId::Route, DeckRef::A, 1);          // DoubleMono: A -> L
         e.set_param(ParamId::Mix, DeckRef::A, 1.f);            // full wet
         e.set_param(ParamId::Size, DeckRef::A, 0.5f);          // moderate stretch (slow read head)
@@ -273,7 +285,7 @@ int main() {
     {
         FakeStream fake;
         PstretchEngine e;
-        { host::HostArena a; EngineContext c = host::make_context(a, time); c.stream = &fake; e.init(c); }
+        { EngineContext c = pooled_ctx(time); c.stream = &fake; e.init(c); }
         e.prepare();                                           // scan /pstretch -> one/two/three.raw
         e.set_param(ParamId::Mix, DeckRef::A, 1.f);
         e.set_config(ConfigId::Mode, DeckRef::A, 2);           // deck A -> SD: opens clip 0 (one.raw)
@@ -297,7 +309,7 @@ int main() {
         auto sd_tone_hz = [&](uint32_t clip_rate, float& peak_out) {
             FakeStream fake; fake.scan_wav = true; fake.scan_rate = clip_rate;
             PstretchEngine e;
-            { host::HostArena a; EngineContext c = host::make_context(a, time); c.stream = &fake; e.init(c); }
+            { EngineContext c = pooled_ctx(time); c.stream = &fake; e.init(c); }
             e.prepare();
             e.set_config(ConfigId::Route, DeckRef::A, 1);     // A -> L
             e.set_param(ParamId::Mix,  DeckRef::A, 1.f);      // fully wet
@@ -331,7 +343,7 @@ int main() {
     {
         FakeStream fake;
         PstretchEngine e;
-        { host::HostArena a; EngineContext c = host::make_context(a, time);
+        { EngineContext c = pooled_ctx(time);
           c.stream = &fake; c.time = nullptr; e.init(c); }                 // null time -> settle immediately
         e.prepare();
         e.set_config(ConfigId::Mode, DeckRef::A, 2);          // SD: opens clip at frame 0
@@ -359,7 +371,7 @@ int main() {
     {
         FakeStream fake; fake.clip_count = 0;                  // card "not ready yet" -> empty scan
         PstretchEngine e;
-        { host::HostArena a; EngineContext c = host::make_context(a, time);
+        { EngineContext c = pooled_ctx(time);
           c.stream = &fake; c.time = nullptr; e.init(c); }     // null time -> first scan settles immediately
         e.prepare();                                           // boot scan finds nothing
         check(e.param(ParamId::Aux, DeckRef::A) == 0.f, "late-mount: no clips found on the early scan");
@@ -379,7 +391,7 @@ int main() {
     {
         FakeStream fake; fake.clip_count = 0;                  // card not ready at the moment SD is selected
         PstretchEngine e;
-        { host::HostArena a; EngineContext c = host::make_context(a, time);
+        { EngineContext c = pooled_ctx(time);
           c.stream = &fake; c.time = nullptr; e.init(c); }
         e.set_param(ParamId::Mix, DeckRef::A, 1.f);
         e.set_config(ConfigId::Mode, DeckRef::A, 2);           // Drift/SD at "boot": nothing to open yet
