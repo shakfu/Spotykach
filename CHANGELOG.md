@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.1]
+
 ### Added
 
 - **On-target engine testing over USB-C (`TERMINAL=1`) — hardware-verified.** A bidirectional text/command channel on the rear USB-C CDC port lets a host script drive an engine into a known state, exercise a feature and assert on a property read back, with no knobs, patch cables or MIDI gear. The whole `IEngine` input surface is addressable by name (`set param`, `config`, `cv`, `gate`, `midi`, `pad`, `fx`), state is readable (`query empty|mix|route|gateout|usb`), and `mode test` freezes the physical input path so injected stimulus is the only thing driving the engine. `describe` emits the device's own control surface so a host configures itself instead of hardcoding per-engine knowledge. Zero cost when off - the terminal TUs compile to 0 bytes and the default binary is unchanged. ([`docs/dev/terminal-control.md`](docs/dev/terminal-control.md), [`docs/dev/terminal-impl.md`](docs/dev/terminal-impl.md))

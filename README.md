@@ -178,6 +178,46 @@ For convenience there are one-shot targets that **clean + build + flash** a vari
 
 Once finished, the device will automatically boot the new firmware. This can "brick" (temporarily) the device and require reinstallation of either the bootloader, the firmware binary, or both.
 
+## Testing
+
+There are two independent suites: one that runs on your machine, and one that drives a flashed device.
+
+### Off-target (no hardware)
+
+The engines and the platform's hardware-free layers compile for the host against a small `<daisy.h>` shim, so most DSP and all of the control-plane logic is testable without a device:
+
+```sh
+make -C host test      # engine + DSP suites (delay, tape, reso, granular, csound, the terminal codec, ...)
+make -C test test      # small standalone unit tests (wav, config, dividers, ...) - 116 checks
+```
+
+Note that a bare `make test` in the repo root does **nothing** — it matches the `test/` directory rather than a target. Use the two commands above.
+
+### On-target (a flashed device)
+
+`TERMINAL=1` builds in a bidirectional text/command channel over the rear USB-C port — the same port used for DFU — which lets a host script drive an engine and assert on what it reports. It is opt-in and costs nothing when off: the terminal translation units compile to zero bytes and a build without the flag is byte-identical.
+
+```sh
+make -j8 ENGINE=delay TERMINAL=1     # then flash as described above
+make test-hw                         # pytest harness over USB-C
+```
+
+`make test-hw` needs `pyserial` and `pytest`; it picks up a project virtualenv (`.venv`) if there is one, and **skips cleanly when no device is attached**, so it is safe to leave in a pipeline. With a device it drives every parameter the engine declares, across both decks, inside an input-isolated mode where knobs, CV, gate and switches cannot perturb the run.
+
+The tests are generic: they are driven entirely by the device's own `describe` output, so one file tests every engine build. Nothing is hardcoded per engine.
+
+For poking at a device by hand there is a REPL:
+
+```sh
+python tools/skterm.py
+sk> describe                 # the device's whole control surface
+sk> set param feedback A 0.75
+sk> get param feedback A     # -> ok 0.7500
+sk> query empty A            # engine state
+```
+
+The channel and its design are documented in [`docs/dev/terminal-control.md`](docs/dev/terminal-control.md) (what and why), [`docs/dev/terminal-dispatch.md`](docs/dev/terminal-dispatch.md) (the command grammar), [`docs/dev/terminal-tools.md`](docs/dev/terminal-tools.md) (the host side) and [`docs/dev/terminal-impl.md`](docs/dev/terminal-impl.md) (what actually landed, including the hardware bring-up history).
+
 ## Architecture & developer docs
 
 Firmware internals are documented under [`docs/`](docs/) — start with [`docs/architecture.md`](docs/architecture.md), which covers the hardware platform, the platform/engine seam (`IEngine`), and how to slot in a new engine. [`docs/engines/`](docs/engines/) documents each engine in detail plus the shared transport and knob-routing model, and [`docs/engine-types/`](docs/engine-types/) covers the three engine-authoring methods (native C++, Faust/cyfaust, gen~/gen-dsp). Notable changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).
