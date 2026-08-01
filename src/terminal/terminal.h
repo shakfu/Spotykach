@@ -24,7 +24,10 @@
 // OTG_HS (see hw/hardware.cpp) - and USB_MIDI defaults ON for every BOOT_QSPI build. Two USB device
 // stacks on one core is not a thing; fail at compile time rather than at 3am on a bench.
 // Fix by choosing one: USB_MIDI=0, or TERMPORT=int if that board's jack is really on OTG_FS.
-#if defined(SPK_USB_MIDI) && SPK_TERMINAL_PORT_EXTERNAL
+// Only a conflict when the channel is actually built: terminal.cpp includes this header OUTSIDE its
+// own `#if SPK_TERMINAL` guard, so without the SPK_TERMINAL term this fires on every USB_MIDI build
+// (i.e. every BOOT_QSPI engine, incl. `make dist`) even though no USB device is claimed.
+#if SPK_TERMINAL && defined(SPK_USB_MIDI) && SPK_TERMINAL_PORT_EXTERNAL
 #error "SPK_TERMINAL (external port) and SPK_USB_MIDI both claim OTG_HS as a USB device. \
 Build with USB_MIDI=0, or TERMPORT=int if this board's terminal jack is on OTG_FS."
 #endif
