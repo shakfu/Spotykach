@@ -97,7 +97,22 @@ Per deck the play LED and a ring marker show the stretch amount and the state co
 
 - **Delayed smear** (live mode) is intentional and inherent to real-time stretching - use **Freeze**, **Capture**, or the **SD-file** source to play *through* a fixed moment / phrase / clip instead of trailing the input.
 
-- **Window is 8192 samples (~171 ms)** by default - a lush, smooth wash, hardware-confirmed running clean on the H7. A lighter **4096-sample (~85 ms)** window is available with `make ENGINE=pstretch WINDOW=4096` (metered at ~32% avg / ~64% max). The 8192 default roughly doubles the FFT work and hasn't had a formal `METER=1` CPU number taken yet, but it plays clean by ear; if you ever hear underruns, drop to `WINDOW=4096` or raise `kWorkBudget`.
+- **Window is 8192 samples (~171 ms)** by default - a lush, smooth wash. A lighter **4096-sample (~85 ms)** window is available with `make ENGINE=pstretch WINDOW=4096`. Both are now measured on hardware (below); if you ever hear underruns, drop to `WINDOW=4096` or raise `kWorkBudget`.
+
+- **CPU + memory, measured on hardware 2026-08-01.** Taken over the terminal channel (`reset cpu` -> sample at 1 s / 3 s / 6 s -> `query cpu`/`cpumin`/`cpumax`), both builds `TERMINAL=1`, engine passive rather than driven hard. The 4096 figures confirm the estimate this doc previously carried (~32% / ~64%); the 8192 default had never had a number taken.
+
+  | | WINDOW=8192 | WINDOW=4096 |
+  |---|---|---|
+  | CPU avg | 41.5% | **33.3%** |
+  | CPU max | **87.6 -> 88.2 -> 91.3%** | **63.47 -> 63.57 -> 63.76%** |
+  | CPU min | 2.00% | 1.93% |
+  | `SRAM` (312K) | 97.40% | **82.01%** |
+  | `SRAM_EXEC` (200K) | 94.38% | 94.35% |
+  | `make test-hw` | 30 passed | 30 passed |
+
+  **Read the max column, not the average - and read it as a sequence.** At 8192 the peak was still CLIMBING through the sample (87.6 -> 91.3, +3.7 pp), i.e. it had not converged and 91.3% is *not* the ceiling, just the worst block seen in six passive seconds. At 4096 it converged immediately (+0.3 pp drift) and reads like an actual bound. So the real 8192 headroom is smaller than "100 - 91" suggests and is not yet known; driving both decks hard will push it further. Neither figure is a worst case - both were measured passive.
+
+- **Why the window choice is not purely a voicing question here.** pstretch is the one engine large in *both* halves of the AXI SRAM split, which is why it needs its own linker script (`linker/alt_sram_pstretch.lds`). 4096 is the only configuration with real margin on both axes at once - ~36% CPU headroom and ~50 KB data slack, against ~9% and ~8 KB at 8192. That is an argument for 4096 as the default, but it is not a decision the numbers can make: 4096 is a shorter, snappier smear (~85 ms vs ~171 ms), and the long wash may be the point of the engine. **The default remains 8192 pending a listening call.**
 
 - **Soft start.** Entering SD mode (and each scrub re-seek) briefly primes the ring - expect ~170 ms of soft/near-silent output; benign for an ambient scrub.
 
@@ -106,7 +121,9 @@ Per deck the play LED and a ring marker show the stretch amount and the state co
 ## Build / flash
 
 ```text
-make -j8 ENGINE=pstretch      # build (8192 window, ~82% SRAM_EXEC; WINDOW=4096 for the lighter build)
+make -j8 ENGINE=pstretch      # build (8192 window; WINDOW=4096 for the lighter build)
+                              # uses linker/alt_sram_pstretch.lds automatically - pstretch does NOT
+                              # link against the default 300K/212K split (see that file's header)
 make ENGINE=pstretch program-dfu
 make engine-pstretch          # one-shot: clean + build + flash (device in DFU mode)
 make -C host test             # host suites incl. test-pstretch

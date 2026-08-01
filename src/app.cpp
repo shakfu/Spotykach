@@ -27,7 +27,19 @@
 #define STORAGE
 
 // #define METER
-#ifdef METER
+//
+// SPK_CPU_METER - "is the CpuLoadMeter being DRIVEN", which is not the same question as "is METER=1".
+// METER=1 both drives the meter and brings up a second USB device (`_meter_usb`, FS_EXTERNAL) purely to
+// print the readings; that device claims the same OTG core the terminal channel needs, so METER=1 and
+// TERMINAL=1 cannot coexist. A TERMINAL build therefore drives the meter itself and reports it on
+// request via `query cpu` (see terminal/cpu_stat.h) - the measurement is two System::GetTick() reads
+// per block, while only the printing needs a USB device of its own. Keep the printing block under
+// METER alone; everything that only measures uses SPK_CPU_METER.
+#if defined(METER) || SPK_TERMINAL
+#define SPK_CPU_METER 1
+#endif
+
+#ifdef SPK_CPU_METER
 #include "meter.h"
 #endif
 
@@ -314,8 +326,10 @@ void AppImpl::Init()
 
     _ui.calibrate(false);
 
-    #ifdef METER
+    #ifdef SPK_CPU_METER
     Meter::cpu().load.Init(sample_rate, block_size);
+    #endif
+    #ifdef METER
     _meter_usb.Init(daisy::UsbHandle::FS_EXTERNAL); // CDC for the load meter (LOGGER_EXTERNAL port)
     #endif
 }
@@ -378,16 +392,16 @@ void AppImpl::ProcessAudio(AudioHandle::InputBuffer  in,
                            AudioHandle::OutputBuffer out,
                            size_t                    size)
 {
-    #ifdef METER
+    #ifdef SPK_CPU_METER
     Meter::cpu().load.OnBlockStart();
     #endif
-    
+
     _hw.ProcessAnalogControls();
     _ui.tick();
     _ui.read_cv();
     _engine.process(in, out, size);
 
-    #ifdef METER
+    #ifdef SPK_CPU_METER
     Meter::cpu().load.OnBlockEnd();
     #endif
 }

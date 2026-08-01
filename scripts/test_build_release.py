@@ -104,8 +104,8 @@ def test_qspi_engines_have_boot_qspi_flags_and_prereqs():
     # gets built as a plain SRAM engine and overflows SRAM_EXEC. Every QSPI engine must carry the
     # right flags (its own linker script) and a prebuilt-lib prerequisite.
     expected = {
-        "csound": "alt_qspi.lds",
-        "chuck":  "alt_qspi_chuck.lds",
+        "csound": "linker/alt_qspi.lds",
+        "chuck":  "linker/alt_qspi_chuck.lds",
     }
     for engine, ldscript in expected.items():
         assert engine in m.DEFAULT_ENGINES

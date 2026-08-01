@@ -45,7 +45,7 @@ Plaits renders at 48 kHz in **`kBlockSize = 12`**-sample chunks; the platform's 
 mosc is a **QSPI-execute target**. The full 24-engine voice is ~292 KB of `.text`, which overflows the 186 KB `SRAM_EXEC`, so it builds `BOOT_QSPI` with the QSPI linker script and executes from the 8 MB QSPI flash:
 
 ```text
-make ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds   # (== make engine-mosc)
+make ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds   # (== make engine-mosc)
 ```
 
 This is the same path [csound](../engines/csound.md)/[chuck](../engines/chuck.md) use, with two differences:

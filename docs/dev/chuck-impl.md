@@ -148,7 +148,7 @@ Nearly everything hard about Csound is reusable with only names changed:
 
 - **SD patch bank + Alt+PITCH selector + boot auto-load + built-in fallback** — same UX and the same FatFs gotchas (relative paths, no leading slash; strip BOM/CRLF on load). `.ck` files instead of `.csd`, under `/chuck/0.ck` … `/chuck/7.ck`.
 
-- **`scripts/fetch_chuck.sh`** modelled on `fetch_csound.sh`: fetch a pinned `ccrma/chuck` tag (the `~MB` source is gitignored, reproduced from upstream), cross-build `libchuck.a` + headers for cortex-m7 single-precision bare metal, install to `thirdparty/chuck/Daisy/{lib,include}` where the `ENGINE=chuck` Makefile branch points `-I` / link. The Makefile branch needs `APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds` and `-DSPK_USE_STREAM` (for SD), exactly like the csound branch.
+- **`scripts/fetch_chuck.sh`** modelled on `fetch_csound.sh`: fetch a pinned `ccrma/chuck` tag (the `~MB` source is gitignored, reproduced from upstream), cross-build `libchuck.a` + headers for cortex-m7 single-precision bare metal, install to `thirdparty/chuck/Daisy/{lib,include}` where the `ENGINE=chuck` Makefile branch points `-I` / link. The Makefile branch needs `APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds` and `-DSPK_USE_STREAM` (for SD), exactly like the csound branch.
 
 ---
 

@@ -613,6 +613,12 @@ void test_dispatch_composites() {
     check_eq(run(e, "reset A"), "ok 3\r\n", "reset <deck> touches one deck (plus globals)");
     check_eq(run(e, "reset Z"), "err bad-deck\r\n", "reset rejects a bad deck");
 
+    // `reset cpu` is a keyword, not a deck: it clears the CPU meter's min/max so a measurement can
+    // bound its own interval instead of inheriting the boot transient. Checked before the deck parse,
+    // which is the whole reason it does not come back `bad-deck`.
+    check_eq(run(e, "reset cpu"), "ok\r\n", "reset cpu clears the meter extremes without touching params");
+    check_eq(run(e, "get param size A"), "ok 0.2500\r\n", "reset cpu left the params alone");
+
     // Snapshot, perturb, restore - the whole point of the pair. These MUST share one TermState: the
     // slots live there (one Terminal, one state, for the life of the firmware), so the convenience
     // run() overload - which makes a fresh state per call - would silently lose the saved slot.
@@ -674,6 +680,15 @@ void test_dispatch_observation() {
     // The latching read: asking changes the answer. This is why it must never be advertised.
     check_eq(run(e, "query reseed A"), "ok 1\r\n", "reseed reports a pending reseed");
     check_eq(run(e, "query reseed A"), "ok 0\r\n", "reseed self-cleared - the read had a side effect");
+
+    // CPU load. Off target there is no audio callback and no tick counter, so cpu_stat.cpp's host
+    // implementation reports zeros - what is verified here is the WIRING (three distinct global Float
+    // queries reaching the right field, each replying in the bare `ok <value>` form a sweep parses),
+    // not the readings, which only mean anything on hardware.
+    check_eq(run(e, "query cpu"),    "ok 0.0000\r\n", "query cpu reports the smoothed average");
+    check_eq(run(e, "query cpumin"), "ok 0.0000\r\n", "query cpumin reports the floor");
+    check_eq(run(e, "query cpumax"), "ok 0.0000\r\n", "query cpumax reports the peak");
+    check_eq(run(e, "query cpu A"),  "ok 0.0000\r\n", "cpu is global - a deck argument is ignored");
 }
 
 void test_dispatch_errors() {
@@ -738,8 +753,8 @@ void test_dispatch_target_b() {
     check(contains(d, "query empty deck bool\r\n"),     "platform queries now carry a kind too");
     check(!contains(d, "query latch"), "an unsafe entry is never advertised");
     check(!contains(d, "query reseed"), "the platform's own latching read stays unadvertised");
-    check(count_lines_with(d, "query ") == 9 + 6,
-          "describe emits both halves: 9 safe platform + 6 safe engine");
+    check(count_lines_with(d, "query ") == 12 + 6,
+          "describe emits both halves: 12 safe platform + 6 safe engine");
 
     // Unsafe entries stay reachable by name - they are simply not offered to a generic host.
     check_eq(run(e, "query latch A"), "ok 1\r\n", "an unsafe query still answers when asked directly");
@@ -806,7 +821,7 @@ void test_describe() {
         check(!contains(d, "param modspeed "),    "modspeed is not advertised (set_mod_speed is its path)");
         check(contains(d, "param crossfade global "), "crossfade IS advertised - it does reach set_param");
         check(count_lines_with(d, "config ") == int(ConfigId::Count), "all-live mask lists every config");
-        check(count_lines_with(d, "query ") == 9, "the platform query vocabulary is enumerated");
+        check(count_lines_with(d, "query ") == 12, "the platform query vocabulary is enumerated");
         for (const char* q : { "query recorded deck", "query capacity deck",
                                "query layout deck", "query sizetempo deck" })
             check(contains(d, q), "the new safe state queries are advertised");

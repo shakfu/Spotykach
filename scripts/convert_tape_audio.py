@@ -161,6 +161,19 @@ def walk_wav(f):
                 af, ch = struct.unpack("<HH", fb[0:4])
                 sr = struct.unpack("<I", fb[4:8])[0]
                 bits = struct.unpack("<H", fb[14:16])[0]
+                # WAVE_FORMAT_EXTENSIBLE (0xFFFE): the real format tag is the first 2 bytes of the
+                # SubFormat GUID at body+24 (past cbSize(2) + wValidBitsPerSample(2) + dwChannelMask(4)).
+                # Mirrors WavStreamReader::begin (src/memory/wav_stream.h) - this function claims to
+                # parse the way the firmware does, and without this it does not: ffmpeg writes 0xFFFE
+                # for float WAVs, so a perfectly playable file was reported as the wrong format. The
+                # error was in the safe direction (rejecting a good file, never accepting a bad one),
+                # which is why it stayed hidden - `--canonical` rewrites the header and masks it, and
+                # sox writes tag 3 directly.
+                if af == 0xFFFE and sz >= 40:
+                    f.seek(body + 24)
+                    tag = f.read(2)
+                    if len(tag) == 2:
+                        af = struct.unpack("<H", tag)[0]
                 fmt = (af, ch, sr, bits)
         elif cid == b"data":
             data_off, data_sz = body, sz

@@ -1,7 +1,7 @@
 # SPIKE (TODO P3): evaluate converting the firmware build to CMake.
 # Goal is parity with the proven Make build, NOT idiomatic-CMake defaults.
 # The Make build compiles app TUs at -O2/no-LTO/c++17, defines BOOT_APP, and links
-# the custom alt_sram.lds for the SRAM bootloader. Each of those is reproduced below;
+# the custom linker/alt_sram.lds for the SRAM bootloader. Each of those is reproduced below;
 # the comments flag every place where DaisyProject.cmake's defaults would diverge.
 
 cmake_minimum_required(VERSION 3.20)
@@ -49,7 +49,7 @@ set(ENGINE_INCLUDES "")            # extra -I roots for the firmware target
 set(ENGINE_DEFINES  "")            # extra compile definitions
 set(ENGINE_OPTIONS  "")            # extra compile options (gigaverb suppresses gen~ unused-* warnings)
 set(APP_OPT -O2)                   # app-TU opt level (overrides the inherited -O3); reso/mosc drop to -Os
-set(ENGINE_LDSCRIPT alt_sram.lds)  # SRAM engines (default); the QSPI engines (mosc/csound/chuck) override
+set(ENGINE_LDSCRIPT linker/alt_sram.lds)  # SRAM engines (default); the QSPI engines (mosc/csound/chuck) override
 set(ENGINE_LIBS "")                # external static libs to link (csound/chuck: libcsound.a / libchuck.a)
 set(ENGINE_LINK_OPTIONS "")        # extra link options (QSPI: -u _printf_float + the SDRAM malloc wraps)
 if(ENGINE STREQUAL granular)
@@ -96,7 +96,7 @@ elseif(ENGINE STREQUAL reso)
 elseif(ENGINE STREQUAL mosc)
     set(ENGINE_DEFINE SPK_ENGINE_MOSC)
     # QSPI-EXECUTE: the full 24-engine Plaits voice (~292 KB .text) overflows the 186 KB SRAM_EXEC, so mosc
-    # runs from QSPI (alt_qspi.lds). The boot define is still BOOT_APP -- BOOT_SRAM/BOOT_QSPI differ only by
+    # runs from QSPI (linker/alt_qspi.lds). The boot define is still BOOT_APP -- BOOT_SRAM/BOOT_QSPI differ only by
     # linker script. UNLIKE csound/chuck it still synthesises from the platform arena (no SPK_NO_ENGINE_ARENA)
     # and reuses the csound VTOR inject. PLAITS_USER_DATA_STUB: this board has no on-device flash patch store.
     # stmlib comes from the shared common/ tree (same dedup as reso). Build -Os to keep the SRAM tables small.
@@ -106,7 +106,7 @@ elseif(ENGINE STREQUAL mosc)
     set(ENGINE_DEFINES M_PI=3.14159265358979323846 PLAITS_USER_DATA_STUB)
     set(ENGINE_INCLUDES ${MOSC_TP} ${COMMON_TP})
     set(APP_OPT -Os)
-    set(ENGINE_LDSCRIPT alt_qspi.lds)
+    set(ENGINE_LDSCRIPT linker/alt_qspi.lds)
     file(GLOB MOSC_PLAITS_CC CONFIGURE_DEPENDS
         ${MOSC_TP}/plaits/dsp/engine/*.cc
         ${MOSC_TP}/plaits/dsp/engine2/*.cc
@@ -237,13 +237,13 @@ elseif(ENGINE STREQUAL voice)
 # <<< faust:voice <<<
 elseif(ENGINE STREQUAL csound)
     set(ENGINE_DEFINE SPK_ENGINE_CSOUND)
-    # QSPI-ONLY: links libcsound.a (~3.7 MB) -> runs from QSPI (alt_qspi.lds). Synthesises from its own
+    # QSPI-ONLY: links libcsound.a (~3.7 MB) -> runs from QSPI (linker/alt_qspi.lds). Synthesises from its own
     # 12 MB SDRAM pool (csound_alloc.cpp), so SPK_NO_ENGINE_ARENA shrinks the platform arena; SPK_USE_STREAM
     # for the /csound/*.csd patch bank. Prereq: scripts/fetch_csound.sh has produced libcsound.a.
     set(CSOUND_BASE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/csound/Daisy)
     set(ENGINE_DEFINES SPK_USE_STREAM SPK_NO_ENGINE_ARENA)
     set(ENGINE_INCLUDES ${CSOUND_BASE}/include/csound)
-    set(ENGINE_LDSCRIPT alt_qspi.lds)
+    set(ENGINE_LDSCRIPT linker/alt_qspi.lds)
     set(ENGINE_SOURCES
         src/engine/csound/csound_engine.cpp
         src/engine/csound/csound_alloc.cpp
@@ -255,7 +255,7 @@ elseif(ENGINE STREQUAL csound)
     set(ENGINE_LINK_OPTIONS -u _printf_float -Wl,--wrap=malloc,--wrap=free,--wrap=calloc,--wrap=realloc)
 elseif(ENGINE STREQUAL chuck)
     set(ENGINE_DEFINE SPK_ENGINE_CHUCK)
-    # QSPI-ONLY: links libchuck.a (~6 MB) -> runs from QSPI (alt_qspi_chuck.lds). Own 12 MB SDRAM pool
+    # QSPI-ONLY: links libchuck.a (~6 MB) -> runs from QSPI (linker/alt_qspi_chuck.lds). Own 12 MB SDRAM pool
     # (chuck_alloc.cpp) -> SPK_NO_ENGINE_ARENA; SPK_USE_STREAM for the /chuck/*.ck patch bank. The ChucK
     # feature defines MUST match the set fetch_chuck.sh built libchuck.a with (ChucK class layouts / ABI).
     # Prereq: scripts/fetch_chuck.sh has produced libchuck.a + the shim sysroot.
@@ -269,7 +269,7 @@ elseif(ENGINE STREQUAL chuck)
         __DISABLE_KBHIT__ __DISABLE_PROMPTER__ __DISABLE_SHELL__ __OLDSCHOOL_RANDOM__
     )
     set(ENGINE_INCLUDES ${CHUCK_BASE}/src/core ${CHUCK_BASE}/Daisy/shim)
-    set(ENGINE_LDSCRIPT alt_qspi_chuck.lds)
+    set(ENGINE_LDSCRIPT linker/alt_qspi_chuck.lds)
     set(ENGINE_SOURCES
         src/engine/chuck/chuck_engine.cpp
         src/engine/chuck/chuck_alloc.cpp
@@ -309,8 +309,8 @@ set(FIRMWARE_SOURCES
 set(DAISYSP_LIB DaisySP)
 
 # PARITY (boot path): use the project's custom linker script, not the stock STM32H750IB_*.lds. SRAM
-# engines use alt_sram.lds; the QSPI-execute engines (mosc/csound/chuck) set ENGINE_LDSCRIPT to
-# alt_qspi.lds / alt_qspi_chuck.lds above. DaisyProject reads CUSTOM_LINKER_SCRIPT at include() time.
+# engines use linker/alt_sram.lds; the QSPI-execute engines (mosc/csound/chuck) set ENGINE_LDSCRIPT to
+# linker/alt_qspi.lds / linker/alt_qspi_chuck.lds above. DaisyProject reads CUSTOM_LINKER_SCRIPT at include() time.
 set(CUSTOM_LINKER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/${ENGINE_LDSCRIPT})
 
 include(DaisyProject)

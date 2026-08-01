@@ -40,6 +40,33 @@ public:
 
     Capabilities capabilities() const override { return CapOwnDisplay | CapDualDeck | CapAux; }
 
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md). set_param stores EVERY id into
+    // _param[] before its switch, so the default all-live mask would advertise all 24 and a host sweep
+    // would "pass" on ids the switch drops - reading back the value it just wrote while nothing in the
+    // engine changed. These are the ids the switch acts on (edrums_engine.cpp:536-554): POS=density,
+    // SIZE=pattern length, ENV=rotation, SPEED=pitch, MIX=per-drum gain, MODAMP=onset probability,
+    // AUX=model, plus the four grit/flux macros and grit decay.
+    ParamMask live_params() const override {
+        return (1u << static_cast<uint32_t>(ParamId::Pos))
+             | (1u << static_cast<uint32_t>(ParamId::Size))
+             | (1u << static_cast<uint32_t>(ParamId::Env))
+             | (1u << static_cast<uint32_t>(ParamId::Speed))
+             | (1u << static_cast<uint32_t>(ParamId::Mix))
+             | (1u << static_cast<uint32_t>(ParamId::ModAmp))
+             | (1u << static_cast<uint32_t>(ParamId::Aux))
+             | (1u << static_cast<uint32_t>(ParamId::GritMix))
+             | (1u << static_cast<uint32_t>(ParamId::GritIntensity))
+             | (1u << static_cast<uint32_t>(ParamId::FluxIntensity))
+             | (1u << static_cast<uint32_t>(ParamId::FluxMix))
+             | (1u << static_cast<uint32_t>(ParamId::FluxFb));
+    }
+    // Route is the only switch set_config acts on; Mode is ignored here.
+    ConfigMask live_configs() const override {
+        return static_cast<ConfigMask>(1u << static_cast<uint32_t>(ConfigId::Route));
+    }
+#endif
+
     void  set_param(ParamId id, DeckRef::Ref deck, float value) override;
     float param(ParamId id, DeckRef::Ref deck) const override;
     void  set_mod_speed(DeckRef::Ref deck, float value, bool sync) override; // MODFREQ -> division

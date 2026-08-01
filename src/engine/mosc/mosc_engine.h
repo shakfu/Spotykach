@@ -44,6 +44,30 @@ public:
         return CapOwnDisplay | CapDualDeck | CapAux;
     }
 
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md). The impl's set_param caches EVERY
+    // id into param_cache[] before its switch, so the default all-live mask would advertise all 24 and a
+    // host sweep would "pass" on ids the switch drops - reading back its own write while the oscillator
+    // never moved. These are the ids the switch acts on (mosc_engine.cpp): PITCH=note, SIZE=harmonics,
+    // POS=timbre, ENV=morph, MODAMP=decay, MIX=level, AUX=Plaits engine select.
+    //
+    // ModSpeed (-> the Plaits `color` control) is bound but stays out: it is platform-owned, delivered
+    // through set_mod_speed rather than set_param, and `describe` filters it either way.
+    ParamMask live_params() const override {
+        return (1u << static_cast<uint32_t>(ParamId::Speed))
+             | (1u << static_cast<uint32_t>(ParamId::Size))
+             | (1u << static_cast<uint32_t>(ParamId::Pos))
+             | (1u << static_cast<uint32_t>(ParamId::Env))
+             | (1u << static_cast<uint32_t>(ParamId::ModAmp))
+             | (1u << static_cast<uint32_t>(ParamId::Mix))
+             | (1u << static_cast<uint32_t>(ParamId::Aux));
+    }
+    ConfigMask live_configs() const override {
+        return static_cast<ConfigMask>((1u << static_cast<uint32_t>(ConfigId::Route))
+                                     | (1u << static_cast<uint32_t>(ConfigId::Mode)));
+    }
+#endif
+
     void  set_param(ParamId id, DeckRef::Ref deck, float value) override;
     float param(ParamId id, DeckRef::Ref deck) const override;
     void  set_mod_speed(DeckRef::Ref deck, float value, bool sync) override;

@@ -50,7 +50,8 @@ DELAY_SRC   = $(ROOT)/src/engine/delay/delay_engine.cpp
 # the only part that needs a device. The ring / TX FIFO / line assembler are header-only.
 TERMINAL_SRC = $(ROOT)/src/terminal/dispatch.cpp $(ROOT)/src/terminal/fmt.cpp \
                $(ROOT)/src/terminal/names.cpp $(ROOT)/src/terminal/text_sink.cpp \
-               $(ROOT)/src/terminal/usb_diag.cpp
+               $(ROOT)/src/terminal/usb_diag.cpp \
+               $(ROOT)/src/terminal/cpu_stat.cpp
 # qdelay flavor: its feedback diffuser is the header-only src/dsp/diffuser.h, so just the engine .cpp.
 QDELAY_SRC  = $(ROOT)/src/engine/qdelay/qdelay_engine.cpp
 EDRUMS_SRC  = $(ROOT)/src/engine/edrums/edrums_engine.cpp

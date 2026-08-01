@@ -2,6 +2,49 @@
 
 Deferred work, in priority order (highest first). See `docs/` for the platform/engine design and `CHANGELOG.md` for done work.
 
+> **Update 2026-08-01 - the bench session is now instrumented.** This file was written as if P2 could
+> only be a manual listening pass. That predates the USB-C terminal channel, which was fixed and verified
+> on hardware 2026-07-31 (root cause: the panel jack is on OTG_HS, not OTG_FS - see
+> [`terminal-impl.md`](docs/dev/terminal-impl.md)). Two things landed since, both host-verified:
+>
+> - **`query cpu` / `cpumin` / `cpumax` + `reset cpu`** - the platform's `CpuLoadMeter` is now readable
+>   over the channel, so P2's headroom numbers are `reset cpu` -> drive the engine -> `query cpumax`,
+>   scripted per engine. Previously the meter needed `METER=1`, which brings up a second USB device on
+>   the same OTG core the terminal uses - the numbers and the channel that would collect them were
+>   mutually exclusive.
+> - **`live_params()`/`live_configs()` on every engine** - the stated blocker on `make test-hw`. The
+>   generic sweep no longer sets params engines ignore, so the mechanical half of P2 can run unattended.
+>
+> Neither is hardware-verified yet; both fold into the P2 session.
+>
+> **And one regression found on the way - now FIXED and hardware-verified.** `pstretch` had stopped
+> building entirely: not "cannot host the terminal" but no link at all, terminal or not, at either
+> window (`region SRAM overflowed by 80576 bytes` on the committed `v0.6.1` tree). Commit `993210f`
+> moved 114K from the data `SRAM` region into `SRAM_EXEC` (186K -> 300K) so the channel would fit
+> everywhere; pstretch's FFT working set needed 297664 B of exactly that region.
+>
+> Fixed with a per-engine linker script, `linker/alt_sram_pstretch.lds` (200K/312K instead of
+> 300K/212K), selected automatically on `ENGINE=pstretch` so a plain `make ENGINE=pstretch` is correct
+> too. Same approach and precedent as `linker/alt_qspi_chuck.lds`, and it leaves the other 20 engines on
+> the 300K split untouched. **All three pstretch images flashed and confirmed working on hardware
+> 2026-08-01** (8192 with and without the terminal, and 4096 with it) - so the moved code/data boundary
+> boots, which a link check could not have established.
+>
+> **P2 is therefore no longer purely pending - its first engine is measured.** `make test-hw` ran
+> against real hardware for the first time (`30 passed, 3 skipped`), and pstretch has CPU numbers:
+>
+> | | WINDOW=8192 | WINDOW=4096 |
+> |---|---|---|
+> | CPU avg / max | 41.5% / **87.6 -> 91.3% (still climbing)** | 33.3% / **63.6% (converged)** |
+> | `SRAM` (312K) | 97.40% | 82.01% |
+>
+> **Open decision - pstretch's default window is now a voicing call with evidence attached.** 4096 is
+> the only config with real margin on both axes at once (~36% CPU, ~50 KB data, vs ~9% and ~8 KB), and
+> its peak has converged where 8192's had not - so 8192's true worst case is unknown and worse than
+> 91%. But 4096 is a shorter smear (~85 ms vs ~171 ms) and the long wash may be the point of the
+> engine. **Default stays 8192 until someone listens to both.** Numbers in
+> [`docs/engines/pstretch.md`](docs/engines/pstretch.md).
+
 Priority is driven less by size than by what unblocks/gates what, and by whether an item is **build-verifiable on the host** vs. **hardware-gated** (needs a flash to verify). Most of the open work is now hardware-gated and has piled up: several engines have been *flashed and heard informally but not rigorously measured/voiced* - they sound alive, but CPU headroom (`Meter::cpu`) and the full voicing range haven't been pinned down. The dominant move is therefore a single bench session (P2) that does that measured pass; the remaining items are a deliberate code refactor (P3), an optional voicing tweak (P4), and a strategic build-system decision (P5). Ahead of all of them sits **P0**: the desk/host audit of whether every engine uses the full UI/indicator grammar is **done** (see `indicator-comparison.md` §7), leaving the ranked toolkit migration as the top actionable item (its apply step is hardware-gated and folds into P2).
 
 | # | Item | Effort | Risk | Verify | Gating |
@@ -51,6 +94,23 @@ Highest-leverage *decision* before any code: answering one hardware fact either 
 ## P2 - One bench session: measure + voice the engines that work but aren't quantified (HARDWARE-GATED)
 
 These engines **have been flashed and heard** - they boot and sound alive on the unit. What's missing is the *measured* pass: real CPU headroom (`Meter::cpu`) and a deliberate sweep of the full voicing range, neither of which a host test or a casual listen establishes. Do it as a single bench session and capture the numbers:
+
+> **The measured pass is now scripted, and pstretch is done (2026-08-01).** Read CPU over the terminal
+> instead of `METER=1` (which cannot coexist with the channel - it wants the same OTG core):
+>
+> ```
+> make ENGINE=<e> TERMINAL=1 && make ENGINE=<e> TERMINAL=1 program-dfu   # device in DFU
+> reset cpu  ->  drive the engine  ->  query cpu / cpumin / cpumax
+> make test-hw                                                          # 30-case sweep, needs dialout
+> ```
+>
+> **Sample the peak more than once.** `max` is "worst block since `reset cpu`", so re-reading it shows
+> whether it has converged. pstretch at 8192 was still climbing after six seconds (87.6 -> 91.3%) while
+> 4096 settled within 0.3 pp - a difference invisible in a single reading, and the thing that actually
+> decides whether an engine has headroom. Also read `min`: it is the platform floor (~2%) with the
+> engine's DSP idle, which separates "expensive" from "spiky".
+>
+> Done: **pstretch** (41.5% avg / 91.3%+ max at 8192; 33.3% / 63.6% at 4096 - see the header note).
 
 - **reverb + tape Faust DSP - CPU + voicing.** Heard on hardware, but the Jiles-Atherton hysteresis (tape) and FDN/plate reverb DSP cost hasn't been measured. CPU: flash `ENGINE=reverb` and `ENGINE=tape`, read `Meter::cpu` for the stereo paths (J-A runs 4 substeps/sample x 2 voices/decks; estimated ~10-25% of 480 MHz but unmeasured). If too hot, the levers are a polynomial Langevin approx or an ADAA-tanh saturator. Voicing: walk the full range - the tape `drive*54` dB clean->crunch sweep across its span, and the reverb's three Faust voices (Dattorro plate / Zita hall / Greyhole, `kReverbCount = 3`, selected per deck on the Mode switch) with a click-free algorithm switch. Levers live in `src/engine/{reverb,tape}/*.dsp`; re-tune and `make faust-gen`. (reverb and tape are already released on `main` - this is a voicing/CPU pass, **not** a merge gate. gigaverb is **excluded** from the reverb engine - the optional `REVERB_GIGAVERB=1` fourth voice overflows SRAM_EXEC and stays out; gigaverb ships only as the standalone `ENGINE=gigaverb`.)
 

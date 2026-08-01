@@ -107,6 +107,42 @@ def test_walk_missing_data(tmp_path):
     assert fmt == m.TARGET_TUPLE and off is None and sz is None
 
 
+def extensible_fmt_chunk(subformat=m.TARGET_FMT, ch=1, sr=m.TARGET_RATE, bits=m.TARGET_BITS):
+    """A 40-byte WAVE_FORMAT_EXTENSIBLE `fmt ` body: tag 0xFFFE, real format in the SubFormat GUID.
+
+    This is what ffmpeg emits for float WAVs, so it is the layout the tool meets in practice - not a
+    hypothetical. Layout after the 16-byte WAVEFORMAT: cbSize(2) wValidBitsPerSample(2)
+    dwChannelMask(4) SubFormat GUID(16), putting the real tag at body+24.
+    """
+    block_align = (bits // 8) * ch
+    guid_tail = b"\x00\x00\x10\x00\x80\x00\x00\xaa\x00\x38\x9b\x71"   # KSDATAFORMAT_SUBTYPE_* tail
+    return (struct.pack("<HHIIHH", 0xFFFE, ch, sr, sr * block_align, block_align, bits)
+            + struct.pack("<HHI", 22, bits, 0x4)            # cbSize, wValidBitsPerSample, SPEAKER_FRONT_CENTER
+            + struct.pack("<H", subformat) + b"\x00\x00" + guid_tail)
+
+
+def test_walk_resolves_wave_format_extensible(tmp_path):
+    """0xFFFE must resolve to the SubFormat GUID's tag, as WavStreamReader::begin does.
+
+    Regression: walk_wav compared the raw tag, so ffmpeg's float output (0xFFFE) was reported as the
+    wrong format and rejected - a file the firmware plays fine. Safe direction (never accepts a bad
+    file), which is why it hid behind `--canonical` and the sox path.
+    """
+    wav = make_wav([(b"fmt ", extensible_fmt_chunk()), (b"data", b"\x00\x00\x00\x00")])
+    fmt, off, sz = _walk_bytes(wav, tmp_path)
+    assert fmt == m.TARGET_TUPLE, "extensible float32/mono/48k must read as the target tuple"
+    assert off is not None and sz == 4
+
+
+def test_walk_extensible_still_rejects_wrong_subformat(tmp_path):
+    """Resolving the GUID must not become a rubber stamp: an extensible INT wav is still not float."""
+    wav = make_wav([(b"fmt ", extensible_fmt_chunk(subformat=1)),   # PCM int, not IEEE float
+                    (b"data", b"\x00\x00\x00\x00")])
+    fmt, _, _ = _walk_bytes(wav, tmp_path)
+    assert fmt == (1, 1, m.TARGET_RATE, m.TARGET_BITS)
+    assert fmt != m.TARGET_TUPLE
+
+
 # --- verify -----------------------------------------------------------------
 
 def test_verify_ok(tmp_path):

@@ -129,6 +129,30 @@ public:
 
     Capabilities capabilities() const override { return Traits::caps; }
 
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md). DERIVED from the bindings the
+    // kernel actually captured, not hand-listed: set_param stores every id blindly into _v[], so the
+    // default all-live mask would advertise all 24 ids and a host sweep would "pass" on ids that reach
+    // no slider - asserting nothing. `bound()` is the exact truth ("this ParamId owns a kernel zone"),
+    // established at init() from the Traits bind table.
+    //
+    // Deriving beats a hand-written mask per engine here because these engines are GENERATED from their
+    // .json manifest - a hand-listed mask would be a second copy of the bind table, free to drift from
+    // it on the next `make faust-engine`. One implementation also covers every future generated engine
+    // with no per-engine code. (ModSpeed may well be bound - chorus binds "rate" to it - but it is
+    // platform-owned and `describe` filters it out, since set_mod_speed, not set_param, is its path.)
+    //
+    // Deck 0 is representative: every deck instantiates the same kernel with the same bind table.
+    ParamMask live_params() const override {
+        ParamMask m = 0;
+        for (int r = 0; r < kRoles; r++) if (_role[0][r].bound()) m |= (ParamMask{1} << r);
+        return m;
+    }
+    // This wrapper implements no set_config at all, so nothing is live. Not the default (all-live),
+    // which would advertise switches that go nowhere.
+    ConfigMask live_configs() const override { return static_cast<ConfigMask>(0); }
+#endif
+
     void set_param(ParamId id, DeckRef::Ref deck, float v) override {
         const int r = static_cast<int>(id);
         if (r < 0 || r >= kRoles) return;

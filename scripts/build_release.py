@@ -87,12 +87,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # script). csound/chuck link a pre-built static lib (scripts/fetch_{csound,chuck}.sh) for their ~2 MB /
 # ~1.1 MB language runtimes; mosc has no prebuilt lib - it compiles the full 24-engine Plaits voice
 # (~292 KB .text) from source and KEEPS the engine arena. These mirror the Makefile's CSOUND_FLAGS /
-# CHUCK_FLAGS / MOSC_FLAGS exactly; chuck uses its OWN linker script (alt_qspi_chuck.lds reclaims the
-# unused SRAM_EXEC region for .bss), while csound and mosc use the stock alt_qspi.lds.
+# CHUCK_FLAGS / MOSC_FLAGS exactly; chuck uses its OWN linker script (linker/alt_qspi_chuck.lds reclaims the
+# unused SRAM_EXEC region for .bss), while csound and mosc use the stock linker/alt_qspi.lds.
 ENGINE_MAKE_FLAGS = {
-    "csound": ["APP_TYPE=BOOT_QSPI", "LDSCRIPT=alt_qspi.lds"],
-    "chuck":  ["APP_TYPE=BOOT_QSPI", "LDSCRIPT=alt_qspi_chuck.lds"],
-    "mosc":   ["APP_TYPE=BOOT_QSPI", "LDSCRIPT=alt_qspi.lds"],
+    "csound": ["APP_TYPE=BOOT_QSPI", "LDSCRIPT=linker/alt_qspi.lds"],
+    "chuck":  ["APP_TYPE=BOOT_QSPI", "LDSCRIPT=linker/alt_qspi_chuck.lds"],
+    "mosc":   ["APP_TYPE=BOOT_QSPI", "LDSCRIPT=linker/alt_qspi.lds"],
 }
 # Files that must already exist for an engine to build (clear error vs a cryptic link failure).
 ENGINE_PREREQUISITES = {

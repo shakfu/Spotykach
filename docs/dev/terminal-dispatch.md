@@ -152,6 +152,8 @@ Deck token is `A`/`B`; global params ignore it (pass `A`). Values are floats unl
 | `query route` | `route()` (:143), mapped to the **selector** encoding | `ok <0/1/2>` |
 | `query gateout <deck>` | `gate_out_triggered(deck)` (:119) | `ok <0/1>` |
 | `query usb` | the `UsbDiag` bring-up snapshot (`src/terminal/usb_diag.h`) | `ok boot=<n> region=<n> clkcfg=<0/1> hsi48=<0/1> usbsel=<n> usb33den=<0/1> usb33rdy=<0/1> phy=<0/1> pullup=<0/1>` |
+| `query cpu\|cpumin\|cpumax` | the platform `CpuLoadMeter` (`src/terminal/cpu_stat.h`) | `ok <f>` - percent of the block budget |
+| `reset cpu` | clears the meter's min/max extremes | `ok` |
 | `query <other> <deck>` | forwarded to `handle_command` (:B) | engine-defined |
 | `caps` | `capabilities()` (:49) | `ok 0x<hex>` |
 | `mode test\|run` | sets `TermState::test_mode` (below) | `ok` |
@@ -172,6 +174,12 @@ previous test's writes in place, which is how a suite ends up passing in isolati
 sequence. `tools/conftest.py` now resets in the `test_mode` fixture. The per-param default comes from
 `IEngine::param_default()`, which defaults to 0.5 - deterministic, which is what a baseline needs, but
 not necessarily musical; engines with real neutral values should override it.
+
+`reset cpu` is the one form that touches no params at all - it clears the CPU meter's min/max instead.
+It shares the verb because it is the same idea (put a measurable thing back to a known baseline), and it
+has to be a keyword rather than a deck, checked ahead of the deck parse that would otherwise reject it
+as `bad-deck`. The sequence a measurement wants is `reset cpu` -> drive the engine -> `query cpumax`;
+without the reset the peak is whatever the boot transient happened to be. See **CPU load** below.
 
 `preset` is **params only, in RAM, non-persistent**. Non-persistent because a test wants to snapshot and
 restore many times per run and should not wear flash to do it. Params only because of a genuine gap in
@@ -196,6 +204,32 @@ exists to exclude, and they are the reason it is a per-entry property rather tha
 as the panel switches, and not worth a fourth freeze point for a display hint.
 
 `config route` is global; the others in that verb are per-deck. `set_config` returns whether the value changed, echoed so a test can assert idempotence.
+
+### CPU load - `query cpu` / `cpumin` / `cpumax`
+
+The platform has always owned a whole-callback `daisy::CpuLoadMeter` (`src/meter.h`), but reading it
+meant building `METER=1`, which brings up a **second USB device** (`_meter_usb`, `FS_EXTERNAL`) whose
+only job is to print the numbers. That device claims the same OTG core the terminal needs, so
+`METER=1 TERMINAL=1` is not a build that can work - and the numbers TODO.md P2 wants are exactly the
+numbers that second device existed to produce.
+
+The channel makes it unnecessary. Measuring is cheap - two `System::GetTick()` reads per block - so a
+`TERMINAL=1` build drives the meter itself and reports on request. `app.cpp` therefore gates the
+`Init`/`OnBlockStart`/`OnBlockEnd` calls on an internal `SPK_CPU_METER` (`METER || SPK_TERMINAL`) and
+keeps the USB-printing block under `METER` alone. With neither flag the macro is undefined and nothing
+changes; `cpu_stat.cpp` compiles to 0 bytes, like the rest of the terminal.
+
+Three separate `Float` queries rather than one `Text` line of `avg=.. min=.. max=..` (the shape `usb`
+uses), because these are the numbers a sweep collects: a `Float` query replies as a bare `ok <value>`
+the existing host tooling already parses, where a `Text` blob would need a parser of its own.
+
+Values are **percent of the block budget**, not the meter's native 0..1 - the unit every consumer
+already speaks (`METER=1` prints `load%`, and TODO.md's headroom figures are percentages).
+
+`min`/`max` are extremes since the last `reset cpu`, not a rolling window, so a measurement must bound
+its own interval. One narrow caveat: `CpuLoadMeter::Reset()` sets all three to `NAN` and re-seeds on the
+next `OnBlockEnd()`, so a read landing inside that one-block gap (~1 ms at 48 kHz) reports `nan`. That is
+left as `nan` rather than coerced to 0 - "no sample yet" and "zero load" are different answers.
 
 ### Target B - engine-specific verbs and L1 state
 

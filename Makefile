@@ -18,7 +18,7 @@ endif
 # clean`; pass TERMINAL=1 to them, e.g. `make engine-delay TERMINAL=1`).
 #
 # Footprint: enabling the channel costs ~28 KB of SRAM_EXEC (mostly the USB-device CDC stack, which a
-# normal build never links). Since SRAM_EXEC was rebalanced 186K -> 300K (see alt_sram.lds) EVERY engine
+# normal build never links). Since SRAM_EXEC was rebalanced 186K -> 300K (see linker/alt_sram.lds) EVERY engine
 # hosts it with margin - worst case granular at 69.9%. The old advice that granular/reso needed a
 # QSPI-execute build no longer applies. QSPI-execute engines (mosc/csound/chuck) additionally need
 # USB_MIDI=0, since MidiUsbHandler claims the same OTG_HS core.
@@ -196,7 +196,7 @@ C_DEFS += -DPLAITS_USER_DATA_STUB
 OPT = -Os
 # The full 24-engine voice is ~292 KB of .text - it overflows the 186 KB SRAM_EXEC, so mosc is a
 # QSPI-EXECUTE target (like csound): build BOOT_QSPI with the QSPI linker script:
-#   make ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds   (or just: make engine-mosc)
+#   make ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds   (or just: make engine-mosc)
 # UNLIKE csound/chuck, mosc still synthesises from the platform engine arena (it placement-news its two
 # plaits::Voice + scratch into ctx.arena), so it does NOT set SPK_NO_ENGINE_ARENA - the 48 MB arena stays.
 # It reuses the csound engine's VTOR inject (engine-agnostic BOOT_QSPI vector-table fix).
@@ -269,7 +269,7 @@ ENGINE_SOURCES =
 else ifeq ($(ENGINE), csound)
 # Csound is a QSPI-ONLY target: it links libcsound.a (~2 MB code) which can't fit the 186 KB
 # SRAM_EXEC budget, so it must run from QSPI. Build it BOOT_QSPI with the QSPI linker script:
-#   make ENGINE=csound APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds   (or just: make engine-csound)
+#   make ENGINE=csound APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds   (or just: make engine-csound)
 # Prereq: libcsound.a (scripts/fetch_csound.sh). engine_select.h maps SPK_ENGINE_CSOUND ->
 # CsoundEngine; see docs/dev/csound-impl.md.
 C_DEFS += -DSPK_ENGINE_CSOUND
@@ -293,7 +293,7 @@ LDFLAGS += -Wl,--wrap=malloc,--wrap=free,--wrap=calloc,--wrap=realloc,--wrap=ali
 else ifeq ($(ENGINE), chuck)
 # ChucK is a QSPI-ONLY target (like Csound): it links libchuck.a (~1.1 MB code) which can't fit the
 # 186 KB SRAM_EXEC budget, so it must run from QSPI. Build it BOOT_QSPI with the QSPI linker script:
-#   make ENGINE=chuck APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi_chuck.lds   (or just: make engine-chuck)
+#   make ENGINE=chuck APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi_chuck.lds   (or just: make engine-chuck)
 # Prereq: libchuck.a + the shim sysroot (scripts/fetch_chuck.sh). engine_select.h maps SPK_ENGINE_CHUCK
 # -> ChuckEngine; see docs/dev/chuck-impl.md.
 C_DEFS += -DSPK_ENGINE_CHUCK
@@ -340,6 +340,10 @@ endif
 # direct NON-BLOCKING transmit (drops if the host isn't draining) - so the meter can never hang the main
 # loop the way the daisy Logger does. No INFS_LOG/Logger dependency, so it adds almost no code. Read it
 # over USB serial (keep the port open). Compiled under METER, works at the shipping -O2.
+# NOTE: METER=1 and TERMINAL=1 are mutually exclusive - the meter's CDC device claims the same OTG core
+# the terminal channel needs. With TERMINAL=1 you do not want this flag anyway: a terminal build drives
+# the same CpuLoadMeter and reports it on request via `query cpu` / `cpumin` / `cpumax` (+ `reset cpu`),
+# with no second USB device. See docs/dev/terminal-dispatch.md "CPU load".
 ifeq ($(METER), 1)
 C_DEFS += -DMETER
 endif
@@ -347,7 +351,7 @@ endif
 # pstretch FFT/analysis window override. The default (8192 - a lusher wash) lives in pstretch_engine.h; opt in
 # to the lighter, meter-verified window with `make ENGINE=pstretch WINDOW=4096` (avg ~32% / max ~64% CPU on
 # hardware). 8192 ~doubles the FFT working set (ola/fifo move to the SDRAM arena there); it links + fits and
-# runs clean on hardware (flashed 2026-07-01) - re-measure CPU with METER=1 to get an exact number.
+# runs clean on hardware (flashed 2026-07-01) - re-measure CPU with TERMINAL=1 + `query cpu` (or METER=1) for an exact number.
 ifdef WINDOW
 C_DEFS += -DPSTRETCH_WINDOW=$(WINDOW)
 endif
@@ -392,7 +396,12 @@ CMSIS_DSP_SRC_DIR = ${LIBDAISY_DIR}/Drivers/CMSIS-DSP/Source
 
 # Daisy Bootloader - SRAM Linkage
 APP_TYPE = BOOT_SRAM
-LDSCRIPT = alt_sram.lds
+# Per-engine linker script. Everything uses linker/alt_sram.lds (300K/212K code/data) EXCEPT pstretch, which is
+# the one engine large in both halves at once and does not link at that split - see the header of
+# linker/alt_sram_pstretch.lds for the measured band. Selected on ENGINE rather than left to the engine-pstretch
+# target, so a plain `make ENGINE=pstretch` is correct too; an explicit LDSCRIPT= on the command line
+# still wins, which is what the QSPI targets (mosc/csound/chuck) rely on.
+LDSCRIPT = $(if $(filter pstretch,$(ENGINE)),linker/alt_sram_pstretch.lds,linker/alt_sram.lds)
 BOOT_BIN = bootloader-spotykach-v2.bin
 
 # USB MIDI (device MIDI on the rear USB-C) pulls libDaisy's USB-device + MIDI-class code (~3 KB) into
@@ -560,10 +569,10 @@ engine-reso:
 	$(MAKE) -j8 ENGINE=reso
 	$(MAKE) ENGINE=reso program-dfu
 
-# mosc is QSPI-execute (BOOT_QSPI + alt_qspi.lds): the full 24-engine Plaits voice is ~292 KB of .text,
+# mosc is QSPI-execute (BOOT_QSPI + linker/alt_qspi.lds): the full 24-engine Plaits voice is ~292 KB of .text,
 # too big for the 186 KB SRAM_EXEC. Same recipe as csound but it KEEPS the engine arena (no own pool).
 # The leading `-` on program-dfu ignores the benign get_status error on the QSPI `:leave`.
-MOSC_FLAGS = ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds
+MOSC_FLAGS = ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds
 engine-mosc:
 	$(MAKE) clean
 	$(MAKE) -j8 $(MOSC_FLAGS)
@@ -616,7 +625,7 @@ engine-pstretch:
 # Csound is QSPI-only (BOOT_QSPI + the SDRAM-pool linker script, links libcsound.a). Put the board
 # in DFU before the build finishes - program-dfu flashes once (no retry loop). The leading `-`
 # ignores the benign get_status error on the QSPI `:leave` (the flash itself succeeds).
-CSOUND_FLAGS = ENGINE=csound APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds
+CSOUND_FLAGS = ENGINE=csound APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds
 engine-csound:
 	$(MAKE) clean
 	$(MAKE) -j8 $(CSOUND_FLAGS)
@@ -626,9 +635,9 @@ engine-csound:
 program-csound:
 	-$(MAKE) $(CSOUND_FLAGS) program-dfu
 
-# ChucK is QSPI-only, same recipe as csound but with its own linker script (alt_qspi_chuck.lds reclaims
-# the unused SRAM_EXEC region for .bss - csound keeps the stock alt_qspi.lds). Links libchuck.a.
-CHUCK_FLAGS = ENGINE=chuck APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi_chuck.lds
+# ChucK is QSPI-only, same recipe as csound but with its own linker script (linker/alt_qspi_chuck.lds reclaims
+# the unused SRAM_EXEC region for .bss - csound keeps the stock linker/alt_qspi.lds). Links libchuck.a.
+CHUCK_FLAGS = ENGINE=chuck APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi_chuck.lds
 engine-chuck:
 	$(MAKE) clean
 	$(MAKE) -j8 $(CHUCK_FLAGS)

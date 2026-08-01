@@ -72,7 +72,7 @@ mosc is a **QSPI-execute** target (`BOOT_QSPI` + `alt_qspi.lds`), like csound/ch
 ```text
 make engine-mosc             # clean + build + DFU flash (board in DFU)
 make program-mosc            # re-flash the last build without rebuilding
-make ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds   # explicit form
+make ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds   # explicit form
 ```
 
 No prerequisite fetch is needed — the Plaits DSP and the shared `stmlib` are vendored in the tree (`src/engine/mosc/thirdparty/plaits`, `src/engine/common/thirdparty/stmlib`). A plain `make ENGINE=mosc` (BOOT_SRAM) will **not** link — the 292 KB of code overflows SRAM_EXEC; that is by design, mosc runs from QSPI.
