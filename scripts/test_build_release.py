@@ -115,6 +115,46 @@ def test_qspi_engines_have_boot_qspi_flags_and_prereqs():
         assert engine in m.ENGINE_PREREQUISITES
 
 
+def test_every_card_bank_is_playable_by_a_published_engine():
+    """`make sdcard` writes sk-card-<version>.zip into the SAME dist/<version>/ directory as the
+    binaries, and `make gh-release` globs that directory - so the card and the engine list ship
+    together. A folder with demo content on that card that NO published binary can open is a release
+    that contradicts itself.
+
+    The check is per folder, not per engine, because a bank can have more than one reader: granular is
+    deliberately unpublished (it is the upstream firmware), but its `SK/{B,G,P,R,T,Y}` folders are the
+    platform's shared tape store and graincloud - which does ship - reads them. So the content is
+    reachable and the release is consistent. Drop graincloud from the list without noticing this and
+    the base card starts carrying tapes nothing can play.
+    """
+    import card_layout as cl
+
+    published = set(m.DEFAULT_ENGINES)
+    orphaned = [b.dirs[0] for b in cl.LAYOUT
+                if b.kind != "config" and not (set(b.readers) & published)]
+    assert not orphaned, (
+        f"the base card carries content in {orphaned} that no published engine can open - "
+        f"either publish one of its readers, or stop shipping content for it.")
+
+
+def test_the_unpublished_engines_are_unpublished_on_purpose():
+    # The complement: nothing should silently drop OFF the list either. Each of these is excluded for a
+    # stated reason in build_release.py's header comment, granular because it is the stock/upstream
+    # firmware rather than something new to this fork.
+    assert set(m.DEFAULT_ENGINES).isdisjoint({"granular", "passthrough", "chorus", "gigaverb"})
+    # ... but the engine that keeps granular's folders usable MUST ship, or the test above is the only
+    # thing standing between the base card and unplayable content.
+    assert "graincloud" in m.DEFAULT_ENGINES
+
+
+def test_default_engines_needs_no_special_flags_beyond_the_qspi_three():
+    # Adding an engine to the list without its make flags is the failure mode
+    # test_qspi_engines_have_boot_qspi_flags_and_prereqs guards from the other side; this asserts the
+    # flags table has not grown entries for engines that are not actually special.
+    assert set(m.ENGINE_MAKE_FLAGS) == {"csound", "chuck", "mosc"}
+    assert set(m.ENGINE_MAKE_FLAGS) <= set(m.DEFAULT_ENGINES)
+
+
 # --- CHANGELOG extraction (ported from the former release_notes.py) ----------------------------
 
 CHANGELOG_SAMPLE = """\

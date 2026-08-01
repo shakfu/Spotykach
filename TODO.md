@@ -58,7 +58,7 @@ Priority is driven less by size than by what unblocks/gates what, and by whether
 | P3 | Refactor delay engine onto shared primitives (by ear) | med | med-high | **hardware flash** | none (primitives in `dsp/`); folds into P2 |
 | P4 | Tape wow/flutter: try quadratic curve + lower maxima | trivial | low | **flash** (by ear) | none (optional voicing); folds into P2 |
 | P5 | Finish or back out the CMake adoption (now merged to `main`, incomplete) | high | high | flash + cleanup | strategic; three build-system files straddle `main` |
-| P6 | Web front-end: browser SD card builder + WebSerial terminal (**proposal written**, nothing built) | high | low-med | **host** (browser) | phase 1 none; phase 2 gated on shipping `TERMINAL=1` releases |
+| P6 | Web front-end: browser SD card builder + WebSerial terminal (**built**; needs a real-browser pass) | done | low | **browser + flash** | code done; open decision on shipping `TERMINAL=1` releases is unchanged |
 
 ---
 
@@ -284,33 +284,36 @@ The original justification still holds: CMake is worth adopting **only** if comm
 
 The boot path is the one real risk and it collapsed to one define: `BOOT_APP` (the only boot-relevant compile define, at `startup_stm32h750xx.c:1550`) is not set by `DaisyProject.cmake` when `CUSTOM_LINKER_SCRIPT` is used, so a naive port re-runs `SystemInit()` and likely won't boot - fix is one line, `target_compile_definitions(daisy PRIVATE BOOT_APP)`. Two more traps (both fixed in the spike): `USE_HAL_DRIVER`/`USE_FULL_LL_DRIVER` are PRIVATE on the daisy lib so they never reach app TUs (breaks bare `size_t` users like `detector.h:11`), and `hid/midi_util.cpp` is in libDaisy's Make module list but absent from its `CMakeLists.txt` (link failure, patched via `target_sources`). Parity achieved: memory map exact (vector table `0x24000000`, `.bss` byte-identical), `.text` within +1.0%; byte-identical objdump is **not** reachable across two build systems (different per-domain flags) and must not be chased. `program-dfu`/`program-boot` reproduced as `add_custom_target`s emitting byte-identical `dfu-util` invocations; `compile_commands.json` falls out natively (no `bear`); the multi-engine matrix works as cached per-engine build dirs, retiring the `.engine-stamp` hack.
 
-## P6 - Web front-end: browser-based SD card builder + terminal (PROPOSAL - see the design doc)
+## P6 - Web front-end: browser-based SD card builder + terminal (BUILT 2026-08-01, host-verified only)
 
-**Full proposal: [`docs/dev/web-frontend.md`](docs/dev/web-frontend.md).** Nothing built. Scope agreed
-2026-08-01 as two phases — an SD card builder/checker, then a WebSerial terminal; in-browser DFU
-flashing is explicitly out of scope (the Daisy Web Programmer already covers it).
+**Built.** Both phases landed in [`web/`](web) — a static page, no dependencies, no build step
+(`make serve-web`, `make test-web`, `make web-data`). Design and the outcome against it are in
+[`docs/dev/web-frontend.md`](docs/dev/web-frontend.md); the app's own notes are in
+[`web/README.md`](web/README.md). In-browser DFU flashing stayed out of scope (the Daisy Web Programmer
+already covers it, and a half-written image is the worst failure in the system).
 
-Ranked last deliberately: **P1.5 already solved the actual user problem**, and this is a second
-front-end onto the same rules rather than new capability. It is the largest new-code item on this list.
+All three constraints were resolved as the doc proposed:
 
-Why it is nonetheless worth having: the CLI still needs a checkout, Python, and a decoder, so a person
-who bought a device and wants audio on a card is still standing in front of a developer's toolchain. A
-browser needs none of it — and `decodeAudioData` decodes mp3/flac/wav/ogg identically on every machine,
-so the *entire* decoder-backend apparatus in `sk_card.py` (the cysox probe, the ffmpeg fallback, the
-libmad licensing thread) simply does not exist in the web version. That half is **simpler** than the
-CLI, not a reimplementation of it.
+1. **Chromium only** — handled by designing around the read-only path. Verify, Build and Convert all
+   work in Safari and Firefox via drag-in-files → download-a-zip; only in-place card editing and the
+   terminal need Chromium, and each says so where it is missing rather than failing silently.
+2. **The terminal does not exist on released firmware** — **still an open firmware decision, unchanged
+   by this work.** Phase 2 is built and tested against a scripted fake device, so writing it cost
+   nothing and gated nothing, but it remains close to useless to anyone who does not build their own
+   image. The Terminal tab leads with that fact. Deciding whether to ship `TERMINAL=1` releases (~19-25
+   KB `SRAM_EXEC` everywhere, and USB MIDI on the QSPI engines only) is the item that is actually left.
+3. **One source of truth** — done, and taken further than the doc asked. `card_layout.py --json` now
+   exports the table *and every piece of generated text* (the per-folder READMEs, the root README, the
+   default config), so the browser builds a card byte-identical to `sk_card.py init` — asserted per
+   file by SHA-256 — while declaring none of it. Convert's target-naming became a per-bank template
+   (`Bank.target`) consumed by both front-ends, replacing six per-engine branches in `sk_card.py`.
 
-Three things decide whether to start, all detailed in the doc:
+Drift is guarded from both sides: `make test-scripts` regenerates the export and fails if the committed
+copy has moved (`scripts/test_web_export.py`), and `make test-web` fails if the JS disagrees with the
+Python — the WAV writers by byte equality against `card_audio.py` fixtures, and the checker by
+reaching the same verdicts *and the same fix text* as `verify_card` on a deliberately-broken card.
 
-1. **Chromium only** — WebSerial / WebUSB / File System Access are absent from Firefox and Safari.
-   Mitigated by designing the card builder to fall back to drag-in-files → download-a-zip, which works
-   everywhere; only in-place card editing and the terminal are locked to Chrome.
-2. **The terminal does not exist on released firmware** — `scripts/build_release.py:176` never passes
-   `TERMINAL=1`, so a web terminal today would serve only people who build their own firmware, who
-   already have `skterm.py`. Shipping terminal-enabled releases costs ~19-25 KB `SRAM_EXEC` everywhere
-   and USB MIDI on the **QSPI engines only** (`USB_MIDI` defaults on just for `BOOT_QSPI`,
-   `Makefile:412`; the collision is the `#error` at `src/terminal/terminal.h:31`). **This is a firmware
-   decision that gates phase 2 and should be made before it starts.** Phase 1 does not depend on it.
-3. **One source of truth** — a hand-ported JS copy of the layout rules would reintroduce exactly the
-   drift `scripts/card_layout.py` exists to prevent, and the firmware-parity tests only guard the
-   Python. Requirement: `card_layout.py` gains a `--json` export and the web app consumes it as data.
+**What is NOT verified, and is what remains:** no real browser has loaded the page, no real card has
+been read through the File System Access API, no mp3 has been converted and heard on the device, and no
+`TERMINAL=1` build has been driven over WebSerial. The full list is under "Remaining verification" in
+the design doc. Items 3 and 4 there fold naturally into the P2 bench session.

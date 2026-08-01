@@ -459,6 +459,7 @@ def test_device_writes_a_44_byte_header():
     ("csound", "src/engine/csound/csound_patch.h", '"csound/%d.csd"'),
     ("tape", "src/engine/tape/tape_engine.cpp", '"tapes/tape_"'),
     ("shuttle", "src/engine/shuttle/shuttle_engine.cpp", '"shuttle/tape_"'),
+    ("softcut", "src/engine/softcut/softcut_engine.cpp", '"softcut/loop_"'),
     ("radio", "src/engine/radio/radio_engine.cpp", '"radio/"'),
 ])
 def test_engine_paths_match_firmware_literals(engine, rel, literal):
@@ -467,6 +468,109 @@ def test_engine_paths_match_firmware_literals(engine, rel, literal):
         pytest.skip(f"{rel} absent")
     assert literal in path.read_text(), \
         f"{engine}'s card path changed in {rel} - update LAYOUT in card_layout.py"
+
+
+@pytest.mark.skipif(not (REPO / "src/engine/softcut/softcut_engine.h").exists(),
+                    reason="firmware source absent")
+def test_softcut_slot_count_and_buffer_match_firmware():
+    """softcut adds no new format - it is FMT_TAPE in a different folder - so what has to be mirrored
+    is the slot count and the RAM cap, both of which are silent when wrong: too many slots and `init`
+    writes files no engine opens; a wrong cap and `verify` mis-warns about loop length."""
+    text = _src("src/engine/softcut/softcut_engine.h")
+    assert "kTapeSlots  = 8" in text, \
+        "softcut's slot count changed - update its slots in card_layout.py"
+    assert "kBufFrames  = 1u << 19" in text, \
+        "softcut's loop buffer changed - update max_seconds in card_layout.py"
+    bank = cl.BANKS["softcut"]
+    assert len(bank.slots) == 8 * 2, "8 slots per deck, two decks"
+    # 1<<19 frames at the platform's 48 kHz, which is what the buffer holds.
+    assert bank.max_seconds == pytest.approx((1 << 19) / 48000.0, abs=0.05)
+
+
+def test_softcut_reuses_the_tape_format_rather_than_declaring_its_own():
+    # The three writable streaming banks share one Fmt on purpose: same 48k mono float WAV through the
+    # same StreamDeck path. Only the folder and the filename prefix differ, which is what keeps a
+    # softcut loop from overwriting a tape take.
+    assert cl.BANKS["softcut"].fmt is cl.FMT_TAPE is cl.BANKS["tape"].fmt is cl.BANKS["shuttle"].fmt
+    dirs = {cl.BANKS[e].dirs[0] for e in ("tape", "shuttle", "softcut")}
+    assert len(dirs) == 3, "they must not share a folder, or their slots collide"
+
+
+# The two ways an engine can reach the card. Both must be searched: matching only the streaming
+# service would miss granular and graincloud, which go through the platform's own save/load path.
+CARD_ACCESS_PATTERNS = (
+    r"ctx\.stream|_stream->|scan_bank|IStreamDeck",          # the streaming service (stream_deck.cpp)
+    r"audio_apply_loaded|audio_capacity_bytes|audio_raw_bytes",  # the platform tape/slot path (hw/card.cpp)
+)
+
+def test_every_card_reading_engine_has_a_bank():
+    """The gap this exists to catch: softcut shipped in every release while `card_layout` had no entry
+    for it, so `init` never created its folder and `verify` ignored its files entirely - silently, in
+    both front-ends.
+
+    Derived from the source rather than a hardcoded list, so a NEW card-reading engine fails here
+    instead of being quietly unsupported. An engine that legitimately reads another bank's folders is
+    declared in that bank's `also_read_by`, which makes the sharing an explicit, reviewable claim
+    rather than an absence nobody notices.
+    """
+    import re
+    engines = REPO / "src/engine"
+    if not engines.is_dir():
+        pytest.skip("firmware source absent")
+    pattern = re.compile("|".join(CARD_ACCESS_PATTERNS))
+    uses_card = set()
+    for d in sorted(p for p in engines.iterdir() if p.is_dir()):
+        for f in d.rglob("*"):
+            if f.suffix not in (".cpp", ".h") or "vendor" in f.parts:
+                continue
+            if pattern.search(f.read_text(errors="replace")):
+                uses_card.add(d.name)
+                break
+    declared = {e for bank in cl.LAYOUT for e in bank.readers}
+    missing = uses_card - declared
+    assert not missing, (
+        f"these engines read the SD card but appear in no Bank in card_layout.py: {sorted(missing)}. "
+        f"Both sk_card.py and web/ are blind to them - add a Bank, or add them to an existing bank's "
+        f"`also_read_by` if they reuse its folders.")
+    # The sharing claims must be real, or `also_read_by` becomes a way to silence the check.
+    for bank in cl.LAYOUT:
+        for engine in bank.also_read_by:
+            assert engine in uses_card, (
+                f"{engine} is listed in {bank.engine}'s also_read_by but no longer reads the card")
+
+
+def test_the_shared_tape_store_is_recorded_as_shared():
+    """The fact that cost a design decision: `SK/{B,G,P,R,T,Y}` looks like granular's folder and is
+    actually the PLATFORM's, shared by every engine with CapTapeStorage. Renaming it to `granular/`
+    would therefore have broken graincloud - which ships - and every card the stock upstream firmware
+    ever wrote. Pinned so the sharing is not rediscovered the hard way."""
+    assert cl.BANKS["granular"].readers == ("granular", "graincloud")
+    src = REPO / "src/memory/storage.cpp"
+    if not src.exists():
+        pytest.skip("firmware source absent")
+    assert 'kRootDir = "SK"' in src.read_text(), \
+        "the platform tape store's root folder moved - update granular's dirs in card_layout.py"
+    for engine in cl.BANKS["granular"].readers:
+        impl = REPO / "src/engine" / engine
+        if impl.is_dir():
+            assert any("CapTapeStorage" in f.read_text(errors="replace")
+                       for f in impl.rglob("*.cpp")), \
+                f"{engine} no longer declares CapTapeStorage, so it no longer uses SK/"
+
+
+def test_the_card_access_patterns_actually_match_the_known_readers():
+    """Guards the guard. If the firmware renames these APIs, the search above silently matches nothing
+    and the test above passes while checking nothing at all."""
+    import re
+    pattern = re.compile("|".join(CARD_ACCESS_PATTERNS))
+    for engine in ("tape", "softcut", "radio", "granular", "graincloud"):
+        d = REPO / "src/engine" / engine
+        if not d.is_dir():
+            pytest.skip(f"{engine} source absent")
+        hit = any(pattern.search(f.read_text(errors="replace"))
+                  for f in d.rglob("*")
+                  if f.suffix in (".cpp", ".h") and "vendor" not in f.parts)
+        assert hit, f"the card-access search no longer matches {engine} - the patterns have gone stale"
 
 
 @pytest.mark.parametrize("engine,rel,literal", [

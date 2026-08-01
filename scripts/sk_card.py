@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """sk-card - build, check, and fill an SD card for the spotykach engines.
 
-Ten engines read the card, using eight different directory layouts and four incompatible audio
+Ten engines read the card, using nine different directory layouts and four incompatible audio
 formats (`python3 scripts/sk_card.py layout` prints them). The firmware converts nothing: a file in
 the wrong format is not rejected, it is reinterpreted as garbage, and a file whose name is too long is
 invisible to the directory scan with no error shown. That combination makes a hand-built card hard to
@@ -49,7 +49,8 @@ class Finding:
 
 # Extensions a user is likely to drop on the card untouched. None of them is readable by the
 # firmware; recognising them lets the diagnostic say "convert this" rather than "unexpected file".
-SOURCE_EXTENSIONS = {".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".aiff", ".aif", ".wma", ".alac"}
+# Declared in card_layout so the web front-end gets it from the JSON export rather than a second copy.
+SOURCE_EXTENSIONS = set(cl.SOURCE_EXTENSIONS)
 
 
 def _short_name_suggestion(f: Path) -> str:
@@ -183,8 +184,7 @@ def _check_config(root: Path, out: list[Finding]) -> None:
                                          "name and its value on separate lines",
                            "Write:\n    pre_load\n    1"))
         return
-    known = {"mid_ch_a": (1, 16), "mid_ch_b": (1, 16), "mid_ps_a": (0, 1),
-             "mid_ps_b": (0, 1), "pre_load": (0, 1)}
+    known = cl.CONFIG_PROPERTIES
     for i in range(0, len(lines) - 1, 2):
         key, val = lines[i], lines[i + 1]
         if key not in known:
@@ -218,8 +218,7 @@ def verify_card(root: Path) -> list[Finding]:
         if rel_dir == ".":
             rel_dir = ""
         # Skip the device's own state directory and FS bookkeeping.
-        dirnames[:] = [x for x in dirnames if x not in ("System Volume Information", ".Spotlight-V100",
-                                                        ".Trashes", ".fseventsd")]
+        dirnames[:] = [x for x in dirnames if x not in cl.SKIP_DIRS]
         bank = cl.bank_for_path(rel_dir) if rel_dir else None
         counted = 0
         for name in sorted(filenames):
@@ -231,7 +230,7 @@ def verify_card(root: Path) -> list[Finding]:
                                        "Harmless, but the device never reads it."))
                 continue
             seen_banks.add(bank.engine)
-            if name.upper() in ("README.TXT", "BOOKS.TXT", "RATE.TXT", "BARD.CFG", "CONFIG.TXT", "MEM"):
+            if name.upper() in cl.SIDECAR_NAMES:
                 continue
             if bank.fmt.container == cl.TEXT:
                 if bank.slots and name.lower() not in {s.lower() for s in bank.slots}:
@@ -319,6 +318,13 @@ def _demo_files(root: Path, quiet: bool) -> None:
     ca.write_wav(root / "shuttle/tape_a_1.wav", ca.tone(5.0, 165.0, 48000), 48000, 1, ca.F32)
     ca.write_wav(root / "shuttle/tape_b_1.wav", ca.pulse_pattern(5.0, 48000, seed=22), 48000, 1, ca.F32)
 
+    # softcut - the same format again, into its own folder so it cannot overwrite a tape take. Loops
+    # are normally recorded on the device; these just give Play something to load on a fresh card.
+    # Well under the ~10.9 s buffer.
+    say("softcut/ - softcut demo loops (48k mono float, short)")
+    ca.write_wav(root / "softcut/loop_a_1.wav", ca.tone(4.0, 110.0, 48000, harmonics=4), 48000, 1, ca.F32)
+    ca.write_wav(root / "softcut/loop_b_1.wav", ca.pulse_pattern(4.0, 48000, seed=23), 48000, 1, ca.F32)
+
     # radio - headerless int16 mono 48k, names <= 12 chars, each >= 32 KB.
     say("radio/0 - four demo stations (headerless int16 .raw)")
     for i, maker in enumerate((
@@ -387,36 +393,10 @@ def build_card(root: Path, *, demo: bool = True, quiet: bool = False) -> None:
         say("  demo audio (synthesized):")
         _demo_files(root, quiet)
 
-    (root / "README.TXT").write_text(_root_readme(demo), encoding="ascii")
+    # The wording lives in card_layout so the JSON export carries it and the web builder emits the
+    # identical file rather than paraphrasing it.
+    (root / "README.TXT").write_text(cl.root_readme(demo), encoding="ascii")
     say("Done.")
-
-
-def _root_readme(demo: bool) -> str:
-    lines = [
-        "SPOTYKACH SD CARD",
-        "=" * 46,
-        "",
-        "Format the card as FAT32 (up to 32 GB). Each folder here belongs to one engine;",
-        "open its README.TXT for the exact audio format that folder needs.",
-        "",
-        "The firmware does NOT convert audio. A file in the wrong format is not rejected -",
-        "it is read as raw bytes and plays as noise. Check a card with:",
-        "",
-        "    python3 scripts/sk_card.py verify /path/to/card",
-        "",
-        "Add your own audio with:",
-        "",
-        "    python3 scripts/sk_card.py convert --engine tape /path/to/card mysound.mp3",
-        "",
-        "Folders:",
-    ]
-    for bank in cl.LAYOUT:
-        lines.append(f"  {bank.dirs[0]:<12} {bank.engine:<10} {bank.fmt.describe()}")
-    if demo:
-        lines += ["", "The audio on this card is synthesized placeholder content so that every engine",
-                  "makes a sound out of the box. Replace it with your own."]
-    lines.append("")
-    return "\r\n".join(lines)
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -576,20 +556,16 @@ def decode_any(backends: list[Backend], src: Path, rate: int, channels: int) -> 
 
 
 def _target_names(engine: str, count: int, args: argparse.Namespace) -> list[str]:
-    """Where each input file lands, per the engine's naming rules."""
+    """Where each input file lands, per the engine's naming rules.
+
+    The rule is the bank's `target` template rather than a branch per engine, so the web front-end
+    places files identically off the same JSON export instead of re-deriving six special cases.
+    """
     bank = cl.BANKS[engine]
-    if engine == "granular":
-        return [f"SK/{args.tape}/{i}.WAV" for i in range(args.slot, args.slot + count)]
-    if engine in ("tape", "shuttle"):
-        return [f"{engine if engine == 'shuttle' else 'tapes'}/tape_{args.deck}_{i}.wav"
-                for i in range(args.slot, args.slot + count)]
-    if engine == "radio":
-        return [f"radio/{args.bank}/{i:02d}.raw" for i in range(args.slot, args.slot + count)]
-    if engine == "bard":
-        return [f"bard/{args.bank}/BOOK{i:02d}.WAV" for i in range(args.slot, args.slot + count)]
-    if engine == "pstretch":
-        return [f"pstretch/CLIP{i:02d}.WAV" for i in range(args.slot, args.slot + count)]
-    raise SystemExit(f"error: {engine} does not take audio files ({bank.fmt.describe()}).")
+    if not bank.target:
+        raise SystemExit(f"error: {engine} does not take audio files ({bank.fmt.describe()}).")
+    return [cl.format_target(bank.target, i, deck=args.deck, bank=args.bank, tape=args.tape)
+            for i in range(args.slot, args.slot + count)]
 
 
 def cmd_convert(args: argparse.Namespace) -> int:

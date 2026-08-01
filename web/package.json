@@ -1,0 +1,9 @@
+{
+  "name": "sk-card",
+  "private": true,
+  "type": "module",
+  "description": "Browser SD card builder/checker and WebSerial terminal for sk-engines. No dependencies: this file exists only so node treats the .js sources as ES modules.",
+  "scripts": {
+    "test": "node test/run.js"
+  }
+}

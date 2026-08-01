@@ -857,6 +857,37 @@ test-scripts:
 	@$(TEST_PY) -c 'import pytest' 2>/dev/null || $(TEST_PY) -m pip install -q --group dev
 	$(TEST_PY) -m pytest scripts/
 
+# Regenerate the web front-end's data files and cross-language test fixtures (docs/dev/web-frontend.md).
+# The browser app in web/ consumes the SD card rules AS DATA rather than re-declaring them in
+# JavaScript, so card_layout.json is a build artifact of scripts/card_layout.py; a hand-ported copy
+# would reintroduce exactly the drift that module exists to prevent. The output is committed so the
+# page is a static deploy with no build step - run this after touching card_layout.py or card_audio.py,
+# and `make test-scripts` will fail if you forget.
+#   make web-data                    # regenerate web/card_layout.json, patches.json and the fixtures
+.PHONY: web-data
+web-data:
+	$(REL_PY) scripts/web_export.py
+
+# Run the web front-end's JS test suite: the WAV writers asserted byte-identical to card_audio.py, the
+# verify checker asserted to reach the same verdicts as sk_card.py on a deliberately-broken card, and
+# the terminal client driven by a scripted fake device. No browser and no npm install - the app has no
+# dependencies, and the tests only need ESM, node:fs and crypto.subtle, which node and bun both have.
+#   make test-web                    # uses node, or bun if node is absent
+WEB_JS ?= $(shell command -v node 2>/dev/null || command -v bun 2>/dev/null)
+.PHONY: test-web serve-web
+test-web:
+	@test -n "$(WEB_JS)" || { echo "no JS runtime found - install node or bun, or set WEB_JS=/path/to/node"; exit 1; }
+	cd web && $(WEB_JS) test/run.js
+
+# Serve web/ locally. The browser APIs this app uses (File System Access, WebSerial) are only offered
+# over HTTPS or localhost, and ES modules will not load from a file:// URL at all, so opening
+# web/index.html directly does not work.
+#   make serve-web                   # then open http://localhost:8000
+SERVE_PORT ?= 8000
+serve-web:
+	@echo "http://localhost:$(SERVE_PORT)  (Ctrl-C to stop)"
+	@cd web && $(REL_PY) -m http.server $(SERVE_PORT)
+
 # Vendored Daisy archives. The core Makefile's link step (-ldaisy -ldaisysp) needs these built, but a
 # fresh checkout has source-only submodules, so a bare `make` used to fail at link with "cannot find
 # -ldaisy". Wire each archive as a file prerequisite of the elf with its own build rule: a plain `make`

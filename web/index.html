@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sk-card - SD card tools for sk-engines</title>
+<meta name="description" content="Check, build and fill an SD card for the spotykach engines, in the browser. Nothing is uploaded.">
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+
+<header>
+  <h1>sk-card</h1>
+  <p id="banner">
+    Build, fill and check an SD card for the spotykach engines. Everything runs in this tab &mdash;
+    no upload, no install, no account. New card? Start on <strong>Build</strong>.
+  </p>
+</header>
+
+<!-- Tab order is the order a person actually needs them: get a working card, put your audio on it,
+     then diagnose. Verify is the most VALUABLE screen but it is the wrong FIRST one - pointed at a
+     blank card it can only say "this is not a card", which is not an answer anybody can act on. -->
+<nav id="tabs" role="tablist">
+  <button data-view="build" role="tab" aria-selected="true">Build</button>
+  <button data-view="convert" role="tab" aria-selected="false">Convert</button>
+  <button data-view="verify" role="tab" aria-selected="false">Verify</button>
+  <button data-view="terminal" role="tab" aria-selected="false">Terminal</button>
+</nav>
+
+<main id="panels">
+  <section id="panel-build" role="tabpanel"></section>
+  <section id="panel-convert" role="tabpanel" hidden></section>
+  <section id="panel-verify" role="tabpanel" hidden></section>
+  <section id="panel-terminal" role="tabpanel" hidden></section>
+</main>
+
+<footer>
+  <p>
+    Flashing firmware is not done here. Use the
+    <a href="https://electro-smith.github.io/Programmer/" target="_blank" rel="noreferrer">Daisy Web
+    Programmer</a>, which already flashes this hardware &mdash; a half-written image is the worst
+    failure in the system and is not worth a second implementation.
+  </p>
+  <p>
+    The rules on this page are generated from <code>scripts/card_layout.py</code>, so they match the
+    firmware rather than paraphrasing it. Same checks as
+    <code>python3 scripts/sk_card.py verify</code>.
+  </p>
+</footer>
+
+<script type="module" src="./js/ui/main.js"></script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The SD card layout: one machine-readable source of truth for every engine that reads the card.
 
-Ten engines read the SD card and between them use EIGHT distinct directory layouts and FOUR
+Ten engines read the SD card and between them use NINE distinct directory layouts and FOUR
 incompatible audio formats. The firmware does NO conversion on the audio path - it reads file body
 bytes straight into frames - so a file in the wrong format is not rejected, it is reinterpreted as
 garbage. This module encodes what each engine actually requires, so `sk_card.py` can build a correct
@@ -13,6 +13,11 @@ change it here and `scripts/test_sk_card.py` will tell you what else moved.
 
 Stdlib only, deliberately: `verify` must run for a user whose problem IS a broken toolchain, and
 `init` feeds `make dist`, which is stdlib-only so plain python3 suffices with no venv.
+
+Run as a script (`python3 scripts/card_layout.py --json`) it dumps the whole table as JSON. That
+export is what the web front-end in `web/` consumes, so the layout is never typed twice: a hand-ported
+JavaScript copy would reintroduce exactly the drift this module exists to prevent, and the
+firmware-parity tests in `test_sk_card.py` only guard the Python.
 """
 
 from __future__ import annotations
@@ -132,10 +137,40 @@ class Bank:
     source: str = ""
     blurb: str = ""
     extras: dict[str, str] = field(default_factory=dict)
+    target: str = ""
+    also_read_by: tuple[str, ...] = ()
+    """Other engines that read these exact folders. `SK/{B,G,P,R,T,Y}` is not granular's private
+    store - it is the PLATFORM's tape store, used by every engine declaring `CapTapeStorage`, so a
+    second engine reading it is normal rather than exceptional. Recording it here keeps two questions
+    answerable that a bare `engine` field cannot: whether content on the card is playable at all (see
+    `readers`), and whether a folder can be renamed without breaking an engine nobody was thinking
+    about."""
 
     @property
     def scanned(self) -> bool:
         return self.kind == "scanned"
+
+    @property
+    def readers(self) -> tuple[str, ...]:
+        """Every engine that reads this bank's folders, the owning one first."""
+        return (self.engine, *self.also_read_by)
+
+
+# Where `convert` puts the Nth input file for a bank. A template rather than per-engine code because
+# both front-ends need it and a JS copy would drift; the placeholder set is deliberately tiny so the
+# formatter is three lines in any language:
+#
+#   {i}     the running index, bare        {i02}   the same, zero-padded to two digits
+#   {deck}  a|b (tape/shuttle)             {bank}  0..15 (radio shelf / bard shelf)
+#   {tape}  B|G|P|R|T|Y (granular)
+#
+# A bank with no template takes no audio at all (the text-patch banks, and the platform config entry).
+
+
+def format_target(template: str, i: int, *, deck: str = "a", bank: int = 0, tape: str = "B") -> str:
+    """Expand one `target` template. Mirrored by `formatTarget` in web/js/convert.js."""
+    return (template.replace("{i02}", f"{i:02d}").replace("{i}", str(i))
+                    .replace("{deck}", deck).replace("{bank}", str(bank)).replace("{tape}", tape))
 
 
 def _slots(prefix: str, n: int = 8) -> tuple[str, ...]:
@@ -157,8 +192,15 @@ LAYOUT: tuple[Bank, ...] = (
         dirs=tuple(f"SK/{t}" for t in GRANULAR_TAPES),
         fmt=FMT_GRANULAR,
         slots=tuple(f"{i}.WAV" for i in range(1, 7)),
-        source="src/hw/card.cpp:61-66,131",
-        blurb="Six colour-coded tapes (B G P R T Y), six slots each. Save with Alt+Play, load with Play.",
+        target="SK/{tape}/{i}.WAV",
+        # The folder name is the PLATFORM's, not granular's: `kRootDir = "SK"` in
+        # src/memory/storage.cpp serves every engine with CapTapeStorage. That is why it is not named
+        # after an engine, and why renaming it would reach further than it looks.
+        also_read_by=("graincloud",),
+        source="src/hw/card.cpp:61-66,131; src/memory/storage.cpp:14",
+        blurb="Six colour-coded tapes (B G P R T Y), six slots each. Save with Alt+Play, load with Play. "
+              "This is the platform's shared tape store, so the graincloud engine reads and writes the "
+              "same folders.",
     ),
     Bank(
         engine="tape",
@@ -166,6 +208,7 @@ LAYOUT: tuple[Bank, ...] = (
         dirs=("tapes",),
         fmt=FMT_TAPE,
         slots=_slots("tape"),
+        target="tapes/tape_{deck}_{i}.wav",
         source="src/engine/tape/tape_engine.cpp:397",
         blurb="8 slots per deck, selected with Alt+PITCH. Streams from the card, so files can be any length.",
     ),
@@ -176,8 +219,22 @@ LAYOUT: tuple[Bank, ...] = (
         fmt=FMT_TAPE,
         slots=_slots("tape"),
         max_seconds=30.0,
+        target="shuttle/tape_{deck}_{i}.wav",
         source="src/engine/shuttle/shuttle_engine.cpp:520",
         blurb="Same format and slot names as tape, but LOADED into RAM: ~30 s per track, longer files truncate.",
+    ),
+    Bank(
+        engine="softcut",
+        kind="slots",
+        dirs=("softcut",),
+        fmt=FMT_TAPE,
+        slots=_slots("loop"),
+        max_seconds=10.9,
+        target="softcut/loop_{deck}_{i}.wav",
+        source="src/engine/softcut/softcut_engine.cpp:635-644; softcut_engine.h:133,149",
+        blurb="Loops you record on the device: Alt+Seq/Alt+Rev save to the slot picked with Alt+PITCH, "
+              "Play loads it. Same format as tape, in its own folder so the two cannot overwrite each "
+              "other; ~10.9 s per loop, the size of the buffer.",
     ),
     Bank(
         engine="radio",
@@ -186,6 +243,7 @@ LAYOUT: tuple[Bank, ...] = (
         fmt=FMT_RADIO,
         max_files=48,
         sidecars=("radio/rate.txt",),
+        target="radio/{bank}/{i02}.raw",
         source="src/engine/radio/radio_engine.cpp:306; radio_engine.h:107-108",
         blurb="16 banks of up to 48 stations. Headerless .raw at 48 kHz; a .wav is also accepted and "
               "carries its own rate.",
@@ -198,6 +256,7 @@ LAYOUT: tuple[Bank, ...] = (
         fmt=FMT_SCAN_WAV,
         max_files=32,
         sidecars=("bard/BARD.CFG",),
+        target="bard/{bank}/BOOK{i02}.WAV",
         source="src/engine/bard/bard_engine.cpp:872; bard_engine.h:131-132",
         blurb="16 shelves of up to 32 books. 16-bit MONO; 24 kHz is the right rate for speech (half the "
               "bytes per hour). Each BOOK.WAV may have a BOOK.TXT of bookmarks beside it, and BOOKS.TXT "
@@ -210,6 +269,7 @@ LAYOUT: tuple[Bank, ...] = (
         dirs=("pstretch",),
         fmt=FMT_SCAN_WAV,
         max_files=32,
+        target="pstretch/CLIP{i02}.WAV",
         source="src/engine/pstretch/pstretch_engine.h:176-178",
         blurb="Source clips for the SD stretch source (Mode switch). 16-bit mono, any rate - off-rate "
               "clips are pitch-corrected. Long clips are ideal: at 50x a 3-minute file plays for ~2.5 h.",
@@ -245,6 +305,31 @@ LAYOUT: tuple[Bank, ...] = (
 )
 
 BANKS = {b.engine: b for b in LAYOUT}
+
+# --- rules the checkers share -------------------------------------------------------------------
+#
+# These live here rather than in sk_card.py because they are part of "what the card is", and both
+# front-ends (the CLI and the web app) need them. Anything a checker branches on belongs in the JSON
+# export, or the JS copy starts drifting from the Python one.
+
+SOURCE_EXTENSIONS = (".mp3", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".aiff", ".aif", ".wma", ".alac")
+"""Extensions a user is likely to drop on the card untouched. None is readable by the firmware;
+recognising them lets the diagnostic say "convert this" rather than "unexpected file"."""
+
+CONFIG_PROPERTIES = {
+    "mid_ch_a": (1, 16),
+    "mid_ch_b": (1, 16),
+    "mid_ps_a": (0, 1),
+    "mid_ps_b": (0, 1),
+    "pre_load": (0, 1),
+}
+"""SK/config.txt properties and their legal ranges (docs/manual.md; src/memory/storage.h)."""
+
+SIDECAR_NAMES = ("README.TXT", "BOOKS.TXT", "RATE.TXT", "BARD.CFG", "CONFIG.TXT", "MEM")
+"""Upper-cased names that are metadata, not audio, and so are never format-checked."""
+
+SKIP_DIRS = ("System Volume Information", ".Spotlight-V100", ".Trashes", ".fseventsd")
+"""Filesystem bookkeeping directories to walk past without comment."""
 
 # The default config.txt, matching the table in docs/manual.md. One property name per line followed by
 # its value on the NEXT line - not `key=value`, which is the easy thing to get wrong by hand.
@@ -339,3 +424,136 @@ def readme_for(bank: Bank, path: str) -> str:
         "",
     ]
     return "\r\n".join(lines)
+
+
+def root_readme(demo: bool) -> str:
+    """The card-root README.TXT: the one-screen orientation for someone holding a card reader."""
+    lines = [
+        "SPOTYKACH SD CARD",
+        "=" * 46,
+        "",
+        "Format the card as FAT32 (up to 32 GB). Each folder here belongs to one engine;",
+        "open its README.TXT for the exact audio format that folder needs.",
+        "",
+        "The firmware does NOT convert audio. A file in the wrong format is not rejected -",
+        "it is read as raw bytes and plays as noise. Check a card with:",
+        "",
+        "    python3 scripts/sk_card.py verify /path/to/card",
+        "",
+        "Add your own audio with:",
+        "",
+        "    python3 scripts/sk_card.py convert --engine tape /path/to/card mysound.mp3",
+        "",
+        "Folders:",
+    ]
+    for bank in LAYOUT:
+        lines.append(f"  {bank.dirs[0]:<12} {bank.engine:<10} {bank.fmt.describe()}")
+    if demo:
+        lines += ["", "The audio on this card is synthesized placeholder content so that every engine",
+                  "makes a sound out of the box. Replace it with your own."]
+    lines.append("")
+    return "\r\n".join(lines)
+
+
+# --- JSON export ---------------------------------------------------------------------------------
+#
+# The web front-end (`web/`) consumes this instead of re-declaring the layout in JavaScript. Note what
+# is exported: not just the table, but every piece of GENERATED TEXT too - the per-folder READMEs, the
+# root README, the default config. Those are the parts a JS port would most plausibly reimplement and
+# then let rot, and they are pure functions of the table, so shipping them as data means the browser
+# builds a card that is byte-identical to `sk_card.py init` without owning a single line of the wording.
+#
+# What the web app must still implement itself is only the WAV header writer/parser and the verify
+# walk - code, not content - and those are pinned to the Python by the fixtures under `web/test/`.
+
+SCHEMA_VERSION = 1
+
+
+def _fmt_dict(fmt: Fmt) -> dict:
+    return {
+        "container": fmt.container,
+        "encodings": list(fmt.encodings),
+        "channels": fmt.channels,
+        "rate": fmt.rate,
+        "note": fmt.note,
+        "describe": fmt.describe(),
+    }
+
+
+def _bank_dict(bank: Bank) -> dict:
+    return {
+        "engine": bank.engine,
+        "kind": bank.kind,
+        "scanned": bank.scanned,
+        "dirs": list(bank.dirs),
+        "fmt": _fmt_dict(bank.fmt),
+        "slots": list(bank.slots),
+        "max_files": bank.max_files,
+        "max_seconds": bank.max_seconds,
+        "sidecars": list(bank.sidecars),
+        "source": bank.source,
+        "blurb": bank.blurb,
+        "extras": dict(bank.extras),
+        "target": bank.target,
+        "readers": list(bank.readers),
+    }
+
+
+def to_dict() -> dict:
+    """The whole layout as a JSON-able dict. Stable key order; no timestamps, so the export is
+    byte-reproducible and can be committed and diffed."""
+    return {
+        "schema": SCHEMA_VERSION,
+        "generated_by": "scripts/card_layout.py --json",
+        "scan": {
+            "max_name": SCAN_MAX_NAME,
+            "min_bytes": SCAN_MIN_BYTES,
+            "extensions": list(SCAN_EXTENSIONS),
+            "skip_dot": SCAN_SKIP_DOT,
+        },
+        "encodings": {
+            "f32": {"bits": 32, "wav_format": 3, "label": _ENCODING_LABEL[F32]},
+            "int16": {"bits": 16, "wav_format": 1, "label": _ENCODING_LABEL[INT16]},
+        },
+        "banks": [_bank_dict(b) for b in LAYOUT],
+        "all_dirs": list(all_dirs()),
+        "granular_tapes": list(GRANULAR_TAPES),
+        "default_config": DEFAULT_CONFIG,
+        "config_properties": {k: list(v) for k, v in CONFIG_PROPERTIES.items()},
+        "source_extensions": list(SOURCE_EXTENSIONS),
+        "sidecar_names": list(SIDECAR_NAMES),
+        "skip_dirs": list(SKIP_DIRS),
+        "readmes": {d: readme_for(b, d) for b in LAYOUT for d in b.dirs},
+        "root_readme": {"demo": root_readme(True), "bare": root_readme(False)},
+    }
+
+
+def to_json() -> str:
+    import json
+    return json.dumps(to_dict(), indent=2, sort_keys=False, ensure_ascii=True) + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    import sys
+    from pathlib import Path
+
+    p = argparse.ArgumentParser(prog="card_layout.py", description=__doc__.split("\n")[0])
+    p.add_argument("--json", action="store_true", help="dump the layout as JSON (for web/)")
+    p.add_argument("-o", "--out", help="write to this file instead of stdout")
+    args = p.parse_args(argv)
+    if not args.json:
+        p.error("nothing to do - pass --json (or use sk_card.py layout for the human-readable table)")
+    text = to_json()
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="ascii")
+        print(f"{out} ({len(text)} bytes, {len(LAYOUT)} banks)", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

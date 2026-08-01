@@ -180,7 +180,7 @@ Once finished, the device will automatically boot the new firmware. This can "br
 
 ## The SD card
 
-Ten engines read the card, using eight folder layouts and four incompatible audio formats — and the firmware converts nothing, so a wrong-format file plays as noise rather than being rejected. You do not have to learn that: build a correct card, and check one that misbehaves.
+Ten engines read the card, using nine folder layouts and four incompatible audio formats — and the firmware converts nothing, so a wrong-format file plays as noise rather than being rejected. You do not have to learn that: build a correct card, and check one that misbehaves.
 
 ```sh
 make sdcard SDCARD_OUT=/media/SK          # build a complete card (folders, configs, patches, demo audio)
@@ -189,6 +189,8 @@ python3 scripts/sk_card.py convert --engine tape /media/SK loop.mp3   # add your
 ```
 
 A prebuilt `sk-card-<version>.zip` ships with each release. See [`docs/sd-card.md`](docs/sd-card.md).
+
+All three commands also exist as a **browser page** in [`web/`](web/), for when a checkout, Python and a working decoder are more than you want to install to put a file on a card — the browser decodes mp3/flac/wav/ogg itself. `make serve-web`, then open <http://localhost:8000>. It reads the same rules the CLI does, exported as data rather than reimplemented, and the same page carries a WebSerial terminal for `TERMINAL=1` builds. See [`web/README.md`](web/README.md).
 
 ## Testing
 
@@ -201,9 +203,13 @@ The engines and the platform's hardware-free layers compile for the host against
 ```sh
 make -C host test      # engine + DSP suites (delay, tape, reso, granular, csound, the terminal codec, ...)
 make -C test test      # small standalone unit tests (wav, config, dividers, ...) - 116 checks
+make test-scripts      # the Python host tooling (SD card rules, release packaging, converters)
+make test-web          # the browser front-end in web/ (node or bun; no npm install)
 ```
 
-Note that a bare `make test` in the repo root does **nothing** — it matches the `test/` directory rather than a target. Use the two commands above.
+Note that a bare `make test` in the repo root does **nothing** — it matches the `test/` directory rather than a target. Use the four commands above.
+
+`make test-scripts` and `make test-web` are two halves of one contract: the browser app reads the SD card rules as data exported from `scripts/card_layout.py`, so the Python side fails if the committed export has drifted, and the JS side fails if its WAV writers or its card checker disagree with the Python they mirror.
 
 ### On-target (a flashed device)
 

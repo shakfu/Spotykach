@@ -1,6 +1,6 @@
 # The SD card
 
-Ten engines read the SD card, and between them they use **eight different folder layouts and four
+Ten engines read the SD card, and between them they use **nine different folder layouts and four
 incompatible audio formats**. The firmware converts nothing on the audio path — it reads file body
 bytes straight into audio frames — so a file in the wrong format is not rejected, it is **reinterpreted
 as garbage**. Several rules fail silently in ways a person cannot see from a file manager.
@@ -25,6 +25,15 @@ make check-sdcard CARD=/media/SK
 ```
 
 The card must be **FAT32**, up to 32 GB.
+
+### Without a checkout
+
+The same three operations exist as a browser page in [`web/`](../web/) — `make serve-web`, then open
+<http://localhost:8000> (or the deployed copy). It needs no Python, no repo and no decoder: the browser
+decodes mp3/flac/wav/ogg itself, which is the whole reason the web version of `convert` is *simpler*
+than this one rather than a reimplementation of it. It reads the rules below as data exported from
+`scripts/card_layout.py`, so it agrees with the CLI by construction rather than by maintenance. Only
+editing a card in place needs Chrome or Edge; elsewhere it hands back a `.zip` to unpack onto the card.
 
 ## Why a checker exists
 
@@ -75,6 +84,7 @@ source citations. In summary:
 | granular | `SK/{B,G,P,R,T,Y}/{1..6}.WAV` | 48 kHz **stereo**, float *or* 16-bit |
 | tape | `tapes/tape_{a,b}_{1..8}.wav` | 48 kHz **mono 32-bit float** |
 | shuttle | `shuttle/tape_{a,b}_{1..8}.wav` | as tape, but ~30 s max (loaded into RAM) |
+| softcut | `softcut/loop_{a,b}_{1..8}.wav` | as tape, but ~10.9 s max (the loop buffer) |
 | radio | `radio/{0..15}/*.raw` | **headerless** 16-bit mono, 48 kHz |
 | bard | `bard/{0..15}/NAME.WAV` | 16-bit mono; 24 kHz suits speech |
 | pstretch | `pstretch/*.wav` | 16-bit mono, any rate |
@@ -83,9 +93,19 @@ source citations. In summary:
 
 Plus `SK/config.txt` (settings) and `SK/MEM` (written by the device).
 
+`SK/{B,G,P,R,T,Y}` is listed under granular above, but it is really the **platform's** tape store —
+`kRootDir` in `src/memory/storage.cpp`, used by every engine that declares `CapTapeStorage`. Today that
+is granular *and* graincloud, which read and write the same six folders. That is why the folder is not
+named after an engine, and why renaming it would reach further than it looks.
+
+Note that **tape, shuttle and softcut share one format** — 48 kHz mono 32-bit float WAV, written and
+read through the same streaming service. Only the folder and the filename prefix differ, and that
+separation is the point: it is what stops a softcut loop overwriting a tape take, and it is how
+`verify` knows which length limit to apply to bytes that are otherwise identical.
+
 **Slot folders vs scanned folders** is the distinction worth internalising. Slot folders
-(granular/tape/shuttle/csound/chuck) open *exact filenames*: a file named anything else is simply never
-opened. Scanned folders (radio/bard/pstretch) enumerate the directory and apply extra rules — the
+(granular/tape/shuttle/softcut/csound/chuck) open *exact filenames*: a file named anything else is
+simply never opened. Scanned folders (radio/bard/pstretch) enumerate the directory and apply extra rules — the
 12-character limit, the 32 KB floor, `.raw`/`.wav` only, no leading dots — so a file there can be
 correctly encoded and still invisible.
 
