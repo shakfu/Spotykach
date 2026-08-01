@@ -803,6 +803,36 @@ RELEASE_ENGINES ?=
 dist:
 	RELEASE_ENGINES="$(RELEASE_ENGINES)" $(REL_PY) scripts/build_release.py $(VERSION) $(if $(WITH_HEX),--hex,)
 
+# Build the base SD card and package it into dist/<version>/sk-card-<version>.zip, so a user can
+# download-and-unzip a correct card instead of hand-authoring eight folder layouts in four audio
+# formats. `make gh-release` globs dist/<version>/*, so the card ships with the binaries for free.
+#
+# Like build_release.py this is deliberately STDLIB-ONLY (plain python3, no venv, no ffmpeg): the demo
+# audio is synthesized, not sampled, which also means the card carries no third-party content and the
+# zip is byte-reproducible for checksumming. Override the interpreter with REL_PY.
+#   make sdcard                      # describe-derived version, with demo audio
+#   make sdcard VERSION=0.6.2        # explicit version (match the tag you will create)
+#   make sdcard SDCARD_DEMO=0        # skeleton + configs + READMEs only, no audio
+#   make sdcard SDCARD_OUT=/media/SK # write the card straight to a mounted card instead of a zip
+SDCARD_DEMO ?= 1
+.PHONY: sdcard
+sdcard:
+ifeq ($(SDCARD_OUT),)
+	$(REL_PY) scripts/sk_card.py dist $(VERSION) $(if $(filter 0,$(SDCARD_DEMO)),--no-demo,)
+else
+	$(REL_PY) scripts/sk_card.py init $(SDCARD_OUT) --force $(if $(filter 0,$(SDCARD_DEMO)),--no-demo,)
+	$(REL_PY) scripts/sk_card.py verify $(SDCARD_OUT)
+endif
+
+# Check a card (yours or a user's) against what the firmware actually accepts. Reports wrong formats,
+# names too long for the directory scan, files under the 32 KB scan floor, macOS metadata stubs, and
+# malformed config.txt - each with the fix. Exits non-zero if anything will not work.
+#   make check-sdcard CARD=/media/SK
+.PHONY: check-sdcard
+check-sdcard:
+	@test -n "$(CARD)" || { echo "usage: make check-sdcard CARD=/path/to/card"; exit 1; }
+	$(REL_PY) scripts/sk_card.py verify $(CARD)
+
 # Upload an already-built dist/<version>/ as a GitHub release (requires `gh auth login`). Tag the
 # release with the SAME bare version so the in-binary banner matches. Run `make dist VERSION=x` first.
 .PHONY: gh-release

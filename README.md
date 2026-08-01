@@ -178,6 +178,18 @@ For convenience there are one-shot targets that **clean + build + flash** a vari
 
 Once finished, the device will automatically boot the new firmware. This can "brick" (temporarily) the device and require reinstallation of either the bootloader, the firmware binary, or both.
 
+## The SD card
+
+Ten engines read the card, using eight folder layouts and four incompatible audio formats — and the firmware converts nothing, so a wrong-format file plays as noise rather than being rejected. You do not have to learn that: build a correct card, and check one that misbehaves.
+
+```sh
+make sdcard SDCARD_OUT=/media/SK          # build a complete card (folders, configs, patches, demo audio)
+make check-sdcard CARD=/media/SK          # explain anything that will not work, with the fix
+python3 scripts/sk_card.py convert --engine tape /media/SK loop.mp3   # add your own audio
+```
+
+A prebuilt `sk-card-<version>.zip` ships with each release. See [`docs/sd-card.md`](docs/sd-card.md).
+
 ## Testing
 
 There are two independent suites: one that runs on your machine, and one that drives a flashed device.

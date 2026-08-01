@@ -144,7 +144,9 @@ Input behaviour: input A alone mirrors to deck B internally; input B alone feeds
 
 ## SD card storage
 
-- FAT32 card up to 32 GB. Layout: `SK/` containing six color-coded tape folders (`B`, `G`, `P`, `R`, `T`, `Y`), each with up to six files `1.WAV`..`6.WAV`. Filenames must be uppercase. Audio is 48 kHz, stereo, 32-bit float; loops over 42 s are truncated.
+- FAT32 card up to 32 GB. Layout: `SK/` containing six color-coded tape folders (`B`, `G`, `P`, `R`, `T`, `Y`), each with up to six files `1.WAV`..`6.WAV`. Filenames must be uppercase. Audio is 48 kHz, stereo, 32-bit float (16-bit PCM is also accepted and converted on load); loops over 42 s are truncated.
+
+- **Other engines use other folders and other formats** — `tapes/`, `shuttle/`, `radio/`, `bard/`, `pstretch/`, `csound/`, `chuck/`. See [`docs/sd-card.md`](sd-card.md): `make sdcard SDCARD_OUT=/media/SK` builds a complete card, and `make check-sdcard CARD=/media/SK` explains anything wrong with an existing one.
 
 - **Enter card mode**: hold Tap, tap a deck's Play.
 
