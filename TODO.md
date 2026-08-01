@@ -58,6 +58,7 @@ Priority is driven less by size than by what unblocks/gates what, and by whether
 | P3 | Refactor delay engine onto shared primitives (by ear) | med | med-high | **hardware flash** | none (primitives in `dsp/`); folds into P2 |
 | P4 | Tape wow/flutter: try quadratic curve + lower maxima | trivial | low | **flash** (by ear) | none (optional voicing); folds into P2 |
 | P5 | Finish or back out the CMake adoption (now merged to `main`, incomplete) | high | high | flash + cleanup | strategic; three build-system files straddle `main` |
+| P6 | Web front-end: browser SD card builder + WebSerial terminal (**proposal written**, nothing built) | high | low-med | **host** (browser) | phase 1 none; phase 2 gated on shipping `TERMINAL=1` releases |
 
 ---
 
@@ -282,3 +283,34 @@ The original justification still holds: CMake is worth adopting **only** if comm
 ### Spike reference (host-side findings, still accurate)
 
 The boot path is the one real risk and it collapsed to one define: `BOOT_APP` (the only boot-relevant compile define, at `startup_stm32h750xx.c:1550`) is not set by `DaisyProject.cmake` when `CUSTOM_LINKER_SCRIPT` is used, so a naive port re-runs `SystemInit()` and likely won't boot - fix is one line, `target_compile_definitions(daisy PRIVATE BOOT_APP)`. Two more traps (both fixed in the spike): `USE_HAL_DRIVER`/`USE_FULL_LL_DRIVER` are PRIVATE on the daisy lib so they never reach app TUs (breaks bare `size_t` users like `detector.h:11`), and `hid/midi_util.cpp` is in libDaisy's Make module list but absent from its `CMakeLists.txt` (link failure, patched via `target_sources`). Parity achieved: memory map exact (vector table `0x24000000`, `.bss` byte-identical), `.text` within +1.0%; byte-identical objdump is **not** reachable across two build systems (different per-domain flags) and must not be chased. `program-dfu`/`program-boot` reproduced as `add_custom_target`s emitting byte-identical `dfu-util` invocations; `compile_commands.json` falls out natively (no `bear`); the multi-engine matrix works as cached per-engine build dirs, retiring the `.engine-stamp` hack.
+
+## P6 - Web front-end: browser-based SD card builder + terminal (PROPOSAL - see the design doc)
+
+**Full proposal: [`docs/dev/web-frontend.md`](docs/dev/web-frontend.md).** Nothing built. Scope agreed
+2026-08-01 as two phases — an SD card builder/checker, then a WebSerial terminal; in-browser DFU
+flashing is explicitly out of scope (the Daisy Web Programmer already covers it).
+
+Ranked last deliberately: **P1.5 already solved the actual user problem**, and this is a second
+front-end onto the same rules rather than new capability. It is the largest new-code item on this list.
+
+Why it is nonetheless worth having: the CLI still needs a checkout, Python, and a decoder, so a person
+who bought a device and wants audio on a card is still standing in front of a developer's toolchain. A
+browser needs none of it — and `decodeAudioData` decodes mp3/flac/wav/ogg identically on every machine,
+so the *entire* decoder-backend apparatus in `sk_card.py` (the cysox probe, the ffmpeg fallback, the
+libmad licensing thread) simply does not exist in the web version. That half is **simpler** than the
+CLI, not a reimplementation of it.
+
+Three things decide whether to start, all detailed in the doc:
+
+1. **Chromium only** — WebSerial / WebUSB / File System Access are absent from Firefox and Safari.
+   Mitigated by designing the card builder to fall back to drag-in-files → download-a-zip, which works
+   everywhere; only in-place card editing and the terminal are locked to Chrome.
+2. **The terminal does not exist on released firmware** — `scripts/build_release.py:176` never passes
+   `TERMINAL=1`, so a web terminal today would serve only people who build their own firmware, who
+   already have `skterm.py`. Shipping terminal-enabled releases costs ~19-25 KB `SRAM_EXEC` everywhere
+   and USB MIDI on the **QSPI engines only** (`USB_MIDI` defaults on just for `BOOT_QSPI`,
+   `Makefile:412`; the collision is the `#error` at `src/terminal/terminal.h:31`). **This is a firmware
+   decision that gates phase 2 and should be made before it starts.** Phase 1 does not depend on it.
+3. **One source of truth** — a hand-ported JS copy of the layout rules would reintroduce exactly the
+   drift `scripts/card_layout.py` exists to prevent, and the firmware-parity tests only guard the
+   Python. Requirement: `card_layout.py` gains a `--json` export and the web app consumes it as data.
