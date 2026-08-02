@@ -124,10 +124,23 @@ export function showError(node: Element, e: unknown): void {
     el('div', { class: 'problem' }, e instanceof Error ? e.message : String(e))));
 }
 
+/**
+ * The word that carries severity.
+ *
+ * In the markup rather than in CSS `content`, deliberately: the stylesheet is 1-bit, so this word is
+ * doing work that colour used to do, and a word invented by a stylesheet is not selectable, not
+ * translatable, and not reliably spoken by a screen reader. Inversion and rule weight reinforce it;
+ * this is what states it.
+ */
+const SEVERITY: Record<string, string> = { error: 'ERROR', warn: 'WARNING', ok: 'OK' };
+
 /** A `verdict`/`finding` block, the two shapes every result in this app takes. */
 export function finding(cls: string, path: string, problem: string, fix?: string): HTMLElement {
+  const label = SEVERITY[cls];
   return el('div', { class: `finding ${cls}` },
-    path && el('div', { class: 'path' }, path),
-    el('div', { class: 'problem' }, problem),
+    el('div', { class: 'problem' },
+      label && el('span', { class: 'badge' }, label),
+      path && el('span', { class: 'path' }, `${path}  `),
+      problem),
     fix && el('div', { class: 'fix' }, fix));
 }

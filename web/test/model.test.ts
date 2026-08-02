@@ -7,8 +7,9 @@
 // because everything the browser owns enters through a port in src/core/ports.ts and every fake below
 // is a few lines long.
 
-import { suite, test, ok, eq, layoutData, readWeb } from './harness.ts';
+import { suite, test, ok, eq, layoutData, engineData, readWeb } from './harness.ts';
 import { makeLayout } from '../src/core/layout.ts';
+import { makeCatalogue } from '../src/core/engines.ts';
 import type { AudioDecoder, CardAccess, Clock, SerialPorts, Transport } from '../src/core/ports.ts';
 import type { Card, CardFile } from '../src/core/types.ts';
 import { BuildModel } from '../src/app/build_model.ts';
@@ -22,6 +23,7 @@ suite('model');
 
 const layout = makeLayout(layoutData());
 const patches = readWeb<Record<string, string>>('patches.json');
+const catalogue = makeCatalogue(engineData(), layout);
 
 // --- fakes ----------------------------------------------------------------------------------------
 
@@ -297,39 +299,41 @@ test('a dismissed folder picker leaves verify silent rather than red', async () 
 test('the reference text box is a search, and a chip is a selection', () => {
   // The distinction is the point: `tape` appears in granular's blurb and in shuttle's filenames, so a
   // chip that filtered by substring would answer a request for one engine with four.
-  const m = new ReferenceModel(layout);
+  const m = new ReferenceModel(layout, catalogue);
   m.setQuery('tape');
   ok(m.visible().length > 1, 'typing tape finds every engine that mentions tape');
 
   m.toggleChip('tape');
-  eq(m.visible().map((b) => b.engine), ['tape'], 'the chip selects exactly one');
+  eq(m.visible().map((e) => e.doc.name), ['tape'], 'the chip selects exactly one');
   eq(m.store.get().query, '', 'and takes over from the text box rather than fighting it');
 
   m.toggleChip('tape');
-  eq(m.visible().length, layout.banks.length, 'clicking it again clears the selection');
+  eq(m.visible().length, catalogue.entries.length, 'clicking it again clears the selection');
 });
 
 test('typing releases a pinned chip', () => {
-  const m = new ReferenceModel(layout);
+  const m = new ReferenceModel(layout, catalogue);
   m.toggleChip('radio');
   m.setQuery('bard');
-  eq(m.visible().map((b) => b.engine), ['bard'], 'the search wins, not the stale selection');
+  eq(m.visible().map((e) => e.doc.name), ['bard'], 'the search wins, not the stale selection');
   eq(m.store.get().pinned, null);
 });
 
 test('the reference search matches folders and formats, not just engine names', () => {
-  const m = new ReferenceModel(layout);
+  const m = new ReferenceModel(layout, catalogue);
   m.setQuery('headerless');
-  eq(m.visible().map((b) => b.engine), ['radio'], '"I have raw files, who wants those?"');
+  eq(m.visible().map((e) => e.doc.name), ['radio'], '"I have raw files, who wants those?"');
   m.setQuery('sk/b');
-  eq(m.visible().map((b) => b.engine), ['granular']);
+  // Both, and correctly so: SK/{B,G,P,R,T,Y} is the platform's shared tape store and graincloud reads
+  // it too. The old version listed banks, so it could only ever have answered with the owning engine.
+  eq(m.visible().map((e) => e.doc.name).sort(), ['graincloud', 'granular']);
 });
 
 test('the reference status counts what is shown against the whole', () => {
-  const m = new ReferenceModel(layout);
-  eq(m.status(), `${layout.banks.length} folder layouts`);
+  const m = new ReferenceModel(layout, catalogue);
+  ok(m.status().startsWith(`${catalogue.entries.length} engines`), m.status());
   m.toggleChip('radio');
-  eq(m.status(), `1 of ${layout.banks.length} shown`);
+  eq(m.status(), `1 of ${catalogue.entries.length} shown`);
 });
 
 // --- terminal -------------------------------------------------------------------------------------

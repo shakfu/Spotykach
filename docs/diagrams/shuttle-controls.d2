@@ -26,12 +26,14 @@ classes: {
 }
 
 panel: Front panel {
-  grid-columns: 3
+  grid-columns: 2
   grid-gap: 60
   style.stroke: "#cbd5e0"
 
   # ----------------------------------------------------------------- DECK A
-  deckA: Deck A {
+  deckA: Deck A and B (identical) {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsA: Knobs (7) {
@@ -59,7 +61,7 @@ panel: Front panel {
     ringA: "LED Ring A (32px)" {
       class: knob
       shape: circle
-      label: "Ring A\ntrack state; focused-track hue"
+      label: "Ring A / B\ntrack state; focused-track hue"
     }
   }
 
@@ -98,37 +100,6 @@ panel: Front panel {
   }
 
   # ----------------------------------------------------------------- DECK B
-  deckB: Deck B {
-    style.stroke: "#90cdf4"
-
-    knobsB: Knobs (7) {
-      class: knob
-      shape: sql_table
-      Pitch: "capstan speed +/-2x (noon=stop); Alt = slot"
-      Position: "loop start; Alt = pan"
-      Size: "loop length"
-      Envelope: "-"
-      "Mix (SOS)": "track volume"
-      Cycle: "wow/flutter rate"
-      Glow: "wow/flutter depth"
-    }
-
-    padsB: Pads (5) {
-      class: pad
-      shape: sql_table
-      Play: "roll / unity snap; Alt+Play = record"
-      Reverse: "swap focused track"
-      Grit: "saturation: +PITCH drive, +MIX char"
-      Flux: "filter: +PITCH cutoff, +MIX reso"
-      Seq: "re-align all 4 tracks"
-    }
-
-    ringB: "LED Ring B (32px)" {
-      class: knob
-      shape: circle
-      label: "Ring B\ntrack state; focused-track hue"
-    }
-  }
 }
 
 # ---------------------------------------------------------------------- I/O

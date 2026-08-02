@@ -332,7 +332,7 @@ APIs, `app/` holds one view-model per tab with all the state and none of the DOM
 Every browser capability enters through an interface in `core/ports.ts`, so the view-models are tested
 against fakes with no DOM and no device - including the two behaviours that previously needed hardware
 (an empty port chooser, a device unplugged mid-session). Tests enforce the layering rather than
-asserting it, and one fails when the committed bundle is older than `src/`. 164 tests, up from 113 at
+asserting it, and one fails when the committed bundle is older than `src/`. 206 tests, up from 113 at
 the original landing.
 
 **Two additions since the build**, both host-verifiable and so done rather than deferred:

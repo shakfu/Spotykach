@@ -1,0 +1,13 @@
+<p><code>ENGINE=passthrough</code> · <code>src/engine/passthrough/passthrough_engine.h</code> (header-only) · class <code>PassthroughEngine</code></p>
+<p>The smallest possible engine: stereo in → stereo out, tracking the last-block peak to drive a level meter on the rings. Its purpose is documentation, not music — it shows how little a non-granular engine needs, and is the template to copy when starting a new engine. It is the minimal <code>IEngine</code> reference (a code example), so it is developer-facing by nature and is not split into a separate impl file.</p>
+<h3>What it does</h3>
+<ul><li><code>process(in, out, size)</code> — copies input to output, updating a decayed peak per channel.</li></ul>
+<ul><li><code>capabilities()</code> = <code>CapOwnDisplay</code> — it fills its own <code>DisplayModel</code> (<code>render()</code> draws a level meter on both rings and lights the play indicators); silence collapses the meter.</li></ul>
+<ul><li>Everything else stays at the <code>IEngine</code> no-op defaults: no params, no MIDI, no pads, no CV, no storage, no transport use.</li></ul>
+<h3>Why it exists</h3>
+<ul><li>It proves the <code>IEngine</code> contract holds for a non-looper with zero granular concepts.</li></ul>
+<ul><li>It is header-only and depends only on the contract + <code>nocopy.h</code> + <code>&lt;cmath&gt;</code> — the floor for engine size and coupling.</li></ul>
+<ul><li>Copy it (into <code>src/engine/&lt;name&gt;/</code>) to start a new engine, then override the methods you need and add an <code>engine_select.h</code> + <code>Makefile</code> branch (see <a href="https://github.com/shakfu/sk-engines/blob/main/docs/engines/README.md#building-and-flashing-a-variant">README</a> and <code>docs/engine-layout.md</code>).</li></ul>
+<h3>Files</h3>
+<p><code>src/engine/passthrough/passthrough_engine.h</code>; build via <code>engine_select.h</code> (<code>SPK_ENGINE_PASSTHROUGH</code>)</p>
+<ul><li><code>Makefile</code> (<code>ENGINE=passthrough</code>, <code>make engine-passthrough</code>). No <code>.cpp</code>.</li></ul>

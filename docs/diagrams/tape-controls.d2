@@ -26,12 +26,14 @@ classes: {
 }
 
 panel: Front panel {
-  grid-columns: 3
+  grid-columns: 2
   grid-gap: 60
   style.stroke: "#cbd5e0"
 
   # ----------------------------------------------------------------- DECK A
-  deckA: Deck A {
+  deckA: Deck A and B (identical) {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsA: Knobs (7) {
@@ -59,7 +61,7 @@ panel: Front panel {
     ringA: "LED Ring A (32px)" {
       class: knob
       shape: circle
-      label: "Ring A\nplay green / record red; slot dots (Alt)"
+      label: "Ring A / B\nplay green / record red; slot dots (Alt)"
     }
   }
 
@@ -98,37 +100,6 @@ panel: Front panel {
   }
 
   # ----------------------------------------------------------------- DECK B
-  deckB: Deck B {
-    style.stroke: "#90cdf4"
-
-    knobsB: Knobs (7) {
-      class: knob
-      shape: sql_table
-      Pitch: "varispeed 0.5-2x; Alt = tape slot"
-      Position: "FX drive; Alt = pan"
-      Size: "FX character"
-      Envelope: "loop mode: none/loop/fade/fripp"
-      "Mix (SOS)": "playback volume"
-      Cycle: "wow/flutter rate"
-      Glow: "wow/flutter depth"
-    }
-
-    padsB: Pads (5) {
-      class: pad
-      shape: sql_table
-      Play: "play; Alt+Play = record"
-      Reverse: "-"
-      Grit: "FX filter: +PITCH cutoff, +MIX reso"
-      Flux: "-"
-      Seq: "-"
-    }
-
-    ringB: "LED Ring B (32px)" {
-      class: knob
-      shape: circle
-      label: "Ring B\nplay green / record red; slot dots (Alt)"
-    }
-  }
 }
 
 # ---------------------------------------------------------------------- I/O

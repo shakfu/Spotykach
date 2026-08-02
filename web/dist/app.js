@@ -66,6 +66,65 @@ function formatTarget(template, i, vars = {}) {
   return template.replaceAll("{i02}", String(i).padStart(2, "0")).replaceAll("{i}", String(i)).replaceAll("{deck}", deck).replaceAll("{bank}", String(bank)).replaceAll("{tape}", tape);
 }
 
+// src/core/engines.ts
+var ENGINES_SCHEMA = 1;
+function makeCatalogue(data, layout) {
+  if (!data || data.schema !== ENGINES_SCHEMA) {
+    throw new Error(`engines.json: unsupported schema ${data && data.schema} (expected ${ENGINES_SCHEMA})`);
+  }
+  const entries = data.engines.map((doc) => ({
+    doc,
+    bank: doc.bank ? layout.bank(doc.bank) ?? null : null
+  }));
+  const documented = new Set(entries.filter((e) => e.bank).map((e) => e.bank.engine));
+  for (const bank of layout.banks) {
+    if (documented.has(bank.engine))
+      continue;
+    entries.push({
+      bank,
+      doc: {
+        name: bank.engine,
+        title: bank.engine,
+        summary: "",
+        body: bank.blurb,
+        source: "",
+        doc: "",
+        page: "",
+        released: false,
+        bank: bank.engine
+      }
+    });
+  }
+  const byName = new Map(entries.map((e) => [e.doc.name, e]));
+  return {
+    entries,
+    get: (name) => byName.get(name),
+    readers: () => entries.filter((e) => e.bank !== null)
+  };
+}
+
+// src/app/store.ts
+class Store {
+  state;
+  listeners = new Set;
+  constructor(initial) {
+    this.state = initial;
+  }
+  get() {
+    return this.state;
+  }
+  set(patch) {
+    this.state = { ...this.state, ...patch };
+    for (const fn of [...this.listeners])
+      fn(this.state);
+  }
+  subscribe(fn) {
+    this.listeners.add(fn);
+    fn(this.state);
+    return () => this.listeners.delete(fn);
+  }
+}
+
 // src/ui/dom.ts
 var $ = (sel, root = document) => root.querySelector(sel);
 var $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -152,8 +211,10 @@ function dropTarget(node, onDrop) {
 function showError(node, e) {
   clear(node).append(el("div", { class: "finding error" }, el("div", { class: "problem" }, e instanceof Error ? e.message : String(e))));
 }
+var SEVERITY = { error: "ERROR", warn: "WARNING", ok: "OK" };
 function finding(cls, path, problem, fix) {
-  return el("div", { class: `finding ${cls}` }, path && el("div", { class: "path" }, path), el("div", { class: "problem" }, problem), fix && el("div", { class: "fix" }, fix));
+  const label = SEVERITY[cls];
+  return el("div", { class: `finding ${cls}` }, el("div", { class: "problem" }, label && el("span", { class: "badge" }, label), path && el("span", { class: "path" }, `${path}  `), problem), fix && el("div", { class: "fix" }, fix));
 }
 
 // src/core/build.ts
@@ -290,28 +351,6 @@ async function makeZip(files, dirs = [], deflate) {
     at += c.length;
   }
   return out;
-}
-
-// src/app/store.ts
-class Store {
-  state;
-  listeners = new Set;
-  constructor(initial) {
-    this.state = initial;
-  }
-  get() {
-    return this.state;
-  }
-  set(patch) {
-    this.state = { ...this.state, ...patch };
-    for (const fn of [...this.listeners])
-      fn(this.state);
-  }
-  subscribe(fn) {
-    this.listeners.add(fn);
-    fn(this.state);
-    return () => this.listeners.delete(fn);
-  }
 }
 
 // src/app/build_model.ts
@@ -1374,19 +1413,24 @@ function mountVerify(root, ctx) {
 class ReferenceModel {
   layout;
   store = new Store({ query: "", pinned: null, showSources: false });
-  entries;
-  constructor(layout) {
+  items;
+  constructor(layout, catalogue) {
     this.layout = layout;
-    this.entries = layout.banks.map((bank) => ({
-      bank,
+    this.items = catalogue.entries.map((entry) => ({
+      entry,
       haystack: [
-        bank.engine,
-        bank.dirs.join(" "),
-        bank.readers.join(" "),
-        bank.fmt.describe,
-        bank.blurb,
-        bank.slots.join(" "),
-        bank.target
+        entry.doc.name,
+        entry.doc.title,
+        entry.doc.summary,
+        entry.doc.body,
+        entry.bank ? [
+          entry.bank.dirs.join(" "),
+          entry.bank.readers.join(" "),
+          entry.bank.fmt.describe,
+          entry.bank.blurb,
+          entry.bank.slots.join(" "),
+          entry.bank.target
+        ].join(" ") : "no card needed"
       ].join(" ").toLowerCase()
     }));
   }
@@ -1397,18 +1441,24 @@ class ReferenceModel {
     const pinned = this.store.get().pinned === engine ? null : engine;
     this.store.set({ pinned, query: "" });
   }
+  select(engine) {
+    if (!this.items.some((i) => i.entry.doc.name === engine))
+      return;
+    this.store.set({ pinned: engine, query: "" });
+  }
   setShowSources(on) {
     this.store.set({ showSources: on });
   }
   visible() {
     const { query, pinned } = this.store.get();
     const q = query.trim().toLowerCase();
-    return this.entries.filter((e) => pinned ? e.bank.engine === pinned : !q || e.haystack.includes(q)).map((e) => e.bank);
+    return this.items.filter((i) => pinned ? i.entry.doc.name === pinned : !q || i.haystack.includes(q)).map((i) => i.entry);
   }
   status() {
     const { query, pinned } = this.store.get();
     const shown = this.visible().length;
-    return pinned || query.trim() ? `${shown} of ${this.entries.length} shown` : `${this.entries.length} folder layouts`;
+    const readers = this.items.filter((i) => i.entry.bank).length;
+    return pinned || query.trim() ? `${shown} of ${this.items.length} shown` : `${this.items.length} engines, ${readers} of them read the card`;
   }
   scan() {
     return this.layout.scan;
@@ -1429,35 +1479,39 @@ function everywhere(scan) {
 function configTable(layout) {
   return el("table", { class: "layout" }, el("thead", {}, el("tr", {}, el("th", {}, "Property"), el("th", {}, "Range"))), el("tbody", {}, Object.entries(layout.configProperties).map(([k, v]) => el("tr", {}, el("td", { class: "mono" }, k), el("td", { class: "mono" }, range(v))))));
 }
-function bankSection(layout, bank) {
-  const rows = [specRow("Format", bank.fmt.describe)];
-  if (bank.slots.length) {
-    const row = specRow(`Names (${bank.slots.length})`, slotList(bank.slots), true);
-    row.querySelector("td").title = bank.slots.join(", ");
-    rows.push(row);
+function engineSection(layout, entry) {
+  const { doc, bank } = entry;
+  const rows = [];
+  if (bank) {
+    rows.push(specRow("Format", bank.fmt.describe));
+    if (bank.slots.length) {
+      const row = specRow(`Names (${bank.slots.length})`, slotList(bank.slots), true);
+      row.querySelector("td").title = bank.slots.join(", ");
+      rows.push(row);
+    }
+    if (bank.scanned) {
+      rows.push(specRow("Scanned", `any name of at most ${layout.scan.max_name} characters ending ` + `${extList(layout.scan.extensions)}, at least ${layout.scan.min_bytes / 1024} KB` + `${bank.max_files ? `, at most ${bank.max_files} per folder` : ""}`));
+    }
+    if (bank.max_seconds) {
+      rows.push(specRow("Length", `about ${seconds(bank.max_seconds)} s at most - this engine loads ` + "the whole file into RAM, so anything longer is trimmed"));
+    }
+    for (const name of bank.sidecars) {
+      const label = bank.kind === "config" ? "File" : "Also needs";
+      const dflt = bank.extras[name];
+      rows.push(specRow(label, dflt ? `${name} - defaults to ${JSON.stringify(dflt.trim())}` : name, true));
+    }
+    if (bank.target)
+      rows.push(specRow("Convert writes", bank.target, true));
+    if (bank.readers.length > 1)
+      rows.push(specRow("Read by", bank.readers.join(", ")));
+    rows.push(specRow("Firmware", bank.source, true, "src"));
   }
-  if (bank.scanned) {
-    rows.push(specRow("Scanned", `any name of at most ${layout.scan.max_name} characters ending ` + `${extList(layout.scan.extensions)}, at least ${layout.scan.min_bytes / 1024} KB` + `${bank.max_files ? `, at most ${bank.max_files} per folder` : ""}`));
-  }
-  if (bank.max_seconds) {
-    rows.push(specRow("Length", `about ${seconds(bank.max_seconds)} s at most - this engine loads the ` + "whole file into RAM, so anything longer is trimmed"));
-  }
-  for (const name of bank.sidecars) {
-    const label = bank.kind === "config" ? "File" : "Also needs";
-    const dflt = bank.extras[name];
-    rows.push(specRow(label, dflt ? `${name} - defaults to ${JSON.stringify(dflt.trim())}` : name, true));
-  }
-  if (bank.target)
-    rows.push(specRow("Convert writes", bank.target, true));
-  if (bank.readers.length > 1)
-    rows.push(specRow("Read by", bank.readers.join(", ")));
-  rows.push(specRow("Firmware", bank.source, true, "src"));
-  return el("section", { class: "ref-bank", dataset: { engine: bank.engine } }, el("h3", {}, bank.engine, " ", el("span", { class: "mono muted" }, folderLabel(bank.dirs))), bank.blurb && el("p", { class: "muted" }, bank.blurb), el("table", { class: "layout spec" }, el("tbody", {}, rows)), bank.kind === "config" && configTable(layout));
+  return el("section", { class: "ref-bank", dataset: { engine: doc.name } }, el("h3", {}, doc.name, " ", el("span", { class: "mono muted" }, bank ? folderLabel(bank.dirs) : "needs no card")), doc.summary && el("p", { class: "summary" }, doc.summary), doc.body && el("p", {}, doc.body), el("p", { class: "muted note" }, !doc.released && doc.doc && "(not in the released set) ", doc.page ? el("a", { href: `#engine/${doc.name}` }, "Open the manual") : null), rows.length ? el("table", { class: "layout spec" }, el("tbody", {}, rows)) : null, bank && bank.kind === "config" ? configTable(layout) : null);
 }
 function mountReference(root, ctx) {
-  const model = new ReferenceModel(ctx.layout);
+  const model = new ReferenceModel(ctx.layout, ctx.engines);
   const status = el("div", { class: "status" });
-  const sections = new Map(ctx.layout.banks.map((b) => [b.engine, bankSection(ctx.layout, b)]));
+  const sections = new Map(ctx.engines.entries.map((e) => [e.doc.name, engineSection(ctx.layout, e)]));
   const filter = el("input", {
     type: "text",
     class: "filter",
@@ -1465,14 +1519,14 @@ function mountReference(root, ctx) {
     autocomplete: "off",
     oninput: () => model.setQuery(filter.value)
   });
-  const chips = el("div", { class: "chips" }, ctx.layout.banks.map((b) => el("button", { class: "link", onclick: () => model.toggleChip(b.engine) }, b.engine)));
+  const chips = el("div", { class: "chips" }, ctx.engines.entries.map((e) => el("button", { class: "link", onclick: () => model.toggleChip(e.doc.name) }, e.doc.name)));
   const srcToggle = el("input", {
     type: "checkbox",
     onchange: () => model.setShowSources(srcToggle.checked)
   });
   const banksEl = el("div", { class: "ref-banks" }, [...sections.values()]);
   model.store.subscribe((s) => {
-    const visible = new Set(model.visible().map((b) => b.engine));
+    const visible = new Set(model.visible().map((e) => e.doc.name));
     for (const [engine, node] of sections)
       node.hidden = !visible.has(engine);
     for (const chip of [...chips.children]) {
@@ -1483,7 +1537,13 @@ function mountReference(root, ctx) {
     banksEl.classList.toggle("show-src", s.showSources);
     status.textContent = model.status();
   });
-  root.append(el("p", { class: "lead" }, "What each engine expects on the card."), el("div", { class: "controls" }, filter, el("label", { class: "field inline" }, srcToggle, el("span", {}, "firmware sources"))), chips, status, everywhere(model.scan()), banksEl, aside("Where are the other engines?", el("p", {}, "An engine not listed here reads nothing from the card and needs no folder at all - most of the " + "effects are in that group. Everything above is generated from the same table the firmware " + "and the command-line tools read, so it is the same content as ", el("code", {}, "python3 scripts/sk_card.py layout"), ".")));
+  ctx.engineFocus.subscribe(({ engine }) => {
+    if (!engine)
+      return;
+    model.select(engine);
+    sections.get(engine)?.scrollIntoView?.({ block: "start" });
+  });
+  root.append(el("p", { class: "lead" }, "Every engine, what it does, and what it expects on the card."), el("div", { class: "controls" }, filter, el("label", { class: "field inline" }, srcToggle, el("span", {}, "firmware sources"))), chips, status, everywhere(model.scan()), banksEl, aside("Where these facts come from", el("p", {}, "The card rules are generated from the same table the firmware and the command-line tools " + "read, so this page cannot disagree with ", el("code", {}, "python3 scripts/sk_card.py layout"), ". The engine descriptions are the opening paragraph of each ", el("code", {}, "docs/engines/<name>.md"), ", so they cannot drift from the documentation either.")));
 }
 
 // src/core/protocol.ts
@@ -2348,6 +2408,163 @@ function mountTerminal(root, _ctx) {
   ]);
 }
 
+// src/app/engine_model.ts
+class EngineModel {
+  catalogue;
+  docs;
+  store = new Store({
+    entry: null,
+    html: "",
+    loading: false,
+    error: null
+  });
+  cache = new Map;
+  constructor(catalogue, docs) {
+    this.catalogue = catalogue;
+    this.docs = docs;
+  }
+  async show(name) {
+    const entry = this.catalogue.get(name);
+    if (!entry) {
+      this.store.set({ entry: null, html: "", loading: false, error: `No engine called "${name}".` });
+      return;
+    }
+    const cached = this.cache.get(name);
+    if (cached !== undefined) {
+      this.store.set({ entry, html: cached, loading: false, error: null });
+      return;
+    }
+    this.store.set({ entry, html: "", loading: true, error: null });
+    try {
+      const html = await this.docs.fetchPage(entry.doc.page);
+      this.cache.set(name, html);
+      if (this.store.get().entry?.doc.name !== name)
+        return;
+      this.store.set({ html, loading: false });
+    } catch (e) {
+      if (this.store.get().entry?.doc.name !== name)
+        return;
+      this.store.set({ loading: false, error: e.message });
+    }
+  }
+}
+
+// src/platform/docs.ts
+var httpDocs = {
+  async fetchPage(path) {
+    const res = await fetch(path);
+    if (!res.ok)
+      throw new Error(`cannot load ${path}: HTTP ${res.status}`);
+    return res.text();
+  }
+};
+
+// src/ui/lightbox.ts
+function createLightbox() {
+  const img = el("img", { alt: "" });
+  const caption = el("p", { class: "muted note" });
+  let actual = false;
+  const frame = el("div", { class: "lightbox-frame" }, img);
+  const setZoom = (on) => {
+    actual = on;
+    frame.classList.toggle("actual", actual);
+    zoom.textContent = actual ? "Fit to window" : "Actual size";
+    if (actual)
+      frame.scrollLeft = (frame.scrollWidth - frame.clientWidth) / 2;
+  };
+  const zoom = el("button", { type: "button", onclick: () => setZoom(!actual) }, "Actual size");
+  const pdfLink = el("a", { class: "pdf-link", download: "", hidden: true }, "Download PDF");
+  const close = el("button", { class: "primary", type: "button", onclick: () => dialog.close() }, "Close");
+  const dialog = el("dialog", { class: "lightbox", "aria-label": "Diagram viewer" }, el("div", { class: "lightbox-bar" }, caption, el("span", { class: "lightbox-actions" }, pdfLink, zoom, close)), frame);
+  dialog.addEventListener("click", (e) => {
+    if (e.target === dialog)
+      dialog.close();
+  });
+  document.body.append(dialog);
+  return {
+    open(src, text, pdf) {
+      pdfLink.hidden = !pdf;
+      if (pdf)
+        pdfLink.href = pdf;
+      img.src = src;
+      img.alt = text;
+      caption.textContent = text;
+      setZoom(false);
+      if (typeof dialog.showModal === "function")
+        dialog.showModal();
+      else
+        dialog.setAttribute("open", "");
+      frame.scrollTop = 0;
+    }
+  };
+}
+
+// src/ui/engine_view.ts
+function formatLine(entry) {
+  const bank = entry.bank;
+  if (!bank)
+    return "Reads nothing from the card.";
+  return `${folderLabel(bank.dirs)} - ${bank.fmt.describe}`;
+}
+function mountEngine(root, ctx) {
+  const model = new EngineModel(ctx.engines, httpDocs);
+  const lightbox = createLightbox();
+  const heading = el("h2", { class: "engine-title" });
+  const meta = el("p", { class: "muted note engine-meta" });
+  const summary = el("div", { class: "callout engine-format" });
+  const doc = el("div", { class: "engine-doc" });
+  const nav = el("div", { class: "controls" }, el("button", { onclick: () => {
+    location.hash = "#reference";
+  } }, "All engines"), el("button", { onclick: () => {
+    location.hash = "#convert";
+  } }, "Put audio on a card"));
+  model.store.subscribe((s) => {
+    if (s.error) {
+      heading.textContent = "Not found";
+      clear(meta);
+      clear(summary).append(s.error);
+      clear(doc);
+      return;
+    }
+    if (!s.entry)
+      return;
+    const { doc: info, bank } = s.entry;
+    heading.textContent = info.name;
+    append(clear(meta), [!info.released && "Not in the released set."]);
+    append(clear(summary), [
+      el("strong", {}, bank ? "On the card: " : "No card needed: "),
+      formatLine(s.entry),
+      bank && el("span", { class: "muted" }, "  Full format on the "),
+      bank && el("a", { href: "#reference" }, "Reference tab"),
+      bank && "."
+    ]);
+    clear(doc);
+    if (s.loading) {
+      doc.append(el("p", { class: "muted" }, "Loading the documentation..."));
+      return;
+    }
+    if (!info.page) {
+      doc.append(el("p", { class: "muted" }, "This entry is part of the card layout rather than an " + "engine, so it has no manual."));
+      return;
+    }
+    doc.innerHTML = s.html;
+  });
+  doc.addEventListener("click", (e) => {
+    const link = e.target?.closest?.("figure a");
+    if (!link || !link.querySelector("img"))
+      return;
+    e.preventDefault();
+    const figure = link.closest("figure");
+    const caption = figure?.querySelector("figcaption");
+    lightbox.open(link.getAttribute("href") ?? "", caption?.firstChild?.textContent?.replace(/ - open full size\s*$/, "").trim() ?? "", figure?.querySelector("a.pdf-link")?.getAttribute("href") ?? null);
+  });
+  ctx.engineFocus.subscribe(({ engine }) => {
+    if (engine)
+      model.show(engine);
+  });
+  root.append(heading, meta, summary, nav, doc);
+}
+
 // src/ui/tabs.ts
 function nextTabIndex(key, current, count) {
   if (count <= 0 || current < 0)
@@ -2366,6 +2583,59 @@ function nextTabIndex(key, current, count) {
   }
 }
 
+// src/ui/route.ts
+function parseHash(hash) {
+  const raw = hash.replace(/^#/, "");
+  if (!raw)
+    return { view: "", engine: null };
+  const [head, ...rest] = raw.split("/");
+  if (head === "engine") {
+    const engine = rest.join("/").trim();
+    return engine ? { view: "reference", engine } : { view: "reference", engine: null };
+  }
+  return { view: head, engine: null };
+}
+
+// src/ui/theme.ts
+var THEMES = [
+  {
+    id: "system6",
+    label: "System 6",
+    framework: "./vendor/system.css/system.css",
+    skin: "./themes/system6.css",
+    note: "Mac System 6. One bit, Chicago, window chrome."
+  },
+  {
+    id: "plain",
+    label: "Plain",
+    framework: "./vendor/water.css/water.css",
+    skin: "./themes/plain.css",
+    note: "Light or dark, system font. The one for reading the manuals."
+  }
+];
+var DEFAULT_THEME = THEMES[0].id;
+var KEY = "sk-card-theme";
+function currentTheme() {
+  try {
+    const saved = localStorage.getItem(KEY);
+    return THEMES.some((t) => t.id === saved) ? saved : DEFAULT_THEME;
+  } catch {
+    return DEFAULT_THEME;
+  }
+}
+function applyTheme(id) {
+  const theme = THEMES.find((t) => t.id === id) ?? THEMES[0];
+  const framework = document.getElementById("theme-framework");
+  const skin = document.getElementById("theme-skin");
+  if (framework)
+    framework.href = theme.framework;
+  if (skin)
+    skin.href = theme.skin;
+  try {
+    localStorage.setItem(KEY, theme.id);
+  } catch {}
+}
+
 // src/ui/main.ts
 var VIEWS = {
   build: mountBuild,
@@ -2375,18 +2645,30 @@ var VIEWS = {
   terminal: mountTerminal
 };
 var DEFAULT_VIEW = Object.keys(VIEWS)[0];
+var ENGINE_PANEL = "engine";
 async function main() {
   let ctx;
   try {
-    const [layoutData, patches] = await Promise.all([
+    const [layoutData, engineData, patches] = await Promise.all([
       fetch("./card_layout.json").then((r) => {
         if (!r.ok)
           throw new Error(`cannot load ./card_layout.json: HTTP ${r.status}`);
         return r.json();
       }),
+      fetch("./engines.json").then((r) => {
+        if (!r.ok)
+          throw new Error(`cannot load ./engines.json: HTTP ${r.status}`);
+        return r.json();
+      }),
       fetch("./patches.json").then((r) => r.ok ? r.json() : {})
     ]);
-    ctx = { layout: makeLayout(layoutData), patches };
+    const layout = makeLayout(layoutData);
+    ctx = {
+      layout,
+      engines: makeCatalogue(engineData, layout),
+      patches,
+      engineFocus: new Store({ engine: null })
+    };
   } catch (e) {
     showError($("#panels"), new Error(`${e.message}
 
@@ -2395,7 +2677,7 @@ This page is generated: run \`make web-data\` and serve web/ over http ` + "(fil
   }
   const mounted = new Set;
   function show(name) {
-    if (!VIEWS[name])
+    if (!VIEWS[name] && name !== ENGINE_PANEL)
       name = DEFAULT_VIEW;
     for (const tab of $$("#tabs button")) {
       const selected = tab.dataset.view === name;
@@ -2403,19 +2685,30 @@ This page is generated: run \`make web-data\` and serve web/ over http ` + "(fil
       tab.setAttribute("aria-selected", String(selected));
       tab.tabIndex = selected ? 0 : -1;
     }
+    if (name === ENGINE_PANEL) {
+      const ref = $("#tab-reference");
+      if (ref)
+        ref.tabIndex = 0;
+    }
     for (const panel of $$("#panels > section"))
       panel.hidden = panel.id !== `panel-${name}`;
     if (!mounted.has(name)) {
       mounted.add(name);
       const root = $(`#panel-${name}`);
       try {
-        VIEWS[name](root, ctx);
+        (name === ENGINE_PANEL ? mountEngine : VIEWS[name])(root, ctx);
       } catch (e) {
         showError(root, e);
       }
     }
-    if (location.hash.slice(1) !== name)
+    if (parseHash(location.hash).view !== name)
       history.replaceState(null, "", `#${name}`);
+  }
+  function showEngine(name) {
+    show(ENGINE_PANEL);
+    ctx.engineFocus.set({ engine: name });
+    if (location.hash !== `#engine/${name}`)
+      history.replaceState(null, "", `#engine/${name}`);
   }
   const tabs = $$("#tabs button");
   for (const tab of tabs) {
@@ -2430,14 +2723,82 @@ This page is generated: run \`make web-data\` and serve web/ over http ` + "(fil
     tabs[next].focus();
     show(tabs[next].dataset.view ?? DEFAULT_VIEW);
   });
-  window.addEventListener("hashchange", () => show(location.hash.slice(1)));
-  $("#banner").append(el("span", { class: "muted" }, `${ctx.layout.banks.length} banks, scan floor ${ctx.layout.scan.min_bytes / 1024} KB, ` + `name limit ${ctx.layout.scan.max_name}`));
-  show(location.hash.slice(1) || DEFAULT_VIEW);
+  window.addEventListener("hashchange", () => {
+    const route2 = parseHash(location.hash);
+    if (route2.engine)
+      showEngine(route2.engine);
+    else
+      show(route2.view);
+  });
+  const provenance = `${ctx.layout.banks.length} banks, ` + `scan floor ${ctx.layout.scan.min_bytes / 1024} KB, name limit ${ctx.layout.scan.max_name}`;
+  $("#banner").append(el("span", { class: "muted" }, provenance));
+  wireAboutMenu(provenance);
+  $("#home-link")?.addEventListener("click", () => {
+    document.activeElement?.blur?.();
+    history.replaceState(null, "", location.pathname + location.search);
+    show(DEFAULT_VIEW);
+  });
+  buildEngineMenu(ctx, showEngine);
+  buildThemeMenu();
+  const route = parseHash(location.hash);
+  if (route.engine)
+    showEngine(route.engine);
+  else
+    show(route.view || DEFAULT_VIEW);
+}
+function wireAboutMenu(provenance) {
+  const dialog = $("#about");
+  const open = $("#about-open");
+  const close = $("#about-close");
+  const facts = $("#about-facts");
+  if (!dialog || !open || !close)
+    return;
+  if (facts)
+    facts.textContent = provenance;
+  open.addEventListener("click", () => {
+    open.blur();
+    if (typeof dialog.showModal === "function")
+      dialog.showModal();
+    else
+      dialog.setAttribute("open", "");
+  });
+  close.addEventListener("click", () => dialog.close());
+}
+function buildEngineMenu(ctx, onPick) {
+  const host = $("#engines-menu");
+  if (!host)
+    return;
+  host.append(el("ul", { role: "menu" }, ctx.engines.entries.map((e) => el("li", { role: "menu-item" }, el("button", {
+    type: "button",
+    onclick: () => {
+      document.activeElement?.blur?.();
+      onPick(e.doc.name);
+    }
+  }, e.doc.name, e.bank ? "" : el("span", { class: "muted" }, "  (no card)"))))));
+}
+function buildThemeMenu() {
+  const host = $("#theme-menu");
+  if (!host)
+    return;
+  const render = () => {
+    const active = currentTheme();
+    host.querySelector("[role=menu]")?.remove();
+    host.append(el("ul", { role: "menu" }, THEMES.map((t) => el("li", { role: "menu-item" }, el("button", {
+      type: "button",
+      title: t.note,
+      onclick: () => {
+        document.activeElement?.blur?.();
+        applyTheme(t.id);
+        render();
+      }
+    }, `${t.id === active ? "• " : "   "}${t.label}`)))));
+  };
+  render();
 }
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
 main();
 
-//# debugId=39AC183EF25BCF2164756E2164756E21
+//# debugId=5C09306187DF745B64756E2164756E21
 //# sourceMappingURL=app.js.map

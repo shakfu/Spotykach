@@ -26,12 +26,14 @@ classes: {
 }
 
 panel: Front panel {
-  grid-columns: 3
+  grid-columns: 2
   grid-gap: 60
   style.stroke: "#cbd5e0"
 
   # ----------------------------------------------------------------- DECK A
-  deckA: Deck A {
+  deckA: Deck A and B (identical) {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsA: Knobs (7) {
@@ -59,7 +61,7 @@ panel: Front panel {
     ringA: "LED Ring A (32px)" {
       class: knob
       shape: circle
-      label: "Ring A\ndivision arc, character-tinted"
+      label: "Ring A / B\ndivision arc, character-tinted"
     }
   }
 
@@ -98,37 +100,6 @@ panel: Front panel {
   }
 
   # ----------------------------------------------------------------- DECK B
-  deckB: Deck B {
-    style.stroke: "#90cdf4"
-
-    knobsB: Knobs (7) {
-      class: knob
-      shape: sql_table
-      Pitch: "transpose wet +/-1 oct"
-      Position: "feedback"
-      Size: "musical division (stepped)"
-      Envelope: "feedback tone (low-pass)"
-      "Mix (SOS)": "wet/dry mix"
-      Cycle: "mod-LFO rate"
-      Glow: "mod-LFO depth (delay time)"
-    }
-
-    padsB: Pads (5) {
-      class: pad
-      shape: sql_table
-      Play: "Freeze (loop at unity fb)"
-      Reverse: "Reverse (backward read)"
-      Grit: "-"
-      Flux: "-"
-      Seq: "-"
-    }
-
-    ringB: "LED Ring B (32px)" {
-      class: knob
-      shape: circle
-      label: "Ring B\ndivision arc, character-tinted"
-    }
-  }
 }
 
 # ---------------------------------------------------------------------- I/O

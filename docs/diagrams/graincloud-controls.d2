@@ -26,12 +26,14 @@ classes: {
 }
 
 panel: Front panel {
-  grid-columns: 3
+  grid-columns: 2
   grid-gap: 60
   style.stroke: "#cbd5e0"
 
   # ----------------------------------------------------------------- DECK A
-  deckA: Deck A {
+  deckA: Deck A and B (identical) {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsA: Knobs (7) {
@@ -59,7 +61,7 @@ panel: Front panel {
     ringA: "LED Ring A (32px)" {
       class: knob
       shape: circle
-      label: "Ring A\ncloud level meter + position dot"
+      label: "Ring A / B\ncloud level meter + position dot"
     }
   }
 
@@ -98,37 +100,6 @@ panel: Front panel {
   }
 
   # ----------------------------------------------------------------- DECK B
-  deckB: Deck B {
-    style.stroke: "#90cdf4"
-
-    knobsB: Knobs (7) {
-      class: knob
-      shape: sql_table
-      Pitch: "grain transpose (+V/Oct, MIDI); Alt = playhead speed"
-      Position: "cloud centre position in the buffer; Alt = vibrato depth"
-      Size: "position spray (spread of grain start points)"
-      Envelope: "grain duration / window"
-      "Mix (SOS)": "dry/wet; Alt = glisson (per-grain pitch glide)"
-      Cycle: "grain density (grains/sec)"
-      Glow: "pitch + pan spray (per-grain randomization)"
-    }
-
-    padsB: Pads (5) {
-      class: pad
-      shape: sql_table
-      Play: "Alt+Play: record live input into this deck (toggle)"
-      Reverse: "Alt+Rev: record live input into this deck (toggle)"
-      Grit: "-"
-      Flux: "-"
-      Seq: "-"
-    }
-
-    ringB: "LED Ring B (32px)" {
-      class: knob
-      shape: circle
-      label: "Ring B\ncloud level meter + position dot"
-    }
-  }
 }
 
 # ---------------------------------------------------------------------- I/O

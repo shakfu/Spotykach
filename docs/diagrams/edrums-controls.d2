@@ -26,12 +26,14 @@ classes: {
 }
 
 panel: Front panel {
-  grid-columns: 3
+  grid-columns: 2
   grid-gap: 60
   style.stroke: "#cbd5e0"
 
   # ----------------------------------------------------------------- DECK A
-  deckA: Deck A {
+  deckA: Deck A and B (identical) {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsA: Knobs (7) {
@@ -59,7 +61,7 @@ panel: Front panel {
     ringA: "LED Ring A (32px)" {
       class: knob
       shape: circle
-      label: "Ring A\nfocused drum's pattern (onsets + playhead)"
+      label: "Ring A / B\nfocused drum's pattern (onsets + playhead)"
     }
   }
 
@@ -98,37 +100,6 @@ panel: Front panel {
   }
 
   # ----------------------------------------------------------------- DECK B
-  deckB: Deck B {
-    style.stroke: "#90cdf4"
-
-    knobsB: Knobs (7) {
-      class: knob
-      shape: sql_table
-      Pitch: "drum pitch (body + noise); Alt = model"
-      Position: "density (Euclidean onsets)"
-      Size: "pattern length (2-16)"
-      Envelope: "rotation (pattern shift)"
-      "Mix (SOS)": "per-drum gain; grit+ = decay"
-      Cycle: "clock division (1/16, 1/8, 1/4)"
-      Glow: "onset probability (0-100%)"
-    }
-
-    padsB: Pads (5) {
-      class: pad
-      shape: sql_table
-      Play: "stop/start focused drum; Alt+Play = mute"
-      Reverse: "swap focused drum"
-      Grit: "macros: +PITCH drive, +SOS decay"
-      Flux: "macros: +PITCH sweep, +SOS body/noise, +POS tone"
-      Seq: "hold Alt+Seq = reset deck to factory"
-    }
-
-    ringB: "LED Ring B (32px)" {
-      class: knob
-      shape: circle
-      label: "Ring B\nfocused drum's pattern (onsets + playhead)"
-    }
-  }
 }
 
 # ---------------------------------------------------------------------- I/O

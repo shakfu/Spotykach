@@ -26,12 +26,14 @@ classes: {
 }
 
 panel: Front panel {
-  grid-columns: 3
+  grid-columns: 2
   grid-gap: 60
   style.stroke: "#cbd5e0"
 
   # ----------------------------------------------------------------- DECK A
-  deckA: Deck A {
+  deckA: Deck A and B (identical) {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsA: Knobs (7) {
@@ -59,7 +61,7 @@ panel: Front panel {
     ringA: "LED Ring A (32px)" {
       class: knob
       shape: circle
-      label: "Ring A\nvoice transport (red rec / green fwd / cyan rev); focused-voice hue idle; amber while saving"
+      label: "Ring A / B\nvoice transport (red rec / green fwd / cyan rev); focused-voice hue idle; amber while saving"
     }
   }
 
@@ -98,37 +100,6 @@ panel: Front panel {
   }
 
   # ----------------------------------------------------------------- DECK B
-  deckB: Deck B {
-    style.stroke: "#90cdf4"
-
-    knobsB: Knobs (7) {
-      class: knob
-      shape: sql_table
-      Pitch: "rate +/-2x (noon=stop, CCW=reverse); Alt = SD slot"
-      Position: "loop start; Alt = pan"
-      Size: "loop length (trims the take)"
-      Envelope: "overdub feedback (1=infinite layering, 0=overwrite)"
-      "Mix (SOS)": "voice volume"
-      Cycle: "rate slew time"
-      Glow: "loop crossfade (fade) time"
-    }
-
-    padsB: Pads (5) {
-      class: pad
-      shape: sql_table
-      Play: "roll / unity snap"
-      Reverse: "swap focused voice; Alt+Rev = save trimmed loop"
-      Grit: "-"
-      Flux: "post filter: +PITCH cutoff, +MIX reso"
-      Seq: "re-align all voices (sync); Alt+Seq = save full, hold = erase voice"
-    }
-
-    ringB: "LED Ring B (32px)" {
-      class: knob
-      shape: circle
-      label: "Ring B\nvoice transport (red rec / green fwd / cyan rev); focused-voice hue idle; amber while saving"
-    }
-  }
 }
 
 # ---------------------------------------------------------------------- I/O

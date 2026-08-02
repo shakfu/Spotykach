@@ -14,7 +14,7 @@ second front-end onto both, not new capability.
 ## What landed
 
 `web/` is a static page with no runtime dependencies: `make web-serve` to run it, `make test-web` for
-its suite, `make web-data` to regenerate its data. 164 tests, plus 18 Python tests guarding the export.
+its suite, `make web-data` to regenerate its data. 206 tests, plus 34 Python tests guarding the export and the markdown converter.
 
 **It is TypeScript now, bundled by bun**, which is the one place the original design was overturned
 rather than extended: "no build step" was a real constraint and it is gone. What replaced it is

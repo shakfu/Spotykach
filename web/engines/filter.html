@@ -1,0 +1,23 @@
+<p><code>ENGINE=filter</code> · <code>src/engine/filter/</code> · generated from <code>filter.dsp</code> + <code>filter.json</code></p>
+<p>A <strong>dual resonant filter</strong> - and the worked example of the <strong>parallel (DoubleMono) dual-deck</strong> generated path: one mono resonant low-pass kernel, run as <strong>two independent instances</strong>, deck A on the <strong>left</strong> channel and deck B on the <strong>right</strong>. Each deck has its own cutoff / resonance / drive / mix, and the two channels never interact. Authored as a Faust <code>.dsp</code> plus a JSON manifest with <strong>no hand-written C++</strong> (the generator emits the wrapper on the shared <code>FaustEngine&lt;Traits&gt;</code> template, <code>decks = 2</code>). See <a href="https://github.com/shakfu/sk-engines/blob/main/docs/dev/engine-gen.md"><code>docs/dev/engine-gen.md</code></a> §9 for the dual-deck design and <a href="https://github.com/shakfu/sk-engines/blob/main/docs/engine-types/faust.md"><code>docs/engine-types/faust.md</code></a> for the Faust path.</p>
+<hr>
+<h3>Controls</h3>
+<figure><a href="engines/media/filter-controls.svg" target="_blank" rel="noreferrer"><img src="engines/media/filter-controls.svg" alt="Dual filter control surface" loading="lazy" width="1603" height="1596"></a><figcaption>Dual filter control surface - open full size <a href="engines/media/filter-controls.pdf" download class="pdf-link">download PDF</a></figcaption></figure>
+<p>_Generated from <a href="https://github.com/shakfu/sk-engines/blob/main/docs/diagrams/controls/filter.json"><code>docs/diagrams/controls/filter.json</code></a> via <code>make diagrams</code>._</p>
+<p>Each deck (A and B) carries the same four controls, addressing <strong>its own channel</strong>:</p>
+<table><thead><tr><th>Control</th><th><code>ParamId</code></th><th>Faust slider</th><th>Effect</th></tr></thead><tbody><tr><td><strong>PITCH</strong></td><td><code>Speed</code></td><td><code>cutoff</code></td><td>low-pass cutoff (~40 Hz – 20 kHz)</td></tr><tr><td><strong>POS</strong></td><td><code>Pos</code></td><td><code>reso</code></td><td>resonance / Q</td></tr><tr><td><strong>SIZE</strong></td><td><code>Size</code></td><td><code>drive</code></td><td>pre-filter saturation</td></tr><tr><td><strong>SOS</strong></td><td><code>Mix</code></td><td><code>mix</code></td><td>dry/wet</td></tr></tbody></table>
+<p>Deck A's knobs filter the left channel; deck B's filter the right. The crossfader is unused (the two decks are independent channels, not an A/B blend). The LED rings show a <strong>per-deck</strong> output-level meter.</p>
+<hr>
+<h3>Authoring (the parallel dual-deck path)</h3>
+<p>The whole engine is two files in <code>src/engine/filter/</code>:</p>
+<ul><li><strong><code>filter.dsp</code></strong> - a mono (1-in/1-out) resonant low-pass with drive and dry/wet.</li></ul>
+<ul><li><strong><code>filter.json</code></strong> - the manifest. <code>"deck_mode": "parallel"</code> turns on DoubleMono (two instances, <code>CapDualDeck</code>); the <code>knobs</code> map applies to both decks:</li></ul>
+<pre><code class="lang-json">{ "engine": "filter", "backend": "faust", "deck_mode": "parallel",
+  "knobs": { "Pitch": "cutoff", "Position": "reso", "Size": "drive", "Mix (SOS)": "mix" },
+  "features": { "meter": true, "color": "0xff8833" } }</code></pre>
+<p>Then:</p>
+<pre><code class="lang-text">make faust-engine MANIFEST=src/engine/filter/filter.json   # kernel + wrapper + build + diagram
+make -j8 ENGINE=filter                                    # build (~83% SRAM_EXEC)
+make engine-filter                                        # clean + build + DFU flash
+make -C host test-filter                                  # host test (per-deck independence)</code></pre>
+<p>The kernel must be <strong>mono</strong> for DoubleMono (deck A=L, deck B=R). <code>filter_engine.h</code> and the generated kernel are checked in (a normal build needs no cyfaust); regenerate the wrapper with <code>--force-glue</code>.</p>

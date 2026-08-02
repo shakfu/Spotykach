@@ -26,12 +26,14 @@ classes: {
 }
 
 panel: Front panel {
-  grid-columns: 3
+  grid-columns: 2
   grid-gap: 60
   style.stroke: "#cbd5e0"
 
   # ----------------------------------------------------------------- DECK A
-  deckA: Deck A {
+  deckA: Deck A and B (identical) {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsA: Knobs (7) {
@@ -59,7 +61,7 @@ panel: Front panel {
     ringA: "LED Ring A (32px)" {
       class: knob
       shape: circle
-      label: "Ring A\nenergy meter + pitch dot; model dots (Alt)"
+      label: "Ring A / B\nenergy meter + pitch dot; model dots (Alt)"
     }
   }
 
@@ -98,37 +100,6 @@ panel: Front panel {
   }
 
   # ----------------------------------------------------------------- DECK B
-  deckB: Deck B {
-    style.stroke: "#90cdf4"
-
-    knobsB: Knobs (7) {
-      class: knob
-      shape: sql_table
-      Pitch: "note pitch (+V/Oct, MIDI); Alt = model"
-      Position: "excitation position"
-      Size: "damping (decay)"
-      Envelope: "brightness"
-      "Mix (SOS)": "dry/wet"
-      Cycle: "Drift density / arp rate"
-      Glow: "structure"
-    }
-
-    padsB: Pads (5) {
-      class: pad
-      shape: sql_table
-      Play: "trigger (pluck / excite)"
-      Reverse: "-"
-      Grit: "-"
-      Flux: "-"
-      Seq: "trigger"
-    }
-
-    ringB: "LED Ring B (32px)" {
-      class: knob
-      shape: circle
-      label: "Ring B\nenergy meter + pitch dot; model dots (Alt)"
-    }
-  }
 }
 
 # ---------------------------------------------------------------------- I/O

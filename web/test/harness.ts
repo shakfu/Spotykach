@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-import type { LayoutData } from '../src/core/types.ts';
+import type { EngineData, LayoutData } from '../src/core/types.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -93,6 +93,9 @@ export const readWeb = <T = unknown>(rel: string): T =>
 
 /** The generated layout export, typed. Every suite starts from this. */
 export const layoutData = (): LayoutData => readWeb<LayoutData>('card_layout.json');
+
+/** The generated engine catalogue, typed. */
+export const engineData = (): EngineData => readWeb<EngineData>('engines.json');
 
 export const b64 = (s: string): Uint8Array => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 

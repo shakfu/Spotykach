@@ -1,0 +1,248 @@
+{
+  "schema": 1,
+  "generated_by": "scripts/web_export.py from docs/engines/*.md",
+  "engines": [
+    {
+      "name": "bard",
+      "title": "bard",
+      "summary": "",
+      "body": "A **storyteller**. Each deck (A/B) reads a **spoken-word recording** - an audiobook, a lecture, a field recording, a radio play - from a shelf on the SD card, and navigates it by **bookmarks**: a list of timestamps in a plain-text sidecar file next to the audio. One knob jumps from **book to book**, another jumps from **bookmark to bookmark**, and the reading itself can be sped up, slowed down, pitch-shifted or pitch-preserved, coloured, and placed in a room.",
+      "source": "`ENGINE=bard` - `src/engine/bard/bard_engine.{h,cpp}` - class `BardEngine`",
+      "doc": "docs/engines/bard.md",
+      "page": "engines/bard.html",
+      "released": true,
+      "bank": "bard"
+    },
+    {
+      "name": "chorus",
+      "title": "chorus",
+      "summary": "",
+      "body": "A simple **stereo chorus** - and the worked example of the **generated-Faust-engine** path: it is authored as a Faust `.dsp` plus a small JSON manifest, with **no hand-written C++**. The generator (`scripts/gen_faust_engine.py`) builds the cyfaust kernel, emits the engine wrapper on the shared `FaustEngine<Traits>` template, and wires the build. See [`docs/dev/engine-gen.md`](../dev/engine-gen.md) for the generator design and [`docs/engine-types/faust.md`](../engine-types/faust.md) for the Faust path.",
+      "source": "`ENGINE=chorus` \u00b7 `src/engine/chorus/` \u00b7 generated from `chorus.dsp` + `chorus.json`",
+      "doc": "docs/engines/chorus.md",
+      "page": "engines/chorus.html",
+      "released": false,
+      "bank": null
+    },
+    {
+      "name": "chuck",
+      "title": "chuck",
+      "summary": "",
+      "body": "The `chuck` engine runs the [ChucK](https://chuck.stanford.edu) language and virtual machine as a synth on the spotykach. A program (a `.ck` text file) is compiled and run at runtime, so the **patch \u2014 not the firmware \u2014 defines the sound**. You load programs from the SD card, switch between them live, and play them from the panel knobs.",
+      "source": "",
+      "doc": "docs/engines/chuck.md",
+      "page": "engines/chuck.html",
+      "released": true,
+      "bank": "chuck"
+    },
+    {
+      "name": "csound",
+      "title": "csound",
+      "summary": "",
+      "body": "The `csound` engine runs a full [Csound](https://csound.com) 7 instance as a synth on the spotykach. An orchestra (a `.csd` text document) is compiled and performed at runtime, so the **patch \u2014 not the firmware \u2014 defines the sound**. You load orchestras from the SD card, switch between them live, and play them from the panel knobs and over MIDI.",
+      "source": "",
+      "doc": "docs/engines/csound.md",
+      "page": "engines/csound.html",
+      "released": true,
+      "bank": "csound"
+    },
+    {
+      "name": "delay",
+      "title": "Delay",
+      "summary": "tempo-synced stereo delay, with characters + topologies",
+      "body": "Two delay lines (deck A \u2192 left, deck B \u2192 right) whose delay time **locks to the transport tempo**, stepping through musical divisions. The second engine to consume the platform transport (it *reads* tempo; it does not subscribe to ticks). The Reel/Slice/Drift switch picks the delay **character** and the routing switch picks the stereo **topology**.",
+      "source": "`ENGINE=delay` \u00b7 `src/engine/delay/delay_engine.{h,cpp}` \u00b7 class `DelayEngine`",
+      "doc": "docs/engines/delay.md",
+      "page": "engines/delay.html",
+      "released": true,
+      "bank": null
+    },
+    {
+      "name": "edrums",
+      "title": "Edrums",
+      "summary": "four-drum Euclidean drum machine",
+      "body": "A drum machine whose hits are placed by **Euclidean rhythms** and voiced by **synthesized** drums (no samples). It is the first engine to *sequence* off the shared platform transport \u2014 it subscribes to the clock's ticks rather than just reading tempo. Status: **working** \u2014 four drums (two per deck), confirmed on hardware and covered by the headless slot test (`make -C host test-edrums`); this doc is the as-built player reference.",
+      "source": "`ENGINE=edrums` \u00b7 `src/engine/edrums/edrums_engine.{h,cpp}` \u00b7 class `EdrumsEngine`",
+      "doc": "docs/engines/edrums.md",
+      "page": "engines/edrums.html",
+      "released": true,
+      "bank": null
+    },
+    {
+      "name": "filter",
+      "title": "filter",
+      "summary": "",
+      "body": "A **dual resonant filter** - and the worked example of the **parallel (DoubleMono) dual-deck** generated path: one mono resonant low-pass kernel, run as **two independent instances**, deck A on the **left** channel and deck B on the **right**. Each deck has its own cutoff / resonance / drive / mix, and the two channels never interact. Authored as a Faust `.dsp` plus a JSON manifest with **no hand-written C++** (the generator emits the wrapper on the shared `FaustEngine<Traits>` template, `decks = 2`). See [`docs/dev/engine-gen.md`](../dev/engine-gen.md) \u00a79 for the dual-deck design and [`docs/engine-types/faust.md`](../engine-types/faust.md) for the Faust path.",
+      "source": "`ENGINE=filter` \u00b7 `src/engine/filter/` \u00b7 generated from `filter.dsp` + `filter.json`",
+      "doc": "docs/engines/filter.md",
+      "page": "engines/filter.html",
+      "released": true,
+      "bank": null
+    },
+    {
+      "name": "gigaverb",
+      "title": "gigaverb",
+      "summary": "stereo reverb from a gen~ patch",
+      "body": "The stock Max/MSP `gen~` reverb example (Tom Erbe's gigaverb), exported to C++ and run as an engine through gen-dsp - the first engine built this way, and the worked example for the method. The mechanism (genlib isolation, the arena-bound allocator, the generic `GenEngine<W>` wrapper, the codegen) is documented in [engine-types/gen.md](../engine-types/gen.md); this page is the gigaverb specifics.",
+      "source": "`ENGINE=gigaverb` \u00b7 `src/engine/gigaverb/` \u00b7 built via the [gen~ / gen-dsp method](../engine-types/gen.md)",
+      "doc": "docs/engines/gigaverb.md",
+      "page": "engines/gigaverb.html",
+      "released": false,
+      "bank": null
+    },
+    {
+      "name": "glitch",
+      "title": "glitch",
+      "summary": "",
+      "body": "A **dual-deck lo-fi / circuit-bent noise voice**. Each deck (A/B) runs one of **12 curated algorithms** ported from Rob Scape's [Noisferatu](https://github.com/rob-scape/noisferatu); the two voices are blended by the platform crossfader and placed by the routing switch, so it plays like a pair of glitch oscillators you mix.",
+      "source": "`ENGINE=glitch` \u00b7 `src/engine/glitch/glitch_engine.{h,cpp}` \u00b7 class `GlitchEngine`",
+      "doc": "docs/engines/glitch.md",
+      "page": "engines/glitch.html",
+      "released": true,
+      "bank": null
+    },
+    {
+      "name": "graincloud",
+      "title": "graincloud",
+      "summary": "",
+      "body": "A polyphonic grain **cloud** (engine #11 in [`docs/engine-ideas.md`](../engine-ideas.md)) - the granular the looper isn't: dozens of grains with independent pitch / pan / position scattered over the recorded buffer. It is built as a **self-contained variant of the `granular` engine**: `src/engine/graincloud/` is a copy of the granular tree (so it keeps granular's recording, SD save/load, dual-deck, crossfade, FX and UI verbatim) with only the grain-generation core replaced - `Generator::process` sums a GrainflowLib cloud (`gf_cloud.{h,cpp}`) reading the recorded `Buffer` instead of driving the granular Vox. It is its own engine (`SPK_ENGINE_GRAINCLOUD`); plain `granular` is untouched.",
+      "source": "`ENGINE=graincloud` \u00b7 `src/engine/graincloud/` \u00b7 class `GraincloudEngine`",
+      "doc": "docs/engines/graincloud.md",
+      "page": "engines/graincloud.html",
+      "released": true,
+      "bank": "granular"
+    },
+    {
+      "name": "granular",
+      "title": "Granular",
+      "summary": "dual granular looper / sampler",
+      "body": "The original instrument and the default build: a two-deck granular looper/sampler with recording, overdub, feedback, a per-deck step sequencer, FX, and CV/MIDI. This is the largest engine; this page is an orientation. Deeper material lives in `docs/architecture.md`, `docs/engine-layout.md`, and the refactor-history docs.",
+      "source": "`ENGINE=granular` (default) \u00b7 `src/engine/granular/` (~50 files: adapter `granular_engine.{h,cpp}` + DSP) \u00b7 class `GranularEngine`",
+      "doc": "docs/engines/granular.md",
+      "page": "engines/granular.html",
+      "released": false,
+      "bank": "granular"
+    },
+    {
+      "name": "mosc",
+      "title": "mosc",
+      "summary": "",
+      "body": "A dual **macro-oscillator**, built on the Mutable Instruments **Plaits** DSP (`src/engine/mosc/thirdparty/plaits`) \u2014 the *full* 24-engine synthesis voice. Each deck wraps one `plaits::Voice`, so the two decks are two independent macro-oscillators (virtual analog, waveshaping, FM, wavetable, granular, additive, chord, speech, modal, drums, and the newer \"engine2\" models). Sibling of the [reso](reso.md) engine (both are Mutable Instruments DSP placement-new'd into the SDRAM arena and share the same `stmlib`).",
+      "source": "",
+      "doc": "docs/engines/mosc.md",
+      "page": "engines/mosc.html",
+      "released": true,
+      "bank": null
+    },
+    {
+      "name": "passthrough",
+      "title": "Passthrough",
+      "summary": "minimal reference engine",
+      "body": "The smallest possible engine: stereo in \u2192 stereo out, tracking the last-block peak to drive a level meter on the rings. Its purpose is documentation, not music \u2014 it shows how little a non-granular engine needs, and is the template to copy when starting a new engine. It is the minimal `IEngine` reference (a code example), so it is developer-facing by nature and is not split into a separate impl file.",
+      "source": "`ENGINE=passthrough` \u00b7 `src/engine/passthrough/passthrough_engine.h` (header-only) \u00b7 class `PassthroughEngine`",
+      "doc": "docs/engines/passthrough.md",
+      "page": "engines/passthrough.html",
+      "released": false,
+      "bank": null
+    },
+    {
+      "name": "pstretch",
+      "title": "pstretch",
+      "summary": "",
+      "body": "A **real-time PaulStretch** ambient time-smear. PaulStretch (Nasca Octavian Paul) turns audio into a diffuse, evolving spectral wash by FFT-ing large overlapping windows, **randomizing the phases** (keeping the magnitudes), and overlapping back to time. Advancing the analysis read head slowly - or freezing it - stretches and smears time without limit.",
+      "source": "`ENGINE=pstretch` \u00b7 `src/engine/pstretch/pstretch_engine.{h,cpp}` \u00b7 class `PstretchEngine`",
+      "doc": "docs/engines/pstretch.md",
+      "page": "engines/pstretch.html",
+      "released": true,
+      "bank": "pstretch"
+    },
+    {
+      "name": "qdelay",
+      "title": "QDelay",
+      "summary": "a dub/ambient flavor of the dual delay",
+      "body": "A second \"flavor\" of the [tempo-synced dual delay](delay.md), inspired by [qdelay](https://github.com/tiagolr/qdelay). It keeps the delay engine's entire control grammar \u2014 tempo-locked musical divisions, feedback, mix, PITCH transpose, ENV tone, the mod LFO, the Freeze/Reverse pad gestures and the three stereo topologies \u2014 and swaps only the **character palette** from Clean/Tape/Shimmer to **Clean / Diffuse / Duck**. The aim is the smeared, reverb-leaning dub end of the delay spectrum rather than the warble-and-shimmer end.",
+      "source": "`ENGINE=qdelay` \u00b7 `src/engine/qdelay/qdelay_engine.{h,cpp}` \u00b7 class `QdelayEngine`",
+      "doc": "docs/engines/qdelay.md",
+      "page": "engines/qdelay.html",
+      "released": true,
+      "bank": null
+    },
+    {
+      "name": "radio",
+      "title": "radio",
+      "summary": "",
+      "body": "A **dual virtual [RadioMusic](https://github.com/TomWhitwell/RadioMusic)**. Each deck (A/B) is an **independent virtual radio** browsing one shared SD library of banks; the two radios are blended by the platform crossfader and placed by the routing switch, so it plays like a pair of radios you tune and mix.",
+      "source": "`ENGINE=radio` \u00b7 `src/engine/radio/radio_engine.{h,cpp}` \u00b7 class `RadioEngine`",
+      "doc": "docs/engines/radio.md",
+      "page": "engines/radio.html",
+      "released": true,
+      "bank": "radio"
+    },
+    {
+      "name": "reso",
+      "title": "reso",
+      "summary": "",
+      "body": "A dual resonator / pluck voice (engine #1 in `docs/engine-ideas.md`, \"Resonator / Pluck\"), built on the Mutable Instruments **Rings** DSP (`src/engine/reso/thirdparty/rings`) rather than a hand-rolled Karplus-Strong loop. Each deck wraps one `rings::Part` (mono, polyphony 1): modal bodies, sympathetic strings, plucked strings, and an FM voice.",
+      "source": "",
+      "doc": "docs/engines/reso.md",
+      "page": "engines/reso.html",
+      "released": true,
+      "bank": null
+    },
+    {
+      "name": "reverb",
+      "title": "reverb",
+      "summary": "",
+      "body": "A **route-aware** stereo reverb with **three all-Faust algorithms** - a **Dattorro plate**, a **Zita-rev1 hall**, and a **Greyhole** (a modulated, evolving/ambient reverb) - the physical **Reel/Slice/Drift mode switch selecting between them** live, per deck. Built with the [Faust / cyfaust method](../engine-types/faust.md); that page covers the pipeline (codegen, namespacing, the arch shim, arena placement-new, the generic `CaptureUI` binding). This page is the reverb specifics.",
+      "source": "`ENGINE=reverb` \u00b7 `src/engine/reverb/reverb_engine.{h,cpp}` \u00b7 class `ReverbEngine`",
+      "doc": "docs/engines/reverb.md",
+      "page": "engines/reverb.html",
+      "released": true,
+      "bank": null
+    },
+    {
+      "name": "shuttle",
+      "title": "shuttle",
+      "summary": "",
+      "body": "A **buffer-based bipolar/reverse varispeed tape** - the random-access counterpart to the SD-streaming [`tape`](tape.md) engine. Where `tape` streams forward-only from the card, `shuttle` holds audio in SDRAM, so the read pointer is random-access and **reverse**, **freeze**, and **loop windowing** are trivial. The trade is a finite, RAM-capped tape length (currently 30 s per track).",
+      "source": "`ENGINE=shuttle` \u00b7 `src/engine/shuttle/shuttle_engine.{h,cpp}` \u00b7 class `ShuttleEngine`",
+      "doc": "docs/engines/shuttle.md",
+      "page": "engines/shuttle.html",
+      "released": true,
+      "bank": "shuttle"
+    },
+    {
+      "name": "softcut",
+      "title": "softcut",
+      "summary": "",
+      "body": "A dual-deck crossfaded **overdub looper** built on monome's [softcut-lib](https://github.com/monome/softcut-lib). Each deck holds two softcut voices (a Rev-swapped pair), so there are four voices in all. Unlike the buffer-tape `shuttle`/`tape` engines, softcut's read/write head plays and records the same loop at once, with subsample-accurate click-free loop crossfades and **interpolated overdub** - layering live input onto a running loop with a feedback control. That sound-on-sound overdub is the reason to reach for softcut over the existing tape engines.",
+      "source": "",
+      "doc": "docs/engines/softcut.md",
+      "page": "engines/softcut.html",
+      "released": true,
+      "bank": "softcut"
+    },
+    {
+      "name": "tape",
+      "title": "tape",
+      "summary": "",
+      "body": "A **dual streaming tape deck**: two independent **mono** decks (A/B), each playing or recording its own arbitrarily long file on the SD card, removing the in-SDRAM loop-length cap that bounds the other engines (~42 s float / ~84 s int16, `kSourceMaxSeconds` in `src/config.h`). A deck is **play-XOR-record** (no overdub), so the two run like a pair of record decks - play deck A while recording deck B, then play both together and beat-match by ear with each deck's PITCH. It is a **linear** player/recorder, not a granular scrubber - random SD seek cannot meet the 2 ms audio deadline, so each tape only ever streams forward.",
+      "source": "`ENGINE=tape` \u00b7 `src/engine/tape/tape_engine.{h,cpp}` \u00b7 class `TapeEngine`",
+      "doc": "docs/engines/tape.md",
+      "page": "engines/tape.html",
+      "released": true,
+      "bank": "tape"
+    },
+    {
+      "name": "voice",
+      "title": "voice",
+      "summary": "",
+      "body": "A **drone voice** - and the worked example of the **series (chain) dual-deck** generated path: **two different** Faust kernels wired in sequence, with deck A driving the first stage and deck B the second. Here stage 1 is a **drone oscillator** (an instrument - it generates sound from its knobs with no audio input) and stage 2 is a **resonant filter**, so the signal flows **osc \u2192 filter \u2192 out**. Authored as two `.dsp` files plus a JSON manifest with **no hand-written C++** (the generator emits the wrapper on the shared `FaustChainEngine<Traits>` template). See [`docs/dev/engine-gen.md`](../dev/engine-gen.md) \u00a79 for the dual-deck design and [`docs/engine-types/faust.md`](../engine-types/faust.md) for the Faust path.",
+      "source": "`ENGINE=voice` \u00b7 `src/engine/voice/` \u00b7 generated from `osc.dsp` + `filter.dsp` + `voice.json`",
+      "doc": "docs/engines/voice.md",
+      "page": "engines/voice.html",
+      "released": true,
+      "bank": null
+    }
+  ]
+}

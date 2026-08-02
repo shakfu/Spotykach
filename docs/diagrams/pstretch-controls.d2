@@ -26,12 +26,14 @@ classes: {
 }
 
 panel: Front panel {
-  grid-columns: 3
+  grid-columns: 2
   grid-gap: 60
   style.stroke: "#cbd5e0"
 
   # ----------------------------------------------------------------- DECK A
-  deckA: Deck A {
+  deckA: Deck A and B (identical) {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsA: Knobs (7) {
@@ -59,7 +61,7 @@ panel: Front panel {
     ringA: "LED Ring A (32px)" {
       class: knob
       shape: circle
-      label: "Ring A\nstretch marker; live/capture/SD/freeze colour; clip dots (Alt, SD)"
+      label: "Ring A / B\nstretch marker; live/capture/SD/freeze colour; clip dots (Alt, SD)"
     }
   }
 
@@ -98,37 +100,6 @@ panel: Front panel {
   }
 
   # ----------------------------------------------------------------- DECK B
-  deckB: Deck B {
-    style.stroke: "#90cdf4"
-
-    knobsB: Knobs (7) {
-      class: knob
-      shape: sql_table
-      Pitch: "pitch shift +/- 1 octave; Alt = CLIP select (SD)"
-      Position: "diffusion / smear (clean .. full wash); Alt = SCRUB clip playhead (SD)"
-      Size: "STRETCH 1x .. 64x"
-      Envelope: "output tone (low-pass)"
-      "Mix (SOS)": "dry/wet"
-      Cycle: "MOD LFO rate; Alt = clock-sync"
-      Glow: "MOD depth (0 = off)"
-    }
-
-    padsB: Pads (5) {
-      class: pad
-      shape: sql_table
-      Play: "FREEZE the read head (drone)"
-      Reverse: "RE-GRAB the ring (Capture mode)"
-      Grit: "-"
-      Flux: "-"
-      Seq: "-"
-    }
-
-    ringB: "LED Ring B (32px)" {
-      class: knob
-      shape: circle
-      label: "Ring B\nstretch marker; live/capture/SD/freeze colour; clip dots (Alt, SD)"
-    }
-  }
 }
 
 # ---------------------------------------------------------------------- I/O

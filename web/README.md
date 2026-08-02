@@ -2,8 +2,26 @@
 
 A static page that builds, fills and checks an SD card for the spotykach engines, plus a WebSerial
 terminal for `TERMINAL=1` builds. TypeScript, bundled by [bun](https://bun.sh) into one committed file;
-no server, no runtime dependencies. Design rationale and the constraints that shaped it are in
+no server, no JavaScript dependencies. Design rationale and the constraints that shaped it are in
 [`../docs/dev/web-frontend.md`](../docs/dev/web-frontend.md).
+
+It ships **two themes**, switched from the View menu and remembered in `localStorage`:
+**System 6** (the default, via [system.css](https://github.com/sakofchit/system.css)) and **Plain**
+(via [water.css](https://watercss.kognise.dev/), light and dark, ordinary system type - the one for
+reading the engine manuals). Both are MIT and vendored in `vendor/`.
+
+A theme is two files: the vendored framework and a skin in `themes/`. Everything structural lives in
+`app.css` and is written against tokens, so a theme is a palette plus the places a framework's
+defaults have to be overridden - not a second copy of the app. The choice is applied by five inline
+lines in the `<head>`, because it has to be settled before the first paint or every load flashes the
+wrong theme; a test asserts that copy agrees with `src/ui/theme.ts`.
+
+The System 6 theme is the reason severity is not carried by colour. That is a deliberate choice of character for a hobbyist tool, and it costs one
+thing worth knowing about: system.css is genuinely 1-bit, so there is no dark mode and **severity is
+not carried by colour**. Every finding states its level as a word (ERROR / WARNING / OK) in the markup,
+errors invert to white-on-black, and the rule down the side varies in weight. That is more robust than
+the red/amber/green it replaced, which said nothing to a colour-blind reader that the group heading
+had not already said.
 
 The tabs run **Build, Convert, Verify** — the order a person needs them, not the order of their value.
 Verify is the most valuable screen and the wrong first one: the entry state for someone who just bought
@@ -58,8 +76,13 @@ from `scripts/`; `make test-web` fails if this side disagrees with the Python.
 ## Layout
 
 ```
-index.html  app.css  sw.js         the page, its styles, and offline caching
+index.html  app.css  sw.js         the page, its shared styles, and offline caching
+themes/system6.css  plain.css      one skin per theme: palette, chrome, severity reinforcement
+vendor/system.css/                 VENDORED - system.css + the fonts and button frames it references
 card_layout.json  patches.json     GENERATED - do not edit, run `make web-data`
+engines.json                       GENERATED from docs/engines/*.md - the Engines menu + Reference
+engines/<name>.html                GENERATED - each engine's manual, rendered from its markdown
+engines/media/                     GENERATED - copies of the control diagrams those manuals show
 dist/app.js                        GENERATED - do not edit, run `make web-build`
 src/
   core/       the rules, and nothing else. No DOM, no browser API, no state.

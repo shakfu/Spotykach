@@ -1,0 +1,190 @@
+/* themes/system6.css - the Mac System 6 look.
+ *
+ * Loaded on top of vendor/system.css and app.css. What lives here is everything that is TRUE OF THIS
+ * THEME AND NOT OF THE APP: the palette, the fonts, the window chrome, the button frames, and the way
+ * severity is reinforced when there is no colour to reinforce it with.
+ *
+ * app.css owns the structure and reads it all through tokens, so a theme is a set of variables plus
+ * the handful of places a framework's defaults have to be overridden. That split is what stops two
+ * themes from becoming two copies of the app.
+ *
+ * SEVERITY WITHOUT COLOUR. system.css is genuinely 1-bit - black, white and two greys - so the red /
+ * amber / green that used to carry "this will not work" does not exist. The word (ERROR / WARNING /
+ * OK) is in the markup and works in every theme; what this file adds is the reinforcement: inversion
+ * for errors, which is System 6's own idiom for alarm, and rule weight - solid, dotted, hairline.
+ */
+
+/* --- overrides: system.css assumes a document with a form in it, not a dense tool --------------- */
+
+:root {
+  --fg: #000;
+  --bg: #fff;
+  --muted: #555;
+  --line: #000;
+  --ui: Chicago_12, Chicago, system-ui, sans-serif;
+  /*
+   * NOT the vendored bitmap Monaco.
+   *
+   * system.css ships a Monaco face drawn for 9-12px. Anywhere this app uses monospace it is for
+   * something that must be read exactly - a filename, a path, `make ENGINE=<engine> TERMINAL=1` - and
+   * at the sizes those appear the bitmap face renders thin and genuinely unreadable. Chicago is the
+   * part of the look worth having; Monaco is the part worth giving up.
+   */
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --measure: 66ch;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 0 2rem;
+  font-family: var(--ui);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--fg);
+}
+
+/* One window, centred, sized like a document rather than pinned to the viewport.
+ *
+ * The font-family is restated here on purpose: system.css sets `.window { font-family: Inconsolata,
+ * Menlo, Chicago, Geneva }`, which beats any rule on `body` for everything inside the window - so the
+ * whole app was rendering in a monospace fallback, and Chicago only appeared where it happened to be
+ * named explicitly. The cascade should be deliberate, not inherited by accident. */
+.window {
+  max-width: 60rem;
+  margin: .75rem auto 2rem;
+  font-family: var(--ui);
+}
+
+/* system.css: `font-size: 18px; overflow-y: scroll; padding: 1rem 2rem`. The forced inner scrollbar
+   means a second scrollbar inside the page's own, and 18px Chicago across ten engines of spec tables
+   is a very tall Reference tab. */
+.window-pane {
+  font-size: 15px;
+  height: auto;
+  overflow-y: visible;
+  padding: 1rem 1.25rem 1.5rem;
+  letter-spacing: 0;
+}
+
+/* system.css: `select { width: 10rem; font-size: 18px }`. Convert puts six of these in a row. */
+select,
+input[type=text],
+input[type=number] {
+  width: auto;
+  font-size: inherit;
+  font-family: var(--ui);
+}
+
+select { padding: 0 20px 0 6px; }
+
+/* The menu bar is real, so it keeps system.css's hover/focus inversion rather than having it
+   suppressed. It opens on focus - that is system.css, in CSS, with no script involved. */
+#menubar { user-select: none; }
+#menubar [role=menu] { min-width: 12rem; }
+
+/* Twenty-two engines is taller than a laptop screen, so the menu scrolls instead of running off it. */
+#engines-menu [role=menu] { max-height: 70vh; overflow-y: auto; }
+#engines-menu [role=menu] button { font-family: var(--mono); }
+
+/* The em-dash tail of a doc heading, where there is one. */
+.ref-bank p.summary { font-weight: 700; margin-top: 0; }
+
+/*
+ * Buttons. system.css styles `.btn`, not bare `<button>`, so the views' plain buttons would otherwise
+ * be unstyled. Rather than sprinkle `.btn` through every view, the same border-image is applied here -
+ * the markup stays semantic and the look is system.css's own.
+ */
+button {
+  font-family: var(--ui);
+  font-size: inherit;
+  background: var(--bg);
+  color: var(--fg);
+  border-style: solid;
+  border-width: 5.5px;
+  border-image: url(vendor/system.css/button.svg) 30 stretch;
+  padding: 0 14px;
+  min-height: 22px;
+  cursor: pointer;
+}
+
+button:active:not(:disabled) { background: #000; color: #fff; border-radius: 6px; }
+button:disabled { color: #b6b7b8; cursor: not-allowed; }
+
+/* The default button in a System 6 dialog wears a heavy double frame. Exactly the right idiom for
+   "this is the one action worth taking". */
+button.primary {
+  border-image: url(vendor/system.css/button-default.svg) 60 stretch;
+  border-width: .5em;
+}
+
+button.primary:active:not(:disabled) { border-radius: 12px; }
+
+/* Borderless, for chips and inline verbs. Underlined so it still reads as actionable in one bit. */
+button.link {
+  border: 0;
+  border-image: none;
+  background: none;
+  padding: 0 .25rem;
+  min-height: 0;
+  text-decoration: underline;
+}
+
+button.link:active:not(:disabled) { background: #000; color: #fff; border-radius: 0; }
+button.danger { border-image: url(vendor/system.css/button-default.svg) 60 stretch; border-width: .4em; }
+
+/* Focus, stated. system.css turns the outline off on inputs and inverts them instead; that is fine
+   for a field and invisible on a button, so everything focusable gets a real ring. */
+:where(a, button, select, summary, input, [tabindex]):focus-visible {
+  outline: 2px solid #000;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+/* System 6 had no tabs. These are drawn as a row of buttons sitting on a rule, which is the closest
+   period-honest idiom, with the selected one inverted rather than tinted. */
+#tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem;
+  margin: 1rem 0 1.25rem;
+  padding-bottom: .4rem;
+  border-bottom: 2px solid #000;
+}
+
+#tabs button {
+  border: 1.5px solid #000;
+  border-image: none;
+  border-radius: 0;
+  background: var(--bg);
+  padding: .15rem .7rem;
+  min-height: 0;
+}
+
+#tabs button.active { background: #000; color: #fff; font-weight: 700; }
+#tabs button:focus-visible { outline-offset: -4px; outline-color: #fff; }
+#tabs button.active:focus-visible { outline-color: #fff; }
+#tabs button:not(.active):focus-visible { outline-color: #000; }
+#tabs button.secondary { font-size: .92rem; }
+
+/* --- 1-bit reinforcement -------------------------------------------------------------------- */
+/*
+ * Inversion, moved here out of the shared layer.
+ *
+ * These are the places System 6 says something with black-and-white because it has nothing else
+ * to say it with. Left in app.css they were a trap: the Plain theme had to remember to override
+ * each one, and it had already missed `.verdict.bad strong` - a failing verdict rendered inverted
+ * in a theme with a full palette. A literal colour in the shared layer is a theme bug waiting.
+ */
+.dropzone.dragging { background: #000; color: #fff; }
+.verdict.bad strong { background: #000; color: #fff; padding: 0 .4em; }
+.verdict.mixed strong { border-bottom: 3px double var(--line); }
+.verdict.good strong { border-bottom: 1px solid var(--line); }
+.finding.error { border-left-style: solid; background: #f2f2f2; }
+.finding.error .badge { background: #000; color: #fff; }
+.chips button.on { background: #000; color: #fff; text-decoration: none; }
+.console .err { background: #000; color: #fff; }

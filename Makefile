@@ -768,9 +768,13 @@ CONTROL_D2    := $(patsubst docs/diagrams/controls/%.json,docs/diagrams/%-contro
 # hand-written d2 sources, excluding the generated *-controls.d2 so each SVG is listed once
 STATIC_D2     := $(filter-out docs/diagrams/%-controls.d2,$(wildcard docs/diagrams/*.d2))
 DIAGRAM_SVG   := $(sort $(patsubst docs/diagrams/%.d2,docs/media/%.svg,$(STATIC_D2) $(CONTROL_D2)))
+# PDFs for the CONTROL diagrams only. They are the ones the web front-end shows and the ones worth
+# printing and pinning next to the hardware; the architecture diagrams are read on screen. d2 renders
+# PDF natively, so this is the same source and the same tool, not a second pipeline.
+CONTROL_PDF   := $(patsubst docs/diagrams/%.d2,docs/media/%.pdf,$(CONTROL_D2))
 
 .PHONY: diagrams controls-diagrams
-diagrams: $(DIAGRAM_SVG)
+diagrams: $(DIAGRAM_SVG) $(CONTROL_PDF)
 	@echo "diagrams up to date in docs/media/"
 
 controls-diagrams: $(CONTROL_D2)
@@ -778,6 +782,19 @@ controls-diagrams: $(CONTROL_D2)
 # JSON control-spec + template -> generated <engine>-controls.d2
 docs/diagrams/%-controls.d2: docs/diagrams/controls/%.json docs/diagrams/controls-template.d2 scripts/gen_controls_diagram.py
 	$(DIAGRAM_PY) scripts/gen_controls_diagram.py $< -o $@
+
+# SVG -> PDF, via librsvg rather than d2.
+#
+# d2 CAN emit PDF, but only by driving a headless Chromium through Playwright, which it downloads on
+# first use - and that download is currently 404ing from its CDN. rsvg-convert renders the SVG d2
+# already produced, needs no browser, and keeps the text as text: the output carries the embedded
+# fonts rather than rasterising the labels, which is the whole point of shipping a PDF of a diagram
+# somebody intends to print.
+RSVG ?= rsvg-convert
+docs/media/%.pdf: docs/media/%.svg
+	@command -v $(RSVG) >/dev/null 2>&1 || { echo "$(RSVG) not found - install librsvg (brew install librsvg)"; exit 1; }
+	@mkdir -p $(@D)
+	$(RSVG) -f pdf -o $@ $<
 
 # any d2 source -> SVG
 docs/media/%.svg: docs/diagrams/%.d2

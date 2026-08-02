@@ -5,55 +5,130 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>sk-card - SD card tools for sk-engines</title>
 <meta name="description" content="Check, build and fill an SD card for the spotykach engines, in the browser. Nothing is uploaded.">
+<!-- Three layers, and the order is load-bearing:
+       1. the FRAMEWORK - vendored, classless-ish, swapped when the theme changes;
+       2. app.css - the app's own components, written against tokens so it survives either framework;
+       3. the THEME - the palette, the chrome and the way severity is reinforced.
+     `themes/plain.css` is water.css's layer; `themes/system6.css` is system.css's. -->
+<link rel="stylesheet" id="theme-framework" href="./vendor/system.css/system.css">
 <link rel="stylesheet" href="./app.css">
+<link rel="stylesheet" id="theme-skin" href="./themes/system6.css">
+<script>
+  // Inline, in the head, and deliberately: the theme has to be settled BEFORE the first paint, or a
+  // reader who chose the plain theme gets a flash of Chicago on every page load. Five lines here beats
+  // that. The list is duplicated in src/ui/theme.ts and a test asserts the two agree.
+  try {
+    var t = localStorage.getItem('sk-card-theme');
+    if (t === 'plain') {
+      document.getElementById('theme-framework').href = './vendor/water.css/water.css';
+      document.getElementById('theme-skin').href = './themes/plain.css';
+    }
+  } catch (e) { /* private mode: the default theme is a fine answer */ }
+</script>
 </head>
 <body>
 
-<header>
-  <h1>sk-card</h1>
-  <p id="banner">
-    SD card tools for the spotykach engines. Nothing is uploaded &mdash; it all runs in this tab.
-  </p>
-</header>
+<!-- One window on a desktop, which is the whole conceit.
+     The Apple menu is REAL - it opens on focus (system.css does that in CSS) and its one item does
+     something. File/Edit/Card were here and are gone: they were dead affordances, which is the exact
+     thing the close and resize widgets were dropped for. One working menu beats four painted ones. -->
+<ul role="menu-bar" id="menubar">
+  <li role="menu-item" tabindex="0" aria-haspopup="true" aria-label="Apple menu">
+    <span class="apple" aria-hidden="true"></span>
+    <ul role="menu">
+      <li role="menu-item"><button id="about-open" type="button">About sk-card...</button></li>
+    </ul>
+  </li>
+  <!-- Not a menu: a button that looks like one. Every other item here opens something, but "go back
+       to the start" has exactly one meaning, and a menu holding a single entry is a click of
+       ceremony for nothing. It matters most on an engine page, where no tab is selected and the way
+       back is otherwise a guess. -->
+  <li role="menu-item" id="home-item"><button id="home-link" type="button">Home</button></li>
+  <!-- Populated by main.ts from engines.json: an engine that gains a doc appears here on the next
+       `make web-data`, and one that loses its doc stops being a menu item that opens nothing. -->
+  <li role="menu-item" tabindex="0" aria-haspopup="true" id="engines-menu">Engines</li>
+  <!-- Populated by main.ts from the theme list, so the markup cannot fall out of step with it. -->
+  <li role="menu-item" tabindex="0" aria-haspopup="true" id="theme-menu">View</li>
+</ul>
 
-<!-- Tab order is the order a person actually needs them: get a working card, put your audio on it,
-     then diagnose. Verify is the most VALUABLE screen but it is the wrong FIRST one - pointed at a
-     blank card it can only say "this is not a card", which is not an answer anybody can act on.
-     Reference sits after the three task tabs because it is not a step in the job - it is the lookup
-     you consult while doing one of them - and Terminal stays last because it needs a firmware build
-     almost nobody has. -->
-<!-- The roving tabindex is part of the contract, not decoration: `role="tablist"` means the whole
-     group is ONE stop in the page's tab order and the arrow keys move within it. main.ts keeps
-     tabindex in step with aria-selected; these are the values for the tab that loads selected. -->
-<nav id="tabs" role="tablist" aria-label="Card tools">
-  <button id="tab-build" data-view="build" role="tab" aria-selected="true" aria-controls="panel-build" tabindex="0">Build</button>
-  <button id="tab-convert" data-view="convert" role="tab" aria-selected="false" aria-controls="panel-convert" tabindex="-1">Convert</button>
-  <button id="tab-verify" data-view="verify" role="tab" aria-selected="false" aria-controls="panel-verify" tabindex="-1">Verify</button>
-  <button id="tab-reference" data-view="reference" role="tab" aria-selected="false" aria-controls="panel-reference" tabindex="-1" class="secondary">Reference</button>
-  <button id="tab-terminal" data-view="terminal" role="tab" aria-selected="false" aria-controls="panel-terminal" tabindex="-1" class="secondary">Terminal</button>
-</nav>
+<dialog id="about" class="modal-dialog" aria-labelledby="about-title">
+  <div class="modal-contents">
+    <h2 id="about-title" class="title">sk-card</h2>
+    <p>SD card tools for the spotykach engines. Everything runs in this tab: nothing is uploaded,
+      and no account, install or server is involved.</p>
+    <p id="about-facts" class="mono"></p>
+    <p>The card rules are generated from <code>scripts/card_layout.py</code>, so this page and the
+      command-line tools cannot disagree about them.</p>
+    <div class="controls">
+      <button id="about-close" class="primary" type="button">OK</button>
+      <a href="https://github.com/shakfu/sk-engines" target="_blank" rel="noreferrer">Project page</a>
+    </div>
+  </div>
+</dialog>
 
-<main id="panels">
-  <section id="panel-build" role="tabpanel" aria-labelledby="tab-build"></section>
-  <section id="panel-convert" role="tabpanel" aria-labelledby="tab-convert" hidden></section>
-  <section id="panel-verify" role="tabpanel" aria-labelledby="tab-verify" hidden></section>
-  <section id="panel-reference" role="tabpanel" aria-labelledby="tab-reference" hidden></section>
-  <section id="panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden></section>
-</main>
+<div class="window" id="app">
+  <!-- No close or resize widgets: they would be the only controls on the page that do nothing, and a
+       dead affordance costs more than the period detail buys. -->
+  <div class="title-bar">
+    <h1 class="title">sk-card</h1>
+  </div>
 
-<footer>
-  <p>
-    Flashing firmware is not done here. Use the
-    <a href="https://electro-smith.github.io/Programmer/" target="_blank" rel="noreferrer">Daisy Web
-    Programmer</a>, which already flashes this hardware &mdash; a half-written image is the worst
-    failure in the system and is not worth a second implementation.
-  </p>
-  <p>
-    The rules on this page are generated from <code>scripts/card_layout.py</code>, so they match the
-    firmware rather than paraphrasing it. Same checks as
-    <code>python3 scripts/sk_card.py verify</code>.
-  </p>
-</footer>
+  <div class="separator"></div>
+
+  <div class="window-pane">
+
+    <header>
+      <p id="banner">
+        SD card tools for the spotykach engines. Nothing is uploaded &mdash; it all runs in this tab.
+      </p>
+    </header>
+
+    <!-- Tab order is the order a person actually needs them: get a working card, put your audio on it,
+         then diagnose. Verify is the most VALUABLE screen but it is the wrong FIRST one - pointed at a
+         blank card it can only say "this is not a card", which is not an answer anybody can act on.
+         Reference sits after the three task tabs because it is not a step in the job - it is the lookup
+         you consult while doing one of them - and Terminal stays last because it needs a firmware build
+         almost nobody has. -->
+    <!-- Kept as a tablist rather than restyled into a System 6 menu: System 6 had no tabs, but five
+         always-visible destinations are a tablist, and menus would hide them behind a click. The
+         roving tabindex is part of that contract - `role="tablist"` means the whole group is ONE stop
+         in the page's tab order and the arrow keys move within it. main.ts keeps tabindex in step with
+         aria-selected; these are the values for the tab that loads selected. -->
+    <nav id="tabs" role="tablist" aria-label="Card tools">
+      <button id="tab-build" data-view="build" role="tab" aria-selected="true" aria-controls="panel-build" tabindex="0">Build</button>
+      <button id="tab-convert" data-view="convert" role="tab" aria-selected="false" aria-controls="panel-convert" tabindex="-1">Convert</button>
+      <button id="tab-verify" data-view="verify" role="tab" aria-selected="false" aria-controls="panel-verify" tabindex="-1">Verify</button>
+      <button id="tab-reference" data-view="reference" role="tab" aria-selected="false" aria-controls="panel-reference" tabindex="-1" class="secondary">Reference</button>
+      <button id="tab-terminal" data-view="terminal" role="tab" aria-selected="false" aria-controls="panel-terminal" tabindex="-1" class="secondary">Terminal</button>
+    </nav>
+
+    <main id="panels">
+      <section id="panel-build" role="tabpanel" aria-labelledby="tab-build"></section>
+      <section id="panel-convert" role="tabpanel" aria-labelledby="tab-convert" hidden></section>
+      <section id="panel-verify" role="tabpanel" aria-labelledby="tab-verify" hidden></section>
+      <section id="panel-reference" role="tabpanel" aria-labelledby="tab-reference" hidden></section>
+      <section id="panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden></section>
+      <!-- Not a tab. One page per engine, reached from the Engines menu or an #engine/<name> link,
+           so the tab row keeps meaning "the five things this tool does". -->
+      <section id="panel-engine" aria-label="Engine documentation" hidden></section>
+    </main>
+
+    <footer>
+      <p>
+        Flashing firmware is not done here. Use the
+        <a href="https://electro-smith.github.io/Programmer/" target="_blank" rel="noreferrer">Daisy Web
+        Programmer</a>, which already flashes this hardware &mdash; a half-written image is the worst
+        failure in the system and is not worth a second implementation.
+      </p>
+      <p>
+        The rules on this page are generated from <code>scripts/card_layout.py</code>, so they match the
+        firmware rather than paraphrasing it. Same checks as
+        <code>python3 scripts/sk_card.py verify</code>.
+      </p>
+    </footer>
+
+  </div>
+</div>
 
 <!-- Built from src/ by `make web-build` (bun). dist/app.js is generated and committed, so GitHub Pages
      can serve web/ with no CI step; edit src/, never dist/. -->

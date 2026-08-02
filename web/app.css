@@ -1,192 +1,84 @@
-/* app.css - one stylesheet, no framework, dark and light.
-   The visual job here is modest: this is a diagnostic tool, so findings must be scannable and the
-   error/warning distinction unmissable. Everything else stays out of the way. */
-
-:root {
-  color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #1a1c1f;
-  --muted: #6b7280;
-  --line: #e3e6ea;
-  --grid: #e8ebef;
-  --panel: #f7f8fa;
-  --accent: #1668c1;
-  /* Text ON the accent, not beside it. A separate token because the answer differs per theme: white
-     reads at 5.6:1 over the light accent and 2.7:1 over the dark one, which is a plain WCAG failure on
-     the primary button - the biggest call to action on the landing tab. */
-  --accent-fg: #ffffff;
-  --danger: #c0392b;
-  /* Border and background only, never text: 4.44:1 on white is under the 4.5 text threshold and over
-     the 3:1 non-text one. If this ever becomes a text colour it needs darkening first. */
-  --warn: #a86a00;
-  --good: #1f7a3d;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-
-  /* The comfortable reading measure, in one place rather than five. */
-  --measure: 62ch;
-  --radius: 8px;
-  --radius-sm: 6px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14161a;
-    --fg: #e6e8eb;
-    --muted: #9aa3ad;
-    --line: #2a2f36;
-    --grid: #262b31;
-    --panel: #1b1e23;
-    --accent: #4ea1ff;
-    --accent-fg: #0d1117; /* 7.1:1 against the dark accent; white would be 2.7:1 */
-    --danger: #ef6b5e;
-    --warn: #e0a336;
-    --good: #4cc38a;
-  }
-}
-
-* { box-sizing: border-box; }
-
-/*
- * Focus, stated rather than inherited.
+/* app.css - everything system.css has no opinion about, plus the places its defaults fight a tool.
  *
- * There was none of this, which left the whole app on whatever ring the browser happened to draw over
- * a custom background - and this app is unusually keyboard-shaped: a filter box, a row of chips, five
- * tabs and a command line. `:focus-visible` rather than `:focus` so a mouse click on a button does not
- * leave a ring behind it. The accent clears 3:1 against every surface it can land on (5.2-6.8:1).
+ * system.css (MIT, vendored) draws the Mac System 6 chrome: the desktop pattern, the window, the title
+ * bar, the form controls. It is genuinely 1-bit - the whole palette is black, white and two greys for
+ * disabled text - which is the one thing that made this a redesign rather than a reskin.
+ *
+ * THE SEVERITY PROBLEM, and how it is solved here.
+ *
+ * The job of this page is that "this file will not work" is unmissable. That used to be carried by
+ * colour: a red, amber or green rule down the side of each finding. There is no red. So severity is
+ * now carried three ways at once, none of which is colour:
+ *
+ *   1. a WORD - every finding is labelled ERROR / WARNING / OK in the markup, not in CSS, so it is
+ *      selectable, translatable, and read aloud;
+ *   2. INVERSION - errors are white-on-black, which is System 6's own idiom for alarm and is the
+ *      loudest thing available in one bit;
+ *   3. WEIGHT - a heavy solid rule for errors, a dotted one for warnings, a hairline for ok.
+ *
+ * That is strictly more robust than the colour version, which conveyed nothing to a colour-blind
+ * reader that the group heading did not already say.
  */
-:where(a, button, select, summary, input, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
 
-/* Honour the system preference. Only the dropzone animates, but "only one" is how it starts. */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-}
+/* --- typography --------------------------------------------------------------------------------- */
 
-body {
-  margin: 0 auto;
-  padding: 1.5rem 1.25rem 4rem;
-  max-width: 62rem;
-  background: var(--bg);
-  color: var(--fg);
-  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
-}
-
-h1 { font-size: 1.5rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
-h3 { font-size: 1.05rem; margin: 2rem 0 .5rem; }
-h4 { font-size: .9rem; margin: 1.25rem 0 .4rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-a { color: var(--accent); }
-code, .mono { font-family: var(--mono); font-size: .9em; }
+h1.title { font-size: 1.1rem; }
+h3 { font-family: var(--ui); font-size: 1rem; margin: 1.75rem 0 .5rem; }
+h4 { font-size: .85rem; margin: 1.25rem 0 .4rem; text-transform: uppercase; letter-spacing: .04em; }
+/* No --accent in a 1-bit theme, so it falls back to the text colour. This was hardcoded
+   black, which loads after water.css and made every link in the Plain theme black. */
+a { color: var(--accent, currentColor); text-decoration: underline; }
+code, .mono { font-family: var(--mono); font-size: .92em; }
 .muted { color: var(--muted); }
-.note { font-size: .87rem; }
+.note { font-size: .9rem; }
 .hidden { display: none; }
-/* One line saying what the tab does. If it needs a second sentence it belongs in an .aside. */
-.lead { max-width: var(--measure); color: var(--muted); margin: 0 0 1rem; }
+.lead { max-width: var(--measure); margin: 0 0 1rem; }
 
-header p { margin: .25rem 0 0; color: var(--muted); max-width: var(--measure); }
-#banner span { display: block; margin-top: .35rem; font-family: var(--mono); font-size: .8rem; }
+header p { margin: 0 0 .25rem; max-width: var(--measure); }
+#banner span { display: block; margin-top: .35rem; font-family: var(--mono); font-size: .85rem; }
 
-/* --- tabs ------------------------------------------------------------------ */
+/* --- tabs --------------------------------------------------------------------------------------- */
 
-#tabs {
-  display: flex;
-  gap: .25rem;
-  margin: 1.5rem 0 1.75rem;
-  border-bottom: 1px solid var(--line);
-}
 
-#tabs button {
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: none;
-  color: var(--muted);
-  padding: .5rem .9rem;
-  font: inherit;
-  cursor: pointer;
-}
-
-#tabs button:hover { color: var(--fg); }
-#tabs button.active { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
-
-/* Inset, because a tab sits directly on the bar's bottom rule: an outline offset OUTWARD puts its
-   bottom edge below that rule, which reads as a stray detached underline rather than as focus. */
-#tabs button:focus-visible { outline-offset: -3px; }
-
-/* Three task tabs are the app; Reference is a lookup and Terminal needs a firmware build almost
-   nobody has. They are set apart so five tabs do not read as five decisions to make before starting.
-   A GAP AND A RULE, not `margin-left: auto` - flushing them to the far edge of a 62rem container left
-   a hand's width of nothing in the middle, which reads as a layout bug rather than as grouping. */
-#tabs button.secondary { font-size: .92rem; }
-
-/* The first secondary tab is the one that follows a primary; :first-of-type would match Build. */
+/* Reference and Terminal are not steps in the job. A gap and a rule, not a shove to the far edge. */
 #tabs button:not(.secondary) + button.secondary {
   margin-left: 1.25rem;
-  padding-left: 1.5rem;
-  border-left: 1px solid var(--line);
+  padding-left: 1.1rem;
+  border-left: 1.5px solid var(--line);
 }
 
-/* --- controls --------------------------------------------------------------- */
+/* --- controls ----------------------------------------------------------------------------------- */
 
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .5rem;
-  align-items: center;
-  margin: 1rem 0;
-}
-
-button {
-  font: inherit;
-  padding: .4rem .85rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  color: var(--fg);
-  cursor: pointer;
-}
-
-button:hover:not(:disabled) { border-color: var(--accent); }
-button:disabled { opacity: .45; cursor: not-allowed; }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
-button.danger { border-color: var(--danger); color: var(--danger); }
-button.link { border: 0; background: none; color: var(--accent); padding: .2rem .4rem; }
-
-select, input, textarea { accent-color: var(--accent); }
-
-select, input[type=text], input[type=number] {
-  font: inherit;
-  padding: .35rem .5rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--fg);
-}
-
-.fields { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0 .5rem; }
-.field { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; color: var(--muted); }
+.controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: 1rem 0; }
+.fields { display: flex; flex-wrap: wrap; gap: .9rem; margin: 1rem 0 .5rem; }
+.field { display: flex; flex-direction: column; gap: .15rem; font-size: .85rem; }
 .field[hidden] { display: none; }
-input.slot { width: 7rem; }
+.field.inline { flex-direction: row; align-items: center; gap: .4rem; }
+/*
+ * Scoped by #panels, and that is not decoration.
+ *
+ * Both themes reset `input[type=text] { width: auto }` to undo system.css forcing every input to
+ * 100%. That reset has specificity (0,1,1) - exactly the same as `input.cmdline` - and a theme loads
+ * after app.css, so it won on order and every sized field in the app collapsed to its default width.
+ * The command line was the visible one; the reference filter and the slot box were wrong too.
+ *
+ * An id puts these out of reach of any element-level rule a theme writes. Every one of these fields
+ * lives inside #panels, so the selector is honest rather than a specificity trick.
+ */
+#panels input.slot { width: 6rem; }
+#panels input.filter { width: 100%; max-width: 22rem; }
+.status { font-family: var(--mono); font-size: .88rem; margin: .5rem 0; }
 
-.status { font-family: var(--mono); font-size: .85rem; color: var(--muted); margin: .5rem 0; }
-
-/* --- dropzone --------------------------------------------------------------- */
+/* --- dropzone ----------------------------------------------------------------------------------- */
 
 .dropzone {
   border: 2px dashed var(--line);
-  border-radius: 10px;
-  padding: 1.75rem 1rem;
+  padding: 1.25rem 1rem;
   text-align: center;
-  color: var(--muted);
-  transition: border-color .12s, background .12s;
+  transition: background .12s;
 }
 
 .dropzone p { margin: .2rem 0; }
-.dropzone.dragging { border-color: var(--accent); background: var(--panel); }
 
 .filelist { list-style: none; padding: 0; margin: .75rem 0; }
 
@@ -194,81 +86,66 @@ input.slot { width: 7rem; }
   display: flex;
   gap: .75rem;
   align-items: center;
-  padding: .3rem .5rem;
-  border-bottom: 1px solid var(--line);
+  padding: .25rem .4rem;
+  border-bottom: 1px dotted var(--line);
   font-size: .9rem;
 }
 
 .filelist .name { flex: 1; font-family: var(--mono); }
 
-/* --- findings --------------------------------------------------------------- */
+/* --- findings: severity without colour ----------------------------------------------------------- */
 
-.verdict { padding: .75rem 1rem; border-radius: var(--radius); margin: 1rem 0; border-left: 4px solid var(--muted); }
-.verdict p { margin: .25rem 0 0; color: var(--muted); }
-.verdict.good { border-left-color: var(--good); background: color-mix(in srgb, var(--good) 8%, transparent); }
-.verdict.bad { border-left-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
-.verdict.mixed { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.verdict { border: 2px solid var(--line); box-shadow: 3px 3px 0 var(--line); padding: .6rem .8rem; margin: 1rem 0; }
+.verdict strong { display: inline-block; }
+.verdict p { margin: .3rem 0 0; }
 
-.finding {
-  border-left: 3px solid var(--line);
-  padding: .5rem .75rem;
-  margin: .5rem 0;
-  background: var(--panel);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+/* Inversion is the alarm. It is the loudest signal one bit affords, and it is System 6's own. */
+
+.finding { padding: .4rem .7rem; margin: .5rem 0; border-left: 6px solid var(--line); }
+.finding.warn { border-left-style: dotted; }
+.finding.ok { border-left-width: 2px; }
+
+/* The word, carried in the markup rather than in `content`, so it is selectable and spoken. */
+.finding .badge {
+  font-family: var(--ui);
+  font-size: .72rem;
+  letter-spacing: .06em;
+  padding: 0 .35em;
+  margin-right: .4em;
+  border: 1.5px solid var(--line);
 }
 
-.finding.error { border-left-color: var(--danger); }
-.finding.warn { border-left-color: var(--warn); }
-.finding.ok { border-left-color: var(--good); }
-.finding .path { font-family: var(--mono); font-size: .85rem; font-weight: 600; }
+.finding .path { font-family: var(--mono); font-size: .9rem; font-weight: 700; }
 .finding .problem { margin-top: .15rem; }
-.finding .fix { margin-top: .3rem; color: var(--muted); font-size: .9rem; white-space: pre-wrap; }
+.finding .fix { margin-top: .3rem; font-size: .9rem; white-space: pre-wrap; }
 .finding .fix::before { content: "-> "; }
 
-/* A standing fact about the tool, not a result. Deliberately quieter than .verdict and .finding, which
-   respond to something the user just did - three boxed styles competing at the same weight was most of
-   what made a tab hard to scan. */
-.callout {
-  padding: .6rem 0 .6rem .9rem;
-  margin: 1rem 0;
-  border-left: 3px solid var(--line);
-  font-size: .92rem;
-}
+/* A standing fact about the tool, not a result - so it stays quieter than a verdict or a finding. */
+.callout { padding: .5rem 0 .5rem .8rem; margin: 1rem 0; border-left: 2px solid var(--line); font-size: .92rem; }
+.callout.warn { border-left-style: double; border-left-width: 5px; }
 
-.callout.warn { border-left-color: var(--warn); }
+/* --- folded explanation --------------------------------------------------------------------------- */
 
-/* --- folded explanation ------------------------------------------------------- */
-
-/* Every rule here has a reason worth keeping, but printing all of them above the controls is what made
-   the landing tab ask for 121 words of reading before offering two buttons. */
-.aside { margin: 1.25rem 0; font-size: .92rem; }
-
-/* Two foldouts in a row are one list of foldouts, not two sections. */
+.aside { margin: 1.1rem 0; font-size: .92rem; }
 .aside + .aside { margin-top: .35rem; }
 
-/*
- * The marker is drawn rather than inherited.
- *
- * The default disclosure triangle is positioned OUTSIDE the summary's box, so it hangs into the page
- * padding and every foldout starts ten pixels left of every other line on the page - a ragged left
- * edge that reads as a mistake. Drawing it as a border triangle puts it exactly where we say, costs
- * no glyph, and rotates on open.
- */
 .aside > summary {
   cursor: pointer;
-  color: var(--muted);
-  padding: .25rem 0 .25rem 1.1rem;
+  padding: .2rem 0 .2rem 1.1rem;
   position: relative;
   list-style: none;
+  text-decoration: underline;
 }
 
 .aside > summary::-webkit-details-marker { display: none; }
 
+/* Drawn, not a glyph: the default marker sits outside the box and hangs into the page padding, which
+   left every foldout starting ten pixels left of every other line. */
 .aside > summary::before {
   content: "";
   position: absolute;
   left: .1rem;
-  top: .7em;
+  top: .65em;
   border: .3rem solid transparent;
   border-left-color: currentColor;
   transform-origin: .15rem .3rem;
@@ -276,76 +153,57 @@ input.slot { width: 7rem; }
 }
 
 .aside[open] > summary::before { transform: rotate(90deg); }
-.aside > summary:hover { color: var(--fg); }
 .aside > * { max-width: var(--measure); }
-.aside > p { margin: .5rem 0 .5rem 1.1rem; color: var(--muted); }
+.aside > p { margin: .5rem 0 .5rem 1.1rem; }
 .aside > table { margin-left: 1.1rem; width: calc(100% - 1.1rem); }
-.aside[open] > summary { color: var(--fg); margin-bottom: .25rem; }
 
-/* --- tables ----------------------------------------------------------------- */
+/* --- tables ------------------------------------------------------------------------------------- */
 
-table.layout { width: 100%; border-collapse: collapse; font-size: .88rem; margin: .5rem 0; }
-table.layout th { text-align: left; color: var(--muted); font-weight: 600; padding: .35rem .5rem; }
-table.layout td { padding: .35rem .5rem; border-top: 1px solid var(--line); }
+table.layout { width: 100%; border-collapse: collapse; font-size: .9rem; margin: .5rem 0; }
+table.layout th { text-align: left; font-weight: 700; padding: .3rem .45rem; }
+table.layout td { padding: .3rem .45rem; border-top: 1px solid var(--line); }
 
-/* --- reference ---------------------------------------------------------------- */
+/* --- reference ---------------------------------------------------------------------------------- */
 
-input.filter { width: 100%; max-width: 24rem; }
+.chips { display: flex; flex-wrap: wrap; gap: .2rem; margin: .25rem 0 .5rem; }
+.chips button { font-family: var(--mono); font-size: .85rem; }
 
-.chips { display: flex; flex-wrap: wrap; gap: .15rem; margin: .25rem 0 .5rem; }
-.chips button { font-family: var(--mono); font-size: .82rem; }
-.chips button.on { color: var(--fg); font-weight: 600; text-decoration: underline; }
-
-/* Firmware citations answer "prove it", which is not the question this screen is for. Present, and
-   one checkbox away, rather than a tenth of what everyone reads. */
 .ref-banks tr.src { display: none; }
 .ref-banks.show-src tr.src { display: table-row; }
 
-.field.inline { flex-direction: row; align-items: center; gap: .4rem; }
-
-.ref-bank { margin: 1.75rem 0; }
-.ref-bank h3 { margin-bottom: .2rem; text-transform: uppercase; letter-spacing: .02em; }
-.ref-bank h3 span { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: .85rem; }
+.ref-bank { margin: 1.5rem 0; }
+.ref-bank h3 { margin-bottom: .2rem; text-transform: uppercase; }
+.ref-bank h3 span { text-transform: none; font-weight: 400; font-size: .82rem; }
 .ref-bank p { max-width: var(--measure); margin: .2rem 0 .5rem; }
 
-/* The label column is a th inside tbody, so it needs its own width and its own top border - the
-   base .layout rule only borders td, which on a two-column spec row draws half a line. */
 table.spec th {
   width: 9rem;
   vertical-align: top;
   font-weight: 400;
-  padding: .35rem .5rem;
+  padding: .3rem .45rem;
   border-top: 1px solid var(--line);
 }
 
 table.spec td { vertical-align: top; word-break: break-word; }
 
-/* --- terminal --------------------------------------------------------------- */
+/* --- terminal ----------------------------------------------------------------------------------- */
 
 .console {
-  height: 18rem;
+  height: 17rem;
   overflow-y: auto;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius) var(--radius) 0 0;
-  padding: .5rem .75rem;
+  border: 1.5px solid var(--line);
+  padding: .4rem .6rem;
   font-family: var(--mono);
-  font-size: .82rem;
+  font-size: .88rem;
 }
 
+/* One bit again: the console distinguishes its line kinds by weight and case, not by hue. */
 .console .line { white-space: pre-wrap; word-break: break-word; }
-.console .sent { color: var(--accent); }
-.console .ok { color: var(--good); }
-.console .err { color: var(--danger); }
+.console .sent { font-weight: 700; }
+.console .ok { font-weight: 700; }
 .console .log, .console .meta { color: var(--muted); }
 
-input.cmdline {
-  width: 100%;
-  border-radius: 0 0 var(--radius) var(--radius);
-  border-top: 0;
-  font-family: var(--mono);
-  font-size: .85rem;
-}
+#panels input.cmdline { width: 100%; font-family: var(--mono); font-size: .9rem; }
 
 .grid { display: grid; gap: .3rem; }
 
@@ -354,41 +212,212 @@ input.cmdline {
   grid-template-columns: 11rem 1fr auto auto;
   gap: .6rem;
   align-items: center;
-  font-size: .88rem;
+  font-size: .9rem;
 }
 
-.row label { font-family: var(--mono); color: var(--muted); }
-.row .value { min-width: 5rem; text-align: right; }
+.row label { font-family: var(--mono); }
+.row .value { min-width: 5rem; text-align: right; font-family: var(--mono); }
 .row input[type=range] { width: 100%; }
 
 .actions { display: flex; flex-wrap: wrap; gap: .35rem; }
-.actions button { font-family: var(--mono); font-size: .82rem; }
+.actions button { font-family: var(--mono); font-size: .85rem; }
 
-canvas.plot { width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); margin: .5rem 0; }
+canvas.plot { width: 100%; height: auto; border: 1.5px solid var(--line); margin: .5rem 0; }
 
-footer {
-  margin-top: 2rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--line);
-  color: var(--muted);
-  font-size: .87rem;
-}
-
+footer { margin-top: 2rem; padding-top: .75rem; border-top: 2px solid var(--line); font-size: .9rem; }
 footer p { max-width: var(--measure); }
 
+/* --- narrow screens ------------------------------------------------------------------------------ */
+
 @media (max-width: 640px) {
+  .window { margin: .25rem; }
+  .window-pane { padding: .75rem; }
   .row { grid-template-columns: 1fr; }
   .row .value { text-align: left; }
-
-  /* Tables are the one thing here that cannot reflow. The format column carries strings like "WAV,
-     32-bit IEEE float (WAV AudioFormat 3) ..." and the firmware column carries unbroken paths, either
-     of which can push the whole page sideways - and a body that scrolls horizontally is the classic
-     way a page reads as broken on a phone. Wrap hard rather than overflow. */
-  table.layout { font-size: .82rem; }
-  table.layout th, table.layout td { padding: .3rem .35rem; overflow-wrap: anywhere; }
+  table.layout { font-size: .8rem; }
+  table.layout th, table.layout td { padding: .25rem .3rem; overflow-wrap: anywhere; }
   table.spec th { width: 6.5rem; }
-
-  /* The spec label column plus a nine-rem value does not fit; let the pair stack instead. */
-  .fields { gap: .6rem; }
-  .console { height: 14rem; }
+  .console { height: 13rem; }
 }
+
+/* --- about box ---------------------------------------------------------------------------------- */
+
+/* The Apple menu's one destination. system.css draws `.modal-dialog`; a native <dialog> supplies the
+   backdrop, Escape and the focus trap, so none of that is reimplemented here. */
+dialog#about {
+  max-width: 34rem;
+  border: 2px solid var(--line);
+  box-shadow: 4px 4px 0 var(--line);
+  padding: 0;
+  font-family: var(--ui);
+  font-size: 15px;
+  color: var(--fg);
+}
+
+dialog#about::backdrop { background: rgb(0 0 0 / .35); }
+dialog#about h2.title { font-size: 1.15rem; margin: 0 0 .5rem; }
+dialog#about p { max-width: none; margin: .5rem 0; }
+dialog#about .controls { margin-bottom: 0; }
+
+/* Menu items are held open by focus, so they need a real hit area rather than an inline run. */
+#menubar [role=menu] button { border: 0; border-image: none; background: none; width: 100%; text-align: left; }
+
+/* --- engine page ---------------------------------------------------------------------------------- */
+
+/* Rendered documentation, not app chrome: this is the one place on the page showing prose written for
+   reading rather than labels written for scanning, so it gets a measure and looser rhythm. */
+.engine-title { font-size: 1.3rem; margin: .25rem 0 .1rem; text-transform: uppercase; }
+.engine-meta { margin: 0 0 .75rem; font-family: var(--mono); }
+.engine-format { margin-bottom: 1rem; }
+
+/*
+ * Wider than the reading measure, and it has to be: these are reference manuals full of control
+ * tables and parameter maps, not essays. 66ch was leaving half the window empty next to a table that
+ * had to scroll inside its own box to fit.
+ */
+/*
+ * The MEASURE belongs to the prose, not to the column.
+ *
+ * Capping `.engine-doc` capped the diagrams and the wide control tables with it, which is the wrong
+ * trade: a paragraph wants 88 characters, a 4000-unit-wide diagram wants every pixel available. The
+ * text elements carry the measure; figures and tables get the whole pane.
+ */
+.engine-doc { max-width: none; }
+.engine-doc > p,
+.engine-doc > ul,
+.engine-doc > ol,
+.engine-doc > blockquote,
+.engine-doc > h2,
+.engine-doc > h3,
+.engine-doc > h4 { max-width: 88ch; }
+
+/*
+ * Nothing inside may exceed the window.
+ *
+ * system.css sets `.window { overflow: hidden }`, so anything wider is CLIPPED - no wrap, no
+ * scrollbar, just gone. A long path or an unbroken identifier in a paragraph is enough to do it, and
+ * the failure is silent: the text is simply not there. Tables and code get their own scroll boxes
+ * below; everything else has to break.
+ */
+.engine-doc { overflow-wrap: anywhere; }
+.engine-doc p, .engine-doc li, .engine-doc td, .engine-doc th { overflow-wrap: anywhere; }
+.engine-doc h2 { font-size: 1.15rem; margin: 1.75rem 0 .4rem; }
+.engine-doc h3 { font-size: 1rem; margin: 1.4rem 0 .35rem; }
+.engine-doc h4, .engine-doc h5, .engine-doc h6 { font-size: .92rem; margin: 1.1rem 0 .3rem; text-transform: none; letter-spacing: 0; }
+.engine-doc p, .engine-doc li { line-height: 1.5; }
+.engine-doc ul, .engine-doc ol { padding-left: 1.4rem; }
+.engine-doc li { margin: .2rem 0; }
+.engine-doc hr { border: 0; border-top: 1px solid var(--line); margin: 1.5rem 0; }
+.engine-doc blockquote { margin: 1rem 0; padding-left: .9rem; border-left: 3px double var(--line); }
+.engine-doc a { word-break: break-word; }
+
+.engine-doc pre {
+  overflow-x: auto;
+  border: 1.5px solid var(--line);
+  padding: .5rem .7rem;
+  font-size: .85rem;
+  line-height: 1.4;
+}
+
+.engine-doc code { font-family: var(--mono); font-size: .9em; }
+.engine-doc pre code { font-size: 1em; }
+
+/* Tables in the docs are wide - control maps, parameter lists - and the widest of them cannot reflow,
+   so they scroll inside their own box rather than pushing the page sideways. */
+.engine-doc table { display: block; overflow-x: auto; max-width: 100%; border-collapse: collapse; font-size: .88rem; margin: .75rem 0; }
+.engine-doc th, .engine-doc td { border: 1px solid var(--line); padding: .3rem .45rem; text-align: left; vertical-align: top; }
+.engine-doc th { font-weight: 700; }
+
+/* The control diagrams are wide SVGs; let them use the full pane rather than the reading measure. */
+.engine-doc figure { margin: 1rem 0; max-width: none; }
+/* White backing on purpose, in both themes: the control diagrams are black line art on transparency,
+   so in dark mode they would otherwise be black on black. */
+.engine-doc img { max-width: 100%; height: auto; border: 1.5px solid var(--line); background: #fff; }
+
+/*
+ * The width is still set, but the reason has changed: the tags now carry the real dimensions from the
+ * SVG's viewBox (scripts/web_export.py reads it), so the image has an intrinsic size at last. This is
+ * now simply "fill the pane" rather than a workaround for having none.
+ */
+.engine-doc figure { margin: 1.25rem 0; max-width: none; }
+.engine-doc figure img { display: block; width: 100%; height: auto; }
+
+/* Even at full pane width these scale to roughly a third, so the inline copy is a thumbnail and the
+   caption says where the readable one is. */
+.engine-doc figcaption { margin-top: .3rem; font-size: .85rem; color: var(--muted); }
+.engine-doc figcaption .pdf-link { margin-left: .5rem; }
+.lightbox-actions .pdf-link { align-self: center; }
+.engine-doc figure a { display: block; text-decoration: none; }
+
+/*
+ * A top-level menu-bar item that IS the control, rather than opening one. Themed twice below; this is
+ * only the geometry, so the button fills its item and inherits the bar's own hover treatment.
+ *
+ * `display: block` and `line-height: inherit` are the two that matter, and both fix the same symptom:
+ * Home sitting a few pixels higher than the items either side of it. A button is an inline-block, so
+ * it aligns on its own baseline rather than filling its item, and it defaults to `line-height: normal`
+ * - about 1.2 - against the bar's 1.45. Either one alone is enough to lift the label; together they
+ * made it visibly out of line with plain-text items like Engines and View.
+ */
+#menubar > [role=menu-item] > button {
+  display: block;
+  font: inherit;
+  line-height: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-image: none;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  cursor: pointer;
+}
+
+/* --- diagram viewer -------------------------------------------------------------------------------- */
+
+/*
+ * A <dialog>, so Escape, the backdrop and the focus trap come from the platform.
+ *
+ * The two views exist because neither answers both questions: Fit shows the shape of the diagram,
+ * Actual shows what its labels say. A four-thousand-unit diagram cannot do both at once on any
+ * screen, so the viewer opens on Fit and the toggle is one click away.
+ */
+.lightbox {
+  width: 96vw;
+  max-width: 96vw;
+  height: 92vh;
+  max-height: 92vh;
+  padding: 0;
+  border: 1.5px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+.lightbox::backdrop { background: rgb(0 0 0 / .55); }
+
+.lightbox-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: .5rem .75rem;
+  border-bottom: 1.5px solid var(--line);
+}
+
+.lightbox-bar p { margin: 0; }
+.lightbox-actions { display: flex; gap: .5rem; }
+
+/* The scroll box. In Fit the image is bounded by the frame; in Actual it takes its own size and the
+   frame pans, which is the only way a label at this scale becomes legible. */
+.lightbox-frame {
+  height: calc(92vh - 3.25rem);
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  background: #fff;
+}
+
+.lightbox-frame img { max-width: 100%; max-height: 100%; width: auto; height: auto; }
+.lightbox-frame.actual { place-items: start; }
+.lightbox-frame.actual img { max-width: none; max-height: none; width: auto; height: auto; }

@@ -78,3 +78,14 @@ export interface SerialPorts {
 export interface Clock {
   every(ms: number, fn: () => void): () => void;
 }
+
+/**
+ * Fetches a generated documentation fragment.
+ *
+ * A port because the engine pages are the one thing this app loads lazily - 184 KB of rendered docs
+ * has no business in the initial payload - and "what happens when that fetch fails" is a state the
+ * page has to render properly rather than a thing to find out about in a browser.
+ */
+export interface DocSource {
+  fetchPage(path: string): Promise<string>;
+}

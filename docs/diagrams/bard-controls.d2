@@ -26,12 +26,14 @@ classes: {
 }
 
 panel: Front panel {
-  grid-columns: 3
+  grid-columns: 2
   grid-gap: 60
   style.stroke: "#cbd5e0"
 
   # ----------------------------------------------------------------- DECK A
-  deckA: Deck A {
+  deckA: Deck A and B (identical) {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsA: Knobs (7) {
@@ -59,7 +61,7 @@ panel: Front panel {
     ringA: "LED Ring A (32px)" {
       class: knob
       shape: circle
-      label: "Ring A\nbook progress + bookmark ticks; shelf dots (Alt)"
+      label: "Ring A / B\nbook progress + bookmark ticks; shelf dots (Alt)"
     }
   }
 
@@ -98,37 +100,6 @@ panel: Front panel {
   }
 
   # ----------------------------------------------------------------- DECK B
-  deckB: Deck B {
-    style.stroke: "#90cdf4"
-
-    knobsB: Knobs (7) {
-      class: knob
-      shape: sql_table
-      Pitch: "BOOK select (+V/Oct CV); Alt = SHELF"
-      Position: "BOOKMARK select (+CV); Alt = SCRUB"
-      Size: "RATE 0.5-2.5x (varispeed)"
-      Envelope: "PITCH-KEEP (varispeed <-> pitch held)"
-      "Mix (SOS)": "deck volume (+CV); Alt = SEAM fade"
-      Cycle: "duck release"
-      Glow: "duck depth"
-    }
-
-    padsB: Pads (5) {
-      class: pad
-      shape: sql_table
-      Play: "play/pause; Alt = drop mark; hold = commit"
-      Reverse: "jump back 15 s; Alt = re-roll auto-marks"
-      Grit: "ROOM (plate / hall / slap)"
-      Flux: "VOICE COLOUR (drive + band-limit)"
-      Seq: "next segment; Alt = arm to clock, Alt-hold = loop/hold"
-    }
-
-    ringB: "LED Ring B (32px)" {
-      class: knob
-      shape: circle
-      label: "Ring B\nbook progress + bookmark ticks; shelf dots (Alt)"
-    }
-  }
 }
 
 # ---------------------------------------------------------------------- I/O

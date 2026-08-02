@@ -202,6 +202,42 @@ def _unused_spec_keys(spec, used):
     return warns
 
 
+
+def collapse_symmetric_decks(text: str) -> str:
+    """Drop the duplicate Deck B column when the two decks are identical.
+
+    The template always emits Deck A, Shared and Deck B side by side, and for 17 of the 19 engines
+    those two deck columns are the SAME table twice - the spec has no `deckB` override, so both are
+    filled from the same knobs/pads/ring. That duplication is most of the diagram's width: it is what
+    made these ~4:1, which in turn is why they scale to a third of readable and need panning.
+
+    Only the symmetric case is collapsed. `gigaverb` and `voice` genuinely differ per deck, and there
+    the second column is information rather than an echo, so it stays.
+    """
+    lines = text.split("\n")
+    out, i = [], 0
+    while i < len(lines):
+        line = lines[i]
+        if line.lstrip().startswith("deckB:"):
+            # Skip to the matching close, counting braces from this line onward.
+            depth = 0
+            while i < len(lines):
+                depth += lines[i].count("{") - lines[i].count("}")
+                i += 1
+                if depth <= 0:
+                    break
+            continue
+        out.append(line)
+        i += 1
+    text = "\n".join(out)
+    # One deck column beside Shared, rather than three columns with a repeat.
+    text = text.replace("grid-columns: 3", "grid-columns: 2", 1)
+    # And say that it is both decks, so a reader does not think Deck B was forgotten.
+    text = text.replace("deckA: Deck A {", "deckA: Deck A and B (identical) {", 1)
+    text = text.replace('label: "Ring A\\n', 'label: "Ring A / B\\n', 1)
+    return text
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -232,6 +268,8 @@ def main():
     out_path = args.out or os.path.join("docs", "diagrams", f"{engine}-controls.d2")
 
     text, warnings = generate(template, spec)
+    if not (isinstance(spec.get("deckB"), dict) and spec["deckB"]):
+        text = collapse_symmetric_decks(text)
     header = (f"# GENERATED from {os.path.basename(args.template)} by "
               f"scripts/gen_controls_diagram.py.\n"
               f"# Edit the JSON spec ({os.path.basename(args.spec)}), not this file; then re-run / `make diagrams`.\n\n")

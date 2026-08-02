@@ -26,12 +26,14 @@ classes: {
 }
 
 panel: Front panel {
-  grid-columns: 3
+  grid-columns: 2
   grid-gap: 60
   style.stroke: "#cbd5e0"
 
   # ----------------------------------------------------------------- DECK A
-  deckA: Deck A {
+  deckA: Deck A and B (identical) {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsA: Knobs (7) {
@@ -59,7 +61,7 @@ panel: Front panel {
     ringA: "LED Ring A (32px)" {
       class: knob
       shape: circle
-      label: "Ring A\nalgorithm marker; selector dots (Alt)"
+      label: "Ring A / B\nalgorithm marker; selector dots (Alt)"
     }
   }
 
@@ -98,37 +100,6 @@ panel: Front panel {
   }
 
   # ----------------------------------------------------------------- DECK B
-  deckB: Deck B {
-    style.stroke: "#90cdf4"
-
-    knobsB: Knobs (7) {
-      class: knob
-      shape: sql_table
-      Pitch: "master pitch +/-2oct; Alt = ALGORITHM select"
-      Position: "param 2 (algorithm-specific)"
-      Size: "param 1 (algorithm-specific)"
-      Envelope: "output tone (low-pass tilt)"
-      "Mix (SOS)": "deck volume"
-      Cycle: "-"
-      Glow: "-"
-    }
-
-    padsB: Pads (5) {
-      class: pad
-      shape: sql_table
-      Play: "regenerate the glitch buffer"
-      Reverse: "-"
-      Grit: "-"
-      Flux: "-"
-      Seq: "-"
-    }
-
-    ringB: "LED Ring B (32px)" {
-      class: knob
-      shape: circle
-      label: "Ring B\nalgorithm marker; selector dots (Alt)"
-    }
-  }
 }
 
 # ---------------------------------------------------------------------- I/O
