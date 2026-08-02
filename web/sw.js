@@ -8,7 +8,10 @@
 // stale copy of card_layout.json would silently check cards against last release's rules, so every
 // fetch also refreshes the entry for next time. Bump CACHE when the asset list changes.
 
-const CACHE = 'sk-card-v2';
+// One bundle rather than the twenty modules this used to list: the sources are TypeScript now, so the
+// browser is served `dist/app.js` and the hand-maintained module list - the thing that could silently
+// go stale and break offline - is gone with it. The remaining entries are the page and its data.
+const CACHE = 'sk-card-v3';
 
 const ASSETS = [
   './',
@@ -16,24 +19,7 @@ const ASSETS = [
   './app.css',
   './card_layout.json',
   './patches.json',
-  './js/layout.js',
-  './js/wav.js',
-  './js/verify.js',
-  './js/build.js',
-  './js/convert.js',
-  './js/zip.js',
-  './js/cardsource.js',
-  './js/ui/main.js',
-  './js/ui/dom.js',
-  './js/ui/verify_view.js',
-  './js/ui/build_view.js',
-  './js/ui/convert_view.js',
-  './js/ui/reference_view.js',
-  './js/ui/terminal_view.js',
-  './js/terminal/framing.js',
-  './js/terminal/descriptor.js',
-  './js/terminal/device.js',
-  './js/terminal/serial.js',
+  './dist/app.js',
 ];
 
 self.addEventListener('install', (e) => {

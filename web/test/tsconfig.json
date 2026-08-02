@@ -1,0 +1,18 @@
+{
+  // The tests are checked, but not held to the shipped code's standard, and the difference is
+  // deliberate. Strict null checking earns its keep in `src/`, where an unhandled undefined reaches a
+  // user; in a test it mostly demands `!` after every fixture lookup that the fixture is asserted to
+  // contain two lines later, which is noise that hides the assertions.
+  //
+  // What stays on is the half that catches real mistakes: wrong arity, misspelled properties, a
+  // changed signature that a test never followed. Those are the ways a test rots into passing while
+  // checking nothing.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "strictNullChecks": false,
+    "noImplicitAny": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": ["**/*.ts", "../src/**/*.ts"]
+}

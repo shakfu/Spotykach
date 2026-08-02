@@ -287,7 +287,7 @@ The boot path is the one real risk and it collapsed to one define: `BOOT_APP` (t
 ## P6 - Web front-end: browser-based SD card builder + terminal (BUILT 2026-08-01, host-verified only)
 
 **Built.** Both phases landed in [`web/`](web) — a static page, no dependencies, no build step
-(`make serve-web`, `make test-web`, `make web-data`). Design and the outcome against it are in
+(`make web-serve`, `make test-web`, `make web-data`). Design and the outcome against it are in
 [`docs/dev/web-frontend.md`](docs/dev/web-frontend.md); the app's own notes are in
 [`web/README.md`](web/README.md). In-browser DFU flashing stayed out of scope (the Daisy Web Programmer
 already covers it, and a half-written image is the worst failure in the system).
@@ -324,7 +324,16 @@ it is about thirty minutes rather than exploratory poking. Writing it against th
 things worth targeting rather than discovering: `fromDataTransfer` reads `dt.items` *after* an `await`,
 by which time the drag data store may be invalidated (C4 aims at it — a dropped loose file is the
 likely casualty), and the service worker registers only when `location.protocol === 'https:'`, so the
-offline check cannot be run against `make serve-web` and needs a real deploy or a local HTTPS cert.
+offline check cannot be run against `make web-serve` and needs a real deploy or a local HTTPS cert.
+
+**Rewritten in TypeScript** (`web/src/`, bundled by bun to a committed `web/dist/app.js`), and
+re-layered: `core/` holds the rules and touches no browser API, `platform/` holds the four browser-only
+APIs, `app/` holds one view-model per tab with all the state and none of the DOM, and `ui/` renders.
+Every browser capability enters through an interface in `core/ports.ts`, so the view-models are tested
+against fakes with no DOM and no device - including the two behaviours that previously needed hardware
+(an empty port chooser, a device unplugged mid-session). Tests enforce the layering rather than
+asserting it, and one fails when the committed bundle is older than `src/`. 164 tests, up from 113 at
+the original landing.
 
 **Two additions since the build**, both host-verifiable and so done rather than deferred:
 

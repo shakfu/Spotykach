@@ -44,14 +44,15 @@ body {
 }
 
 h1 { font-size: 1.5rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
-h3 { font-size: 1.05rem; margin: 1.75rem 0 .5rem; }
+h3 { font-size: 1.05rem; margin: 2rem 0 .5rem; }
 h4 { font-size: .9rem; margin: 1.25rem 0 .4rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 a { color: var(--accent); }
 code, .mono { font-family: var(--mono); font-size: .9em; }
 .muted { color: var(--muted); }
 .note { font-size: .87rem; }
 .hidden { display: none; }
-.lead { max-width: 58ch; color: var(--muted); }
+/* One line saying what the tab does. If it needs a second sentence it belongs in an .aside. */
+.lead { max-width: 62ch; color: var(--muted); margin: 0 0 1rem; }
 
 header p { margin: .25rem 0 0; color: var(--muted); max-width: 62ch; }
 #banner span { display: block; margin-top: .35rem; font-family: var(--mono); font-size: .8rem; }
@@ -61,7 +62,7 @@ header p { margin: .25rem 0 0; color: var(--muted); max-width: 62ch; }
 #tabs {
   display: flex;
   gap: .25rem;
-  margin: 1.5rem 0 1.25rem;
+  margin: 1.5rem 0 1.75rem;
   border-bottom: 1px solid var(--line);
 }
 
@@ -77,6 +78,14 @@ header p { margin: .25rem 0 0; color: var(--muted); max-width: 62ch; }
 
 #tabs button:hover { color: var(--fg); }
 #tabs button.active { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* Three task tabs are the app; Reference is a lookup and Terminal needs a firmware build almost
+   nobody has. Pushing those two to the right says "these are not steps" without hiding them - five
+   equal-weight tabs read as five decisions to make before starting. */
+#tabs button.secondary { font-size: .92rem; }
+
+/* The first secondary tab is the one that follows a primary; :first-of-type would match Build. */
+#tabs button:not(.secondary) + button.secondary { margin-left: auto; }
 
 /* --- controls --------------------------------------------------------------- */
 
@@ -134,11 +143,6 @@ input.slot { width: 7rem; }
 .dropzone p { margin: .2rem 0; }
 .dropzone.dragging { border-color: var(--accent); background: var(--panel); }
 
-/* The three-step path on the landing tab. Numbered because the order genuinely matters - formatting
-   FAT32 has to happen before anything else, and browsers cannot do it. */
-.steps { max-width: 58ch; padding-left: 1.2rem; margin: .75rem 0 1rem; }
-.steps li { margin: .3rem 0; }
-
 .filelist { list-style: none; padding: 0; margin: .75rem 0; }
 
 .filelist li {
@@ -176,16 +180,36 @@ input.slot { width: 7rem; }
 .finding .fix { margin-top: .3rem; color: var(--muted); font-size: .9rem; white-space: pre-wrap; }
 .finding .fix::before { content: "-> "; }
 
+/* A standing fact about the tool, not a result. Deliberately quieter than .verdict and .finding, which
+   respond to something the user just did - three boxed styles competing at the same weight was most of
+   what made a tab hard to scan. */
 .callout {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: .75rem 1rem;
+  padding: .6rem 0 .6rem .9rem;
   margin: 1rem 0;
-  background: var(--panel);
+  border-left: 3px solid var(--line);
   font-size: .92rem;
 }
 
-.callout.warn { border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
+.callout.warn { border-left-color: var(--warn); }
+
+/* --- folded explanation ------------------------------------------------------- */
+
+/* Every rule here has a reason worth keeping, but printing all of them above the controls is what made
+   the landing tab ask for 121 words of reading before offering two buttons. */
+.aside { margin: 1.25rem 0; font-size: .92rem; }
+
+.aside > summary {
+  cursor: pointer;
+  color: var(--muted);
+  padding: .25rem 0;
+  list-style-position: outside;
+}
+
+.aside > summary:hover { color: var(--fg); }
+.aside > * { max-width: 62ch; }
+.aside > p { margin: .5rem 0 .5rem 1.1rem; color: var(--muted); }
+.aside > table { margin-left: 1.1rem; width: calc(100% - 1.1rem); }
+.aside[open] > summary { color: var(--fg); margin-bottom: .25rem; }
 
 /* --- tables ----------------------------------------------------------------- */
 
@@ -200,6 +224,13 @@ input.filter { width: 100%; max-width: 24rem; }
 .chips { display: flex; flex-wrap: wrap; gap: .15rem; margin: .25rem 0 .5rem; }
 .chips button { font-family: var(--mono); font-size: .82rem; }
 .chips button.on { color: var(--fg); font-weight: 600; text-decoration: underline; }
+
+/* Firmware citations answer "prove it", which is not the question this screen is for. Present, and
+   one checkbox away, rather than a tenth of what everyone reads. */
+.ref-banks tr.src { display: none; }
+.ref-banks.show-src tr.src { display: table-row; }
+
+.field.inline { flex-direction: row; align-items: center; gap: .4rem; }
 
 .ref-bank { margin: 1.75rem 0; }
 .ref-bank[hidden] { display: none; }

@@ -28,7 +28,7 @@ The card must be **FAT32**, up to 32 GB.
 
 ### Without a checkout
 
-The same three operations exist as a browser page in [`web/`](../web/) — `make serve-web`, then open
+The same three operations exist as a browser page in [`web/`](../web/) — `make web-serve`, then open
 <http://localhost:8000> (or the deployed copy). It needs no Python, no repo and no decoder: the browser
 decodes mp3/flac/wav/ogg itself, which is the whole reason the web version of `convert` is *simpler*
 than this one rather than a reimplementation of it. It reads the rules below as data exported from

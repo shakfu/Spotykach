@@ -1,28 +1,40 @@
 # web/ - browser SD card tools
 
 A static page that builds, fills and checks an SD card for the spotykach engines, plus a WebSerial
-terminal for `TERMINAL=1` builds. No server, no build step, no dependencies. Design rationale and the
-constraints that shaped it are in [`../docs/dev/web-frontend.md`](../docs/dev/web-frontend.md).
+terminal for `TERMINAL=1` builds. TypeScript, bundled by [bun](https://bun.sh) into one committed file;
+no server, no runtime dependencies. Design rationale and the constraints that shaped it are in
+[`../docs/dev/web-frontend.md`](../docs/dev/web-frontend.md).
 
-The tabs run **Build, Convert, Verify, Reference, Terminal** — the order a person needs them, not the
-order of their value. Verify is the most valuable screen and the wrong first one: the entry state for
-someone who just bought a device is "I have no card yet", and all Verify can say to that is "this is
-not a card". Build hands back a complete, valid, minimal card in one click. Reference follows the three
-task tabs because it is a lookup rather than a step — it is `sk_card.py layout` as a screen, and the
-only tab that needs nothing from the browser.
+The tabs run **Build, Convert, Verify** — the order a person needs them, not the order of their value.
+Verify is the most valuable screen and the wrong first one: the entry state for someone who just bought
+a device is "I have no card yet", and all Verify can say to that is "this is not a card". Build hands
+back a complete, valid, minimal card in one click.
+
+**Reference** and **Terminal** sit apart, to the right, because neither is a step in that job:
+Reference is a lookup (`sk_card.py layout` as a screen, and the only tab needing nothing from the
+browser), and Terminal needs a firmware build almost nobody has.
+
+Each tab opens with its controls. The reasoning behind a rule lives in a folded aside beneath them,
+because every rule here has a reason worth keeping and none of them is worth reading before you can
+press a button.
 
 ## Running it
 
 ```
-make serve-web          # then open http://localhost:8000
-make test-web           # the JS suite (node or bun; no npm install)
+make web-serve          # builds, then http://localhost:8000
+make web-build          # rebuild dist/app.js after editing src/
+make test-web           # typecheck (src strict, tests relaxed) + the suite
 make web-data           # regenerate card_layout.json, patches.json and the test fixtures
 ```
+
+`dist/app.js` is **generated and committed**: GitHub Pages serves `web/` as-is, so a fresh checkout can
+open the page with no toolchain. The cost is that it can be committed stale, so a test fails when it is
+older than `src/`. Edit `src/`, never `dist/`.
 
 Opening `index.html` from the filesystem does **not** work: ES modules will not load over `file://`,
 and the browser APIs the page uses are only offered over HTTPS or `localhost`.
 
-The node suite covers the logic but cannot cover the four browser APIs the app is built on.
+The suite covers the logic but cannot cover the four browser APIs the app is built on.
 [`../docs/dev/web-frontend-checks.md`](../docs/dev/web-frontend-checks.md) is the mechanical pass that
 does — about half an hour with a card, a Daisy and two browsers.
 
@@ -33,7 +45,7 @@ truth, and `make web-data` exports it to `card_layout.json`, which this app read
 the generated text (per-folder READMEs, the root README, the default config), so the browser writes a
 card byte-identical to `sk_card.py init` without owning a line of the wording.
 
-Two things genuinely are reimplemented in JavaScript, because they are code rather than content:
+Two things genuinely are reimplemented here, because they are code rather than content:
 
 | Piece | Python original | Pinned by |
 |---|---|---|
@@ -41,27 +53,42 @@ Two things genuinely are reimplemented in JavaScript, because they are code rath
 | the `verify` walk | `scripts/sk_card.py` | same verdicts as `verify_card` on a deliberately-broken card |
 
 Both are enforced by tests on both sides. `make test-scripts` fails if the committed export has drifted
-from `scripts/`; `make test-web` fails if the JS disagrees with the Python.
+from `scripts/`; `make test-web` fails if this side disagrees with the Python.
 
 ## Layout
 
 ```
 index.html  app.css  sw.js         the page, its styles, and offline caching
 card_layout.json  patches.json     GENERATED - do not edit, run `make web-data`
-js/
-  layout.js        card_layout.json, wrapped, plus the folder-set label both views render
-  wav.js           WAV/raw read+write, mirroring card_audio.py
-  verify.js        the checker, mirroring sk_card.verify_card
-  build.js         the card skeleton, assembled from the exported text
-  convert.js       decodeAudioData -> OfflineAudioContext -> wav.js
-  zip.js           a dependency-free ZIP writer (the non-Chromium output path)
-  cardsource.js    File System Access / drag-drop / <input webkitdirectory>, behind one shape
-  ui/              the four tabs; the only files that touch the DOM
-  terminal/        framing, the describe parser, the command client, the WebSerial transport
-test/                                node/bun; fixtures GENERATED by scripts/web_export.py
+dist/app.js                        GENERATED - do not edit, run `make web-build`
+src/
+  core/       the rules, and nothing else. No DOM, no browser API, no state.
+    types.ts       what card_layout.json declares, given names
+    ports.ts       what the core needs from outside, as interfaces
+    layout.ts      card_layout.json, wrapped
+    wav.ts         WAV/raw read+write, mirroring card_audio.py
+    verify.ts      the checker, mirroring sk_card.verify_card
+    build.ts       the card skeleton, assembled from the exported text
+    convert.ts     encoding for a bank (decoding is a port)
+    zip.ts         a dependency-free ZIP writer (compression is a port)
+    protocol.ts    line framing + the describe model
+    device.ts      the command API, over any transport
+  platform/   the four browser APIs, and only these files may touch them
+    cardsource.ts  File System Access / drag-drop / <input webkitdirectory>
+    audio.ts       decodeAudioData -> OfflineAudioContext
+    serial.ts      WebSerial
+    download.ts    saving a file, and CompressionStream
+    clock.ts       setInterval
+  app/        one view-model per tab: all the state, none of the DOM
+  ui/         the five tabs: render and bind, nothing else
+test/                                bun runs the .ts directly; fixtures GENERATED
 ```
 
-`js/` outside `ui/` is deliberately DOM-free, which is why the tests can run without a browser.
+**Dependencies point inwards**: `ui -> app -> core` and `platform -> core`, never back out. That is
+what makes `app/` testable with no DOM at all - every browser capability enters through an interface in
+`core/ports.ts`, and the tests implement those with twenty-line fakes. Three tests in
+`test/offline.test.ts` enforce the rule, because it is the kind of claim that rots silently: one
+convenient `document.` in a view-model and the models need a browser again.
 
 ## Browser support
 

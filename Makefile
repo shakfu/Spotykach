@@ -868,23 +868,37 @@ test-scripts:
 web-data:
 	$(REL_PY) scripts/web_export.py
 
-# Run the web front-end's JS test suite: the WAV writers asserted byte-identical to card_audio.py, the
-# verify checker asserted to reach the same verdicts as sk_card.py on a deliberately-broken card, and
-# the terminal client driven by a scripted fake device. No browser and no npm install - the app has no
-# dependencies, and the tests only need ESM, node:fs and crypto.subtle, which node and bun both have.
-#   make test-web                    # uses node, or bun if node is absent
-WEB_JS ?= $(shell command -v node 2>/dev/null || command -v bun 2>/dev/null)
-.PHONY: test-web serve-web
+# The web front-end is TypeScript, bundled by bun to web/dist/app.js. The bundle is COMMITTED so the
+# page stays a static deploy - GitHub Pages serves web/ as-is with no CI step - which means it can also
+# go stale, and `make test-web` fails if it is older than src/.
+#   make web-build                   # rebuild web/dist/app.js after editing web/src/
+BUN ?= $(shell command -v bun 2>/dev/null)
+.PHONY: web-build test-web web-serve
+web-build:
+	@test -n "$(BUN)" || { echo "bun not found - install it (https://bun.sh) or set BUN=/path/to/bun"; exit 1; }
+	cd web && $(BUN) run build
+
+# Run the web front-end's test suite: the WAV writers asserted byte-identical to card_audio.py, the
+# verify checker asserted to reach the same verdicts as sk_card.py on a deliberately-broken card, the
+# view-models driven by fake ports (no DOM, no device), and the views mounted against a minimal DOM
+# shim. Type-checks first, in two passes - `src/` strictly, the tests with null-checking relaxed.
+#
+# `bun install` is needed once, for TypeScript itself; nothing else is a dependency and nothing ships
+# from node_modules.
+#   make test-web
 test-web:
-	@test -n "$(WEB_JS)" || { echo "no JS runtime found - install node or bun, or set WEB_JS=/path/to/node"; exit 1; }
-	cd web && $(WEB_JS) test/run.js
+	@test -n "$(BUN)" || { echo "bun not found - install it (https://bun.sh) or set BUN=/path/to/bun"; exit 1; }
+	@cd web && test -d node_modules || (cd web && $(BUN) install)
+	cd web && $(BUN) run typecheck
+	cd web && $(BUN) test/run.ts
 
 # Serve web/ locally. The browser APIs this app uses (File System Access, WebSerial) are only offered
 # over HTTPS or localhost, and ES modules will not load from a file:// URL at all, so opening
-# web/index.html directly does not work.
-#   make serve-web                   # then open http://localhost:8000
+# web/index.html directly does not work. Still a plain static server: the TypeScript is bundled ahead
+# of time, so serving needs no toolchain at all.
+#   make web-serve                   # builds, then http://localhost:8000
 SERVE_PORT ?= 8000
-serve-web:
+web-serve: web-build
 	@echo "http://localhost:$(SERVE_PORT)  (Ctrl-C to stop)"
 	@cd web && $(REL_PY) -m http.server $(SERVE_PORT)
 

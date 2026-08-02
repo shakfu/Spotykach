@@ -13,9 +13,19 @@ second front-end onto both, not new capability.
 
 ## What landed
 
-`web/` is a static page with no dependencies and no build step: `make serve-web` to run it,
-`make test-web` for its suite, `make web-data` to regenerate its data. 135 JS tests, plus 18 Python
-tests guarding the export.
+`web/` is a static page with no runtime dependencies: `make web-serve` to run it, `make test-web` for
+its suite, `make web-data` to regenerate its data. 164 tests, plus 18 Python tests guarding the export.
+
+**It is TypeScript now, bundled by bun**, which is the one place the original design was overturned
+rather than extended: "no build step" was a real constraint and it is gone. What replaced it is
+narrower than it sounds - `dist/app.js` is committed, so serving and deploying still need no toolchain,
+and only *editing* does. The layering that came with it is the substantive change: `core/` holds the
+rules and touches no browser API, `platform/` holds the four APIs that only a browser has, `app/` holds
+one view-model per tab with all the state and none of the DOM, and `ui/` renders. Every browser
+capability enters through an interface in `core/ports.ts`, so the view-models are tested against
+twenty-line fakes with no DOM and no device - including the two questions that previously needed
+hardware: what happens when a port chooser comes back empty, and what happens when the device is
+unplugged mid-session.
 
 **Tab order deviates from the phasing below, deliberately.** This design lists Verify first and calls
 it "the highest-value screen", which it is — but value is not the same as sequence. Pointed at a blank
@@ -63,8 +73,9 @@ client is transport-agnostic for exactly that reason, so none of it needed hardw
 decision in constraint 2 is still **open**, and the tab says so at the top rather than letting a user
 spend an afternoon wondering why nothing answers.
 
-**Verified how far?** Host-side only. The JS suite covers the format writers, the checker, the builder,
-the ZIP writer, the terminal client and framing, and mounts all four views under a minimal DOM shim
+**Verified how far?** Host-side only. The suite covers the format writers, the checker, the builder,
+the ZIP writer, the terminal client and framing, drives every view-model against fake ports, and mounts
+all five views under a minimal DOM shim
 (which caught one real bug: `'serial' in navigator` is true on a browser that declares the property and
 leaves it undefined, which would have hidden the "this browser cannot do it" notice behind a Connect
 button that then threw). What is **not** verified: no real browser has loaded the page, no real card
@@ -262,7 +273,7 @@ Everything below is host-verified only; none of it has met a browser or a device
 expected output and the CLI command to diff against — so the pass is half an hour rather than an
 exploratory afternoon. Two things worth knowing before starting it: the drag-and-drop path reads
 `dt.items` after an `await`, which the drag data store may already have invalidated (C4 targets it),
-and the service worker registers only over HTTPS, so C9 cannot run against `make serve-web`.
+and the service worker registers only over HTTPS, so C9 cannot run against `make web-serve`.
 
 1. **Load the page in Chrome and in Safari.** The Safari run is the one that matters: it is the
    graceful-degradation path (drag-in, zip-out) that the whole design was shaped around, and it is

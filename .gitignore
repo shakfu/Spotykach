@@ -5,6 +5,11 @@
 build-cmake/
 build-*/
 dist/
+# ...but the web front-end's bundle IS a tracked artifact: GitHub Pages serves web/ as-is, so the
+# built app.js has to be in the tree or a fresh checkout cannot open the page. `make web-build`
+# regenerates it, and a test fails if it is older than src/.
+!web/dist/
+!web/dist/**
 *.log
 *.mmon
 .*_cache
@@ -24,6 +29,9 @@ __pycache__/
 # testing
 *.dSYM
 runner
+
+# web front-end: typescript is a devDependency for `tsc --noEmit` only; nothing ships from here
+node_modules/
 
 # agents
 .claude

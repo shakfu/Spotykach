@@ -190,7 +190,7 @@ python3 scripts/sk_card.py convert --engine tape /media/SK loop.mp3   # add your
 
 A prebuilt `sk-card-<version>.zip` ships with each release. See [`docs/sd-card.md`](docs/sd-card.md).
 
-All three commands also exist as a **browser page** in [`web/`](web/), for when a checkout, Python and a working decoder are more than you want to install to put a file on a card — the browser decodes mp3/flac/wav/ogg itself. `make serve-web`, then open <http://localhost:8000>. It reads the same rules the CLI does, exported as data rather than reimplemented, and the same page carries a WebSerial terminal for `TERMINAL=1` builds. See [`web/README.md`](web/README.md).
+All three commands also exist as a **browser page** in [`web/`](web/), for when a checkout, Python and a working decoder are more than you want to install to put a file on a card — the browser decodes mp3/flac/wav/ogg itself. `make web-serve`, then open <http://localhost:8000>. It reads the same rules the CLI does, exported as data rather than reimplemented, and the same page carries a WebSerial terminal for `TERMINAL=1` builds. See [`web/README.md`](web/README.md).
 
 ## Testing
 

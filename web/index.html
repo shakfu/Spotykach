@@ -12,8 +12,7 @@
 <header>
   <h1>sk-card</h1>
   <p id="banner">
-    Build, fill and check an SD card for the spotykach engines. Everything runs in this tab &mdash;
-    no upload, no install, no account. New card? Start on <strong>Build</strong>.
+    SD card tools for the spotykach engines. Nothing is uploaded &mdash; it all runs in this tab.
   </p>
 </header>
 
@@ -27,8 +26,8 @@
   <button data-view="build" role="tab" aria-selected="true">Build</button>
   <button data-view="convert" role="tab" aria-selected="false">Convert</button>
   <button data-view="verify" role="tab" aria-selected="false">Verify</button>
-  <button data-view="reference" role="tab" aria-selected="false">Reference</button>
-  <button data-view="terminal" role="tab" aria-selected="false">Terminal</button>
+  <button data-view="reference" role="tab" aria-selected="false" class="secondary">Reference</button>
+  <button data-view="terminal" role="tab" aria-selected="false" class="secondary">Terminal</button>
 </nav>
 
 <main id="panels">
@@ -53,6 +52,8 @@
   </p>
 </footer>
 
-<script type="module" src="./js/ui/main.js"></script>
+<!-- Built from src/ by `make web-build` (bun). dist/app.js is generated and committed, so GitHub Pages
+     can serve web/ with no CI step; edit src/, never dist/. -->
+<script type="module" src="./dist/app.js"></script>
 </body>
 </html>

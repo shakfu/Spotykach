@@ -1,6 +1,6 @@
 # Web front-end: the browser pass
 
-The `web/` suite runs in node and covers the logic. It cannot cover the four browser APIs the app is
+The `web/` suite runs in bun and covers the logic. It cannot cover the four browser APIs the app is
 built on — File System Access, `decodeAudioData`, WebSerial, service workers — because a DOM shim can
 only assert that the code *calls* them. This is the mechanical run that closes that gap: about 30
 minutes with a card, a Daisy and both browsers.
@@ -14,8 +14,13 @@ Work top to bottom and record the result. A check that is skipped is not a check
 ```
 make test-web                 # must be green before a browser is involved
 make web-data                 # only if scripts/card_layout.py changed since the last export
-make serve-web                # http://localhost:8000, Ctrl-C to stop
+make web-serve                # builds web/dist/app.js, then http://localhost:8000
 ```
+
+The page runs a bundle built from `web/src/`, so **anything you change in `src/` needs
+`make web-build`** before the browser sees it. `make web-serve` does that for you; a reload alone will
+not. (`make test-web` fails if the committed bundle is older than the sources, which is the same
+mistake caught earlier.)
 
 You need:
 
@@ -70,8 +75,8 @@ With a card that has content on it, in **Chrome**:
    python3 scripts/sk_card.py verify /Volumes/<CARD>
    ```
 
-   Same errors, same warnings, same fix text. A difference here is a real defect in `web/js/verify.js`
-   — the JS checker is pinned against a fixture, not against a real card.
+   Same errors, same warnings, same fix text. A difference here is a real defect in `web/src/core/verify.ts`
+   — the checker is pinned against a fixture, not against a real card.
 
 4. `System Volume Information`, `.Spotlight-V100`, `.fseventsd` and `.DS_Store` must not appear in the
    findings, and must not produce a permission error either.
@@ -85,7 +90,7 @@ the wrong bank and the findings will differ wildly.)
 
 Drag the card's folder onto the Verify dropzone, in **both** browsers. Expect the same findings as C3.
 
-**Suspect, check carefully.** `fromDataTransfer` reads `dt.items` after an `await`, and the drag data
+**Suspect, check carefully.** `platform/cardsource.ts`'s `fromDataTransfer` reads `dt.items` after an `await`, and the drag data
 store is invalidated once the drop event's task ends. The Chromium path returns early for a dropped
 *directory*, so the risk is concentrated in two cases:
 
@@ -186,7 +191,7 @@ line split across two reads being mangled.
 **Known limitation before you start:** `js/ui/main.js` registers the service worker only when
 `location.protocol === 'https:'`, so it does **not** register on `http://localhost`. That keeps a
 cache-first worker from serving stale files during development, and it means C9 cannot be run against
-`make serve-web` — it needs a real HTTPS deploy. Either deploy to Pages first, or serve `web/` over
+`make web-serve` — it needs a real HTTPS deploy. Either deploy to Pages first, or serve `web/` over
 local HTTPS with a self-signed certificate.
 
 Then:

@@ -2,8 +2,14 @@
   "name": "sk-card",
   "private": true,
   "type": "module",
-  "description": "Browser SD card builder/checker and WebSerial terminal for sk-engines. No dependencies: this file exists only so node treats the .js sources as ES modules.",
+  "description": "Browser SD card builder/checker and WebSerial terminal for sk-engines. TypeScript, bundled by bun; no runtime dependencies.",
   "scripts": {
-    "test": "node test/run.js"
+    "build": "bun build src/ui/main.ts --outdir dist --entry-naming app.js --sourcemap=linked --target browser",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "bun test/run.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "5.9.2"
   }
 }

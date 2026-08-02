@@ -260,9 +260,9 @@ def _build_manifest(tmp: Path) -> dict:
     """Every file `sk_card.py init --no-demo` writes, by SHA-256.
 
     Hashes rather than contents because this is a byte-equality check on ~30 files that mostly repeat
-    the same README boilerplate: the JS builder in web/js/build.js has to produce the identical card,
+    the same README boilerplate: the JS builder in web/src/core/build.ts has to produce the identical card,
     and a digest per path says so in a fixture small enough to read in a diff. Demo audio is excluded
-    because the web app deliberately does not synthesize it (see web/js/build.js).
+    because the web app deliberately does not synthesize it (see web/src/core/build.ts).
     """
     import hashlib
 
