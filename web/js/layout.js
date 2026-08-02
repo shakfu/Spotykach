@@ -72,6 +72,30 @@ export function makeLayout(data) {
 }
 
 /**
+ * A readable label for a bank's folders, matching how docs/sd-card.md writes them.
+ *
+ * `SK/B .. SK/Y` reads as a range of two folders rather than a set of six, and it makes granular's
+ * relationship to the `SK` platform row - at the other end of the table - impossible to see. Collapsing
+ * to the shared parent says it in one glance: `SK/{B,G,P,R,T,Y}`, `radio/{0..15}`.
+ *
+ * Lives here rather than in a view because two of them render the folder set and neither should have
+ * to import the other to do it.
+ */
+export function folderLabel(dirs) {
+  if (dirs.length === 1) return dirs[0];
+  const cut = dirs[0].lastIndexOf('/');
+  const parent = cut < 0 ? '' : dirs[0].slice(0, cut);
+  const leaves = dirs.map((d) => d.slice(d.lastIndexOf('/') + 1));
+  // Bail out if they do not actually share one parent - better a clumsy label than a wrong one.
+  if (!dirs.every((d) => d.slice(0, d.lastIndexOf('/')) === parent)) return dirs.join(', ');
+  const nums = leaves.map(Number);
+  const contiguous = nums.every(Number.isInteger)
+    && nums.every((n, i) => i === 0 || n === nums[i - 1] + 1);
+  const set = contiguous ? `${nums[0]}..${nums[nums.length - 1]}` : leaves.join(',');
+  return parent ? `${parent}/{${set}}` : `{${set}}`;
+}
+
+/**
  * Expand a bank's `target` template. Mirrors card_layout.format_target - keep the two in step; the
  * placeholder set is kept tiny for exactly that reason.
  */

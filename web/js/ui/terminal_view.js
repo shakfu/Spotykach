@@ -54,12 +54,16 @@ export function mountTerminal(root, ctx) {
 
   // --- connection -----------------------------------------------------------
 
-  async function connect() {
+  async function connect({ filtered = true } = {}) {
     try {
-      const transport = await serial.requestPort();
+      const transport = await serial.requestPort({ filtered });
+      // Registered before the first command: a device unplugged during `describe` must not leave the
+      // tab claiming a connection it no longer has.
+      transport.onClose((why) => lost(why));
       device = new Device(transport, { logSink: (l) => write(l, 'log') });
       status.textContent = `connected (${transport.info()})`;
       connectBtn.textContent = 'Disconnect';
+      allPortsBtn.hidden = true;
       input.disabled = false;
       input.focus();
       write('connected', 'meta');
@@ -67,10 +71,31 @@ export function mountTerminal(root, ctx) {
       await refreshUsb();
       startCpu();
     } catch (e) {
-      if (e.name === 'NotFoundError') return; // the user closed the port chooser
+      // NotFoundError means "no port came back", which is BOTH a cancelled chooser and an empty one -
+      // WebSerial does not distinguish them. Returning silently was wrong for the empty case: a user
+      // whose device enumerates under another vendor id got no dialog worth reading and no message,
+      // which is indistinguishable from the tab being broken.
+      if (e.name === 'NotFoundError') {
+        if (filtered) {
+          write(`no port chosen. If the chooser was empty, nothing on this machine is reporting USB `
+            + `vendor id 0x${serial.DAISY_VID.toString(16).padStart(4, '0')} - check the device is on `
+            + 'and running a TERMINAL=1 build, or list every serial port instead.', 'meta');
+          allPortsBtn.hidden = false;
+        } else {
+          write('no port chosen.', 'meta');
+        }
+        return;
+      }
       showError(usbPanel, e);
       status.textContent = '';
     }
+  }
+
+  /** The port went away by itself. Tear down exactly as a manual disconnect would, and say why. */
+  function lost(why) {
+    if (!device) return;
+    write(`device disconnected: ${why}`, 'err');
+    disconnect();
   }
 
   async function disconnect() {
@@ -94,6 +119,12 @@ export function mountTerminal(root, ctx) {
     class: 'primary',
     onclick: () => (device ? disconnect() : connect()),
   }, 'Connect');
+
+  // Hidden until the filtered chooser comes back empty-handed, so the normal path stays one button.
+  const allPortsBtn = el('button', {
+    hidden: true,
+    onclick: () => connect({ filtered: false }),
+  }, 'List every serial port');
 
   // --- command line ---------------------------------------------------------
 
@@ -410,7 +441,7 @@ export function mountTerminal(root, ctx) {
       + 'with ',
       el('code', {}, 'make ENGINE=<engine> TERMINAL=1'),
       '. Note USB MIDI is lost on the QSPI engines (chuck, csound, mosc), which claim the same OTG core.'),
-    el('div', { class: 'controls' }, connectBtn, status),
+    el('div', { class: 'controls' }, connectBtn, allPortsBtn, status),
     !serial.supported() && el('div', { class: 'callout' },
       el('strong', {}, 'This browser has no WebSerial. '),
       'Talking to hardware needs Chrome or Edge. Unlike the card tabs there is no fallback for this '

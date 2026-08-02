@@ -19,11 +19,15 @@
 
 <!-- Tab order is the order a person actually needs them: get a working card, put your audio on it,
      then diagnose. Verify is the most VALUABLE screen but it is the wrong FIRST one - pointed at a
-     blank card it can only say "this is not a card", which is not an answer anybody can act on. -->
+     blank card it can only say "this is not a card", which is not an answer anybody can act on.
+     Reference sits after the three task tabs because it is not a step in the job - it is the lookup
+     you consult while doing one of them - and Terminal stays last because it needs a firmware build
+     almost nobody has. -->
 <nav id="tabs" role="tablist">
   <button data-view="build" role="tab" aria-selected="true">Build</button>
   <button data-view="convert" role="tab" aria-selected="false">Convert</button>
   <button data-view="verify" role="tab" aria-selected="false">Verify</button>
+  <button data-view="reference" role="tab" aria-selected="false">Reference</button>
   <button data-view="terminal" role="tab" aria-selected="false">Terminal</button>
 </nav>
 
@@ -31,6 +35,7 @@
   <section id="panel-build" role="tabpanel"></section>
   <section id="panel-convert" role="tabpanel" hidden></section>
   <section id="panel-verify" role="tabpanel" hidden></section>
+  <section id="panel-reference" role="tabpanel" hidden></section>
   <section id="panel-terminal" role="tabpanel" hidden></section>
 </main>
 

@@ -21,13 +21,23 @@ export const supported = () => typeof navigator !== 'undefined' && navigator.ser
 
 /**
  * Prompt for a port and open it. Must be called from a user gesture.
+ *
+ * `filtered` narrows the chooser to the Daisy's vendor id, which is the right default - it saves
+ * picking the Daisy out of a list of bluetooth modems. But a filter that matches nothing produces an
+ * EMPTY chooser, and cancelling an empty chooser throws the same `NotFoundError` as cancelling a full
+ * one, so the app cannot tell "no device" from "changed my mind" and the user is told neither. Anything
+ * that puts a different bridge in front of the CDC endpoint - a board revision, a hub, a USB-serial
+ * adapter on the panel jack - lands there with no way out, so callers can retry unfiltered.
+ *
+ * @param {{filtered?: boolean}} [opts]
  * @returns {Promise<SerialTransport>}
  */
-export async function requestPort() {
+export async function requestPort({ filtered = true } = {}) {
   if (!supported()) {
     throw new Error('This browser has no WebSerial. Use Chrome, Edge or another Chromium browser.');
   }
-  const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: DAISY_VID }] });
+  const port = await navigator.serial.requestPort(
+    filtered ? { filters: [{ usbVendorId: DAISY_VID }] } : {});
   await port.open({ baudRate: BAUD });
   // Some hosts and USB-serial bridges gate output on DTR. For this device it is cosmetic - the
   // firmware's CDC control handler ignores line state - but assert it explicitly anyway.
@@ -44,6 +54,7 @@ export class SerialTransport {
     this.port = port;
     this.assembler = new LineAssembler();
     this._onLine = () => {};
+    this._onClose = () => {};
     this._closed = false;
     this._reader = null;
     this._pump();
@@ -53,9 +64,22 @@ export class SerialTransport {
     this._onLine = cb;
   }
 
+  /**
+   * Called once if the port goes away on its own - unplugged, or reset into the bootloader.
+   *
+   * Without it the loss is silent in the worst way: the read loop ends, but the UI still shows a
+   * connected device, the command line stays enabled, and the CPU poll keeps firing commands that now
+   * time out three seconds at a time. A deliberate close() sets `_closed` first, so it does not come
+   * back through here and cannot recurse into the caller's teardown.
+   */
+  onClose(cb) {
+    this._onClose = cb;
+  }
+
   async _pump() {
     const decoder = new TextDecoder();
     this._reader = this.port.readable.getReader();
+    let reason = 'the port closed';
     try {
       for (;;) {
         const { value, done } = await this._reader.read();
@@ -66,6 +90,7 @@ export class SerialTransport {
         }
       }
     } catch (e) {
+      reason = e.message;
       if (!this._closed) this._onLine(`[transport] read failed: ${e.message}`);
     } finally {
       try {
@@ -73,6 +98,7 @@ export class SerialTransport {
       } catch {
         /* already released */
       }
+      if (!this._closed) this._onClose(reason);
     }
   }
 

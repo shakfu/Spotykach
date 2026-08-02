@@ -8,5 +8,6 @@ import './build.test.js';
 import './terminal.test.js';
 import './misc.test.js';
 import './ui.test.js';
+import './offline.test.js';
 
 process.exit(await run());

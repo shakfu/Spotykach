@@ -9,8 +9,104 @@ import { suite, test, ok, eq, throws, rejects } from './harness.js';
 import { LineAssembler, isLog, parseReply, isDestructive, CommandError, Timeout } from '../js/terminal/framing.js';
 import { parseDescribe, vocabulary, parseUsbDiag } from '../js/terminal/descriptor.js';
 import { Device } from '../js/terminal/device.js';
+import { SerialTransport, requestPort, DAISY_VID } from '../js/terminal/serial.js';
 
 suite('terminal');
+
+// --- the WebSerial transport --------------------------------------------------------------------
+//
+// SerialTransport is the one part of the client that touches a browser API, so it is the part the
+// scripted-transport tests below cannot reach. A ReadableStream is a ReadableStream in node, though,
+// which is enough to drive the two lifecycle paths that matter and that no host test covered before:
+// a port that ends by itself, and one closed deliberately.
+
+/** A serial port whose read stream can be ended or failed on demand. */
+function fakePort({ chunks = [], failWith = null, keepOpen = false } = {}) {
+  return {
+    readable: new ReadableStream({
+      start(c) {
+        for (const s of chunks) c.enqueue(new TextEncoder().encode(s));
+        if (failWith) c.error(new Error(failWith));
+        else if (!keepOpen) c.close();
+      },
+    }),
+    writable: new WritableStream({ write() {} }),
+    async open() {},
+    async close() {},
+    async setSignals() {},
+    getInfo: () => ({ usbVendorId: DAISY_VID, usbProductId: 0x5740 }),
+  };
+}
+
+/**
+ * Wait for `onClose`, or give up.
+ *
+ * The bound is the point: a transport that never reports the loss is exactly the bug these tests
+ * exist to catch, and a bare `new Promise(r => t.onClose(r))` does not fail on it - it hangs the whole
+ * suite forever, which reads as a broken runner rather than a broken transport.
+ */
+const closeReason = (t, ms = 1000) => Promise.race([
+  new Promise((resolve) => t.onClose(resolve)),
+  new Promise((_, reject) => setTimeout(() => reject(new Error('onClose never fired')), ms)),
+]);
+
+const withNavigator = async (serial, fn) => {
+  const saved = globalThis.navigator;
+  globalThis.navigator = { serial };
+  try {
+    return await fn();
+  } finally {
+    globalThis.navigator = saved;
+  }
+};
+
+test('the chooser is filtered to the Daisy by default and unfiltered on request', async () => {
+  // An empty chooser and a cancelled one are the same NotFoundError, so a filter that matches nothing
+  // is a dead end. The unfiltered retry is the way out for a board that reports another vendor id.
+  const seen = [];
+  const serial = {
+    requestPort: async (opts) => {
+      seen.push(opts);
+      return fakePort({ keepOpen: true });
+    },
+  };
+  await withNavigator(serial, async () => {
+    await (await requestPort()).close();
+    await (await requestPort({ filtered: false })).close();
+  });
+  eq(seen[0], { filters: [{ usbVendorId: DAISY_VID }] });
+  eq(seen[1], {}, 'no filters at all, not an empty filter list - those differ to the chooser');
+});
+
+test('a port that ends by itself reports the loss', async () => {
+  const t = new SerialTransport(fakePort({ chunks: ['ok 1\r\n'] }));
+  const lines = [];
+  t.onLine((l) => lines.push(l));
+  const why = await closeReason(t);
+  eq(lines, ['ok 1'], 'and delivers what it had already received first');
+  ok(why, 'with a reason to show the user');
+});
+
+test('a read failure reports the loss too, with the error', async () => {
+  const t = new SerialTransport(fakePort({ failWith: 'device disconnected' }));
+  t.onLine(() => {});
+  eq(await closeReason(t), 'device disconnected');
+});
+
+test('a deliberate close is not reported as a loss', async () => {
+  // Otherwise the teardown re-enters itself: close() fires onClose, which the view answers by tearing
+  // down, which calls close().
+  const t = new SerialTransport(fakePort({ keepOpen: true }));
+  let fired = false;
+  t.onClose(() => { fired = true; });
+  await t.close();
+  await new Promise((r) => setTimeout(r, 0));
+  ok(!fired);
+});
+
+test('the transport names the port it opened', () => {
+  eq(new SerialTransport(fakePort({ keepOpen: true })).info(), 'USB 0x0483:0x5740');
+});
 
 // --- framing ----------------------------------------------------------------------------------
 

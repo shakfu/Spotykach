@@ -14,16 +14,25 @@ second front-end onto both, not new capability.
 ## What landed
 
 `web/` is a static page with no dependencies and no build step: `make serve-web` to run it,
-`make test-web` for its suite, `make web-data` to regenerate its data. 107 JS tests, plus 18 Python
+`make test-web` for its suite, `make web-data` to regenerate its data. 135 JS tests, plus 18 Python
 tests guarding the export.
 
 **Tab order deviates from the phasing below, deliberately.** This design lists Verify first and calls
 it "the highest-value screen", which it is — but value is not the same as sequence. Pointed at a blank
 or absent card, Verify can only report "no recognised engine folders found here", which is not
-something a new owner can act on. The tabs therefore run **Build, Convert, Verify, Terminal**, and
-Build is what a fresh visit lands on: one click produces a complete, valid, minimal card (the
-`--no-demo` skeleton), and the tab closes by pointing at Verify for when something later misbehaves.
-The ordering is pinned by a test, because it is a considered decision that reads like an arbitrary one.
+something a new owner can act on. The tabs therefore run **Build, Convert, Verify, Reference,
+Terminal**, and Build is what a fresh visit lands on: one click produces a complete, valid, minimal
+card (the `--no-demo` skeleton), and the tab closes by pointing at Verify for when something later
+misbehaves. The ordering is pinned by a test, because it is a considered decision that reads like an
+arbitrary one.
+
+**Reference was added after the fact**, and is the web counterpart of `sk_card.py layout` — the one
+subcommand with no screen. It sits after the three task tabs rather than among them because it is not a
+step in the job, it is the lookup consulted while doing one; and it is the only tab that asks nothing of
+the browser, which makes it the one that works identically everywhere. Like everything else on the
+page it is generated from `card_layout.json`, and a test asserts it writes down no figure the layout
+owns — on a screen that is nothing but such figures, one typed literal is a number that outlives its
+source.
 
 **Constraint 3 (one source of truth) was taken further than proposed.** The design asked for a
 `--json` export of the layout table. What ships also exports every piece of *generated text* — the
@@ -249,6 +258,11 @@ Two are settled by what was built; two are not.
 ## Remaining verification
 
 Everything below is host-verified only; none of it has met a browser or a device.
+[`web-frontend-checks.md`](web-frontend-checks.md) turns this list into a mechanical run — exact steps,
+expected output and the CLI command to diff against — so the pass is half an hour rather than an
+exploratory afternoon. Two things worth knowing before starting it: the drag-and-drop path reads
+`dt.items` after an `await`, which the drag data store may already have invalidated (C4 targets it),
+and the service worker registers only over HTTPS, so C9 cannot run against `make serve-web`.
 
 1. **Load the page in Chrome and in Safari.** The Safari run is the one that matters: it is the
    graceful-degradation path (drag-in, zip-out) that the whole design was shaped around, and it is

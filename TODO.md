@@ -58,7 +58,7 @@ Priority is driven less by size than by what unblocks/gates what, and by whether
 | P3 | Refactor delay engine onto shared primitives (by ear) | med | med-high | **hardware flash** | none (primitives in `dsp/`); folds into P2 |
 | P4 | Tape wow/flutter: try quadratic curve + lower maxima | trivial | low | **flash** (by ear) | none (optional voicing); folds into P2 |
 | P5 | Finish or back out the CMake adoption (now merged to `main`, incomplete) | high | high | flash + cleanup | strategic; three build-system files straddle `main` |
-| P6 | Web front-end: browser SD card builder + WebSerial terminal (**built**; needs a real-browser pass) | done | low | **browser + flash** | code done; open decision on shipping `TERMINAL=1` releases is unchanged |
+| P6 | Web front-end: browser SD card builder + WebSerial terminal (**built**; needs a real-browser pass) | done | low | **browser + flash** | code done, and the browser pass is now a scripted checklist ([`docs/dev/web-frontend-checks.md`](docs/dev/web-frontend-checks.md)) rather than an exploratory afternoon; open decision on shipping `TERMINAL=1` releases is unchanged |
 
 ---
 
@@ -317,3 +317,25 @@ reaching the same verdicts *and the same fix text* as `verify_card` on a deliber
 been read through the File System Access API, no mp3 has been converted and heard on the device, and no
 `TERMINAL=1` build has been driven over WebSerial. The full list is under "Remaining verification" in
 the design doc. Items 3 and 4 there fold naturally into the P2 bench session.
+
+**That pass is now scripted**, in [`docs/dev/web-frontend-checks.md`](docs/dev/web-frontend-checks.md):
+nine checks with exact steps, the expected output, and the CLI command to diff each result against, so
+it is about thirty minutes rather than exploratory poking. Writing it against the source turned up two
+things worth targeting rather than discovering: `fromDataTransfer` reads `dt.items` *after* an `await`,
+by which time the drag data store may be invalidated (C4 aims at it — a dropped loose file is the
+likely casualty), and the service worker registers only when `location.protocol === 'https:'`, so the
+offline check cannot be run against `make serve-web` and needs a real deploy or a local HTTPS cert.
+
+**Two additions since the build**, both host-verifiable and so done rather than deferred:
+
+- **A Reference tab**, the web counterpart of `sk_card.py layout` — the one subcommand that had no
+  screen. It states what every engine expects on the card, the constraints that fail silently, the
+  sidecar defaults (`radio/rate.txt` sets the playback rate for a whole bank and appeared nowhere in
+  the UI), and the `SK/config.txt` properties with their ranges. It asks nothing of the browser, which
+  makes it the one tab that behaves identically in Safari, and a test asserts it writes down no figure
+  the layout owns.
+- **A drift guard on the service-worker asset list**, which was hand-maintained with nothing checking
+  it. The failure it invited was silent and one-sided — a forgotten entry breaks only offline, only for
+  users who already installed the worker. Now checked against a filesystem walk in both directions,
+  plus an import-graph walk from the entry point, with all three confirmed to fail on the drift they
+  describe.

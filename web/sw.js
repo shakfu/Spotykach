@@ -8,7 +8,7 @@
 // stale copy of card_layout.json would silently check cards against last release's rules, so every
 // fetch also refreshes the entry for next time. Bump CACHE when the asset list changes.
 
-const CACHE = 'sk-card-v1';
+const CACHE = 'sk-card-v2';
 
 const ASSETS = [
   './',
@@ -28,6 +28,7 @@ const ASSETS = [
   './js/ui/verify_view.js',
   './js/ui/build_view.js',
   './js/ui/convert_view.js',
+  './js/ui/reference_view.js',
   './js/ui/terminal_view.js',
   './js/terminal/framing.js',
   './js/terminal/descriptor.js',

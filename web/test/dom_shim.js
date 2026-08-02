@@ -226,7 +226,8 @@ class TextNode {
  * Defaults to the LEAST capable browser - no File System Access, no WebSerial - because that is the
  * configuration the app has to degrade into, and a shim that quietly presents a full Chromium would
  * never exercise the fallbacks. Pass `{fileSystemAccess: true}` / `{serial: true}` to test the other
- * branch.
+ * branch, or pass an OBJECT as `serial` to script what `navigator.serial.requestPort` does - which is
+ * how the failure paths (an empty chooser, a port that goes away) are reached without hardware.
  */
 export function installDom({ fileSystemAccess = false, serial = false } = {}) {
   const doc = new Node('html');
@@ -251,7 +252,9 @@ export function installDom({ fileSystemAccess = false, serial = false } = {}) {
   set('Node', Node);
   set('document', doc);
   set('window', win);
-  set('navigator', serial ? { serial: { requestPort: async () => {} } } : {});
+  set('navigator', serial
+    ? { serial: serial === true ? { requestPort: async () => {} } : serial }
+    : {});
   set('getComputedStyle', () => ({ getPropertyValue: () => '' }));
   set('location', { hash: '', protocol: 'http:' });
   set('URL', globalThis.URL);

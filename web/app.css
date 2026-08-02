@@ -193,6 +193,32 @@ table.layout { width: 100%; border-collapse: collapse; font-size: .88rem; margin
 table.layout th { text-align: left; color: var(--muted); font-weight: 600; padding: .35rem .5rem; }
 table.layout td { padding: .35rem .5rem; border-top: 1px solid var(--line); }
 
+/* --- reference ---------------------------------------------------------------- */
+
+input.filter { width: 100%; max-width: 24rem; }
+
+.chips { display: flex; flex-wrap: wrap; gap: .15rem; margin: .25rem 0 .5rem; }
+.chips button { font-family: var(--mono); font-size: .82rem; }
+.chips button.on { color: var(--fg); font-weight: 600; text-decoration: underline; }
+
+.ref-bank { margin: 1.75rem 0; }
+.ref-bank[hidden] { display: none; }
+.ref-bank h3 { margin-bottom: .2rem; text-transform: uppercase; letter-spacing: .02em; }
+.ref-bank h3 span { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: .85rem; }
+.ref-bank p { max-width: 62ch; margin: .2rem 0 .5rem; }
+
+/* The label column is a th inside tbody, so it needs its own width and its own top border - the
+   base .layout rule only borders td, which on a two-column spec row draws half a line. */
+table.spec th {
+  width: 9rem;
+  vertical-align: top;
+  font-weight: 400;
+  padding: .35rem .5rem;
+  border-top: 1px solid var(--line);
+}
+
+table.spec td { vertical-align: top; word-break: break-word; }
+
 /* --- terminal --------------------------------------------------------------- */
 
 .console {

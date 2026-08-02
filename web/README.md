@@ -4,10 +4,12 @@ A static page that builds, fills and checks an SD card for the spotykach engines
 terminal for `TERMINAL=1` builds. No server, no build step, no dependencies. Design rationale and the
 constraints that shaped it are in [`../docs/dev/web-frontend.md`](../docs/dev/web-frontend.md).
 
-The tabs run **Build, Convert, Verify, Terminal** — the order a person needs them, not the order of
-their value. Verify is the most valuable screen and the wrong first one: the entry state for someone
-who just bought a device is "I have no card yet", and all Verify can say to that is "this is not a
-card". Build hands back a complete, valid, minimal card in one click.
+The tabs run **Build, Convert, Verify, Reference, Terminal** — the order a person needs them, not the
+order of their value. Verify is the most valuable screen and the wrong first one: the entry state for
+someone who just bought a device is "I have no card yet", and all Verify can say to that is "this is
+not a card". Build hands back a complete, valid, minimal card in one click. Reference follows the three
+task tabs because it is a lookup rather than a step — it is `sk_card.py layout` as a screen, and the
+only tab that needs nothing from the browser.
 
 ## Running it
 
@@ -19,6 +21,10 @@ make web-data           # regenerate card_layout.json, patches.json and the test
 
 Opening `index.html` from the filesystem does **not** work: ES modules will not load over `file://`,
 and the browser APIs the page uses are only offered over HTTPS or `localhost`.
+
+The node suite covers the logic but cannot cover the four browser APIs the app is built on.
+[`../docs/dev/web-frontend-checks.md`](../docs/dev/web-frontend-checks.md) is the mechanical pass that
+does — about half an hour with a card, a Daisy and two browsers.
 
 ## The one rule
 
@@ -43,7 +49,7 @@ from `scripts/`; `make test-web` fails if the JS disagrees with the Python.
 index.html  app.css  sw.js         the page, its styles, and offline caching
 card_layout.json  patches.json     GENERATED - do not edit, run `make web-data`
 js/
-  layout.js        card_layout.json, wrapped
+  layout.js        card_layout.json, wrapped, plus the folder-set label both views render
   wav.js           WAV/raw read+write, mirroring card_audio.py
   verify.js        the checker, mirroring sk_card.verify_card
   build.js         the card skeleton, assembled from the exported text

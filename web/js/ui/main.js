@@ -8,15 +8,18 @@ import { loadLayout } from '../layout.js';
 import { mountVerify } from './verify_view.js';
 import { mountBuild } from './build_view.js';
 import { mountConvert } from './convert_view.js';
+import { mountReference } from './reference_view.js';
 import { mountTerminal } from './terminal_view.js';
 
 // Declaration order is tab order; the first entry is what a fresh visit lands on. Build comes first
 // because the entry state for someone who just bought a device is "I have no card yet", and Verify has
-// nothing useful to say to that.
+// nothing useful to say to that. Reference is a lookup rather than a step, so it follows the three task
+// tabs; Terminal is last because it needs a firmware build almost nobody has.
 const VIEWS = {
   build: mountBuild,
   convert: mountConvert,
   verify: mountVerify,
+  reference: mountReference,
   terminal: mountTerminal,
 };
 
