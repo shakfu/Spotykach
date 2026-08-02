@@ -90,16 +90,16 @@ the wrong bank and the findings will differ wildly.)
 
 Drag the card's folder onto the Verify dropzone, in **both** browsers. Expect the same findings as C3.
 
-**Suspect, check carefully.** `platform/cardsource.ts`'s `fromDataTransfer` reads `dt.items` after an `await`, and the drag data
-store is invalidated once the drop event's task ends. The Chromium path returns early for a dropped
-*directory*, so the risk is concentrated in two cases:
+**Was a real bug, now fixed - confirm it stayed fixed.** `platform/cardsource.ts` used to read
+`dt.items` *after* awaiting `getAsFileSystemHandle()`, by which point the browser has invalidated the
+drag data store: a dropped loose file returned nothing at all, silently. Every read of the store now
+happens synchronously before the first `await`, and `test/cardsource.test.ts` drives it with a fake
+transfer that expires the same way (verified to fail against the old ordering). What is left to check
+on real hardware is only that a real browser expires it the way the fake does:
 
-- dropping a **single loose file** onto Verify (falls through to `webkitGetAsEntry()` post-await, which
-  can return `null`, then to `dt.files`);
-- dropping **several** folders or files at once.
-
-If either drops silently to "0 files", that is the bug, and the fix is to take the entries
-synchronously in the drop handler before any `await`.
+- drop a **single loose file** onto Verify - it must be read, not silently ignored;
+- drop **several** folders or files at once;
+- drop a folder in Safari, where only the legacy `webkitGetAsEntry` walk exists.
 
 ### C5 — converting real audio
 

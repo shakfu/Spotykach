@@ -11,6 +11,7 @@ import { mountConvert } from './convert_view.ts';
 import { mountVerify } from './verify_view.ts';
 import { mountReference } from './reference_view.ts';
 import { mountTerminal } from './terminal_view.ts';
+import { nextTabIndex } from './tabs.ts';
 import type { MountFn, ViewContext } from './context.ts';
 
 // Declaration order is tab order; the first entry is what a fresh visit lands on. Build comes first
@@ -50,8 +51,12 @@ async function main(): Promise<void> {
   function show(name: string): void {
     if (!VIEWS[name]) name = DEFAULT_VIEW;
     for (const tab of $$<HTMLButtonElement>('#tabs button')) {
-      tab.classList.toggle('active', tab.dataset.view === name);
-      tab.setAttribute('aria-selected', String(tab.dataset.view === name));
+      const selected = tab.dataset.view === name;
+      tab.classList.toggle('active', selected);
+      tab.setAttribute('aria-selected', String(selected));
+      // Roving tabindex: the selected tab is the group's only stop in the page tab order, so Tab
+      // moves past the whole row and the arrows move within it.
+      tab.tabIndex = selected ? 0 : -1;
     }
     for (const panel of $$<HTMLElement>('#panels > section')) panel.hidden = panel.id !== `panel-${name}`;
     if (!mounted.has(name)) {
@@ -66,9 +71,23 @@ async function main(): Promise<void> {
     if (location.hash.slice(1) !== name) history.replaceState(null, '', `#${name}`);
   }
 
-  for (const tab of $$<HTMLButtonElement>('#tabs button')) {
+  const tabs = $$<HTMLButtonElement>('#tabs button');
+  for (const tab of tabs) {
     tab.addEventListener('click', () => show(tab.dataset.view ?? DEFAULT_VIEW));
   }
+
+  // Selection follows focus, which the authoring practices allow where showing a panel is cheap - and
+  // here it is, since a view mounts once and is only shown thereafter.
+  $('#tabs')!.addEventListener('keydown', (e) => {
+    const ev = e as KeyboardEvent;
+    const next = nextTabIndex(ev.key, tabs.indexOf(document.activeElement as HTMLButtonElement),
+      tabs.length);
+    if (next == null) return;
+    ev.preventDefault();
+    tabs[next].focus();
+    show(tabs[next].dataset.view ?? DEFAULT_VIEW);
+  });
+
   window.addEventListener('hashchange', () => show(location.hash.slice(1)));
 
   // The card layout is versioned with the firmware so the rules on this page match the binaries it

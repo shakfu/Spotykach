@@ -19,8 +19,11 @@ export function mountBuild(root: HTMLElement, ctx: ViewContext): void {
   const status = el('div', { class: 'status' });
   const out = el('div', { class: 'results' });
 
-  const inPlace = el('button', { class: 'primary', onclick: () => model.writeInPlace() },
-    'Write onto a card');
+  // Deliberately NOT `primary`: the zip is the path that works in every browser, and this one is the
+  // Chromium-only enhancement. Two filled buttons side by side means neither is the main action - and
+  // this is the one that is disabled for most visitors, so filled-but-faded reads as the app being
+  // broken rather than as a capability their browser lacks.
+  const inPlace = el('button', { onclick: () => model.writeInPlace() }, 'Write onto a card');
   if (!model.canWriteInPlace()) {
     inPlace.disabled = true;
     inPlace.title = 'This browser has no File System Access API - use the zip';

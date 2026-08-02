@@ -117,18 +117,29 @@ interface FileSystemEntryLike {
  * unlocks in-place editing from a drag; falls back to the older `webkitGetAsEntry` tree walk, which
  * every browser has and which is read-only.
  *
- * NOTE (unverified, C4 in docs/dev/web-frontend-checks.md): the entries are taken from `dt.items`
- * AFTER an await, and the drag data store may already have been invalidated by then. The single
- * dropped-directory case returns before that point on Chromium; a single loose file does not.
+ * EVERY read of the drag data store happens synchronously at the top, before the first `await`.
+ *
+ * That is not style. The store is invalidated once the drop event's task ends, so a `DataTransferItem`
+ * touched after an await can return null and the drop silently yields nothing - and "silently" is the
+ * whole problem: the user sees a dropzone accept their folder and then report zero files. The previous
+ * version called `webkitGetAsEntry()` after awaiting `getAsFileSystemHandle()`, which is exactly that
+ * bug for a single loose file. Promises started here are awaited below; starting them is synchronous.
  */
 export async function fromDataTransfer(dt: DataTransfer): Promise<Card> {
   type ItemWithHandle = DataTransferItem & {
     getAsFileSystemHandle?: () => Promise<FileSystemHandleLike | null>;
   };
   const items = [...dt.items].filter((i) => i.kind === 'file') as ItemWithHandle[];
+  const roots = items
+    .map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() as unknown as FileSystemEntryLike : null))
+    .filter((e): e is FileSystemEntryLike => Boolean(e));
+  const plainFiles = [...dt.files];
+  const pendingHandle = items.length === 1 && typeof items[0].getAsFileSystemHandle === 'function'
+    ? items[0].getAsFileSystemHandle()
+    : null;
 
-  if (items.length === 1 && typeof items[0].getAsFileSystemHandle === 'function') {
-    const handle = await items[0].getAsFileSystemHandle();
+  if (pendingHandle) {
+    const handle = await pendingHandle;
     if (handle && handle.kind === 'directory') return fromDirectoryHandle(handle as DirHandleLike);
   }
 
@@ -156,9 +167,6 @@ export async function fromDataTransfer(dt: DataTransfer): Promise<Card> {
       }
     });
 
-  const roots = items
-    .map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() as unknown as FileSystemEntryLike : null))
-    .filter((e): e is FileSystemEntryLike => Boolean(e));
   if (roots.length === 1 && roots[0].isDirectory) {
     // A single dropped folder IS the card root, so its own name is not part of any path.
     const reader = roots[0].createReader();
@@ -174,7 +182,7 @@ export async function fromDataTransfer(dt: DataTransfer): Promise<Card> {
   }
   await Promise.all(roots.map((e) => readEntry(e, '')));
   if (!roots.length) {
-    for (const f of Array.from(dt.files)) files.push(entryFor(f.name, f));
+    for (const f of plainFiles) files.push(entryFor(f.name, f));
   }
   return { files, dirs, handle: null };
 }

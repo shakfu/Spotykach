@@ -11,10 +11,21 @@
   --grid: #e8ebef;
   --panel: #f7f8fa;
   --accent: #1668c1;
+  /* Text ON the accent, not beside it. A separate token because the answer differs per theme: white
+     reads at 5.6:1 over the light accent and 2.7:1 over the dark one, which is a plain WCAG failure on
+     the primary button - the biggest call to action on the landing tab. */
+  --accent-fg: #ffffff;
   --danger: #c0392b;
+  /* Border and background only, never text: 4.44:1 on white is under the 4.5 text threshold and over
+     the 3:1 non-text one. If this ever becomes a text colour it needs darkening first. */
   --warn: #a86a00;
   --good: #1f7a3d;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* The comfortable reading measure, in one place rather than five. */
+  --measure: 62ch;
+  --radius: 8px;
+  --radius-sm: 6px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -26,6 +37,7 @@
     --grid: #262b31;
     --panel: #1b1e23;
     --accent: #4ea1ff;
+    --accent-fg: #0d1117; /* 7.1:1 against the dark accent; white would be 2.7:1 */
     --danger: #ef6b5e;
     --warn: #e0a336;
     --good: #4cc38a;
@@ -33,6 +45,28 @@
 }
 
 * { box-sizing: border-box; }
+
+/*
+ * Focus, stated rather than inherited.
+ *
+ * There was none of this, which left the whole app on whatever ring the browser happened to draw over
+ * a custom background - and this app is unusually keyboard-shaped: a filter box, a row of chips, five
+ * tabs and a command line. `:focus-visible` rather than `:focus` so a mouse click on a button does not
+ * leave a ring behind it. The accent clears 3:1 against every surface it can land on (5.2-6.8:1).
+ */
+:where(a, button, select, summary, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Honour the system preference. Only the dropzone animates, but "only one" is how it starts. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 body {
   margin: 0 auto;
@@ -52,9 +86,9 @@ code, .mono { font-family: var(--mono); font-size: .9em; }
 .note { font-size: .87rem; }
 .hidden { display: none; }
 /* One line saying what the tab does. If it needs a second sentence it belongs in an .aside. */
-.lead { max-width: 62ch; color: var(--muted); margin: 0 0 1rem; }
+.lead { max-width: var(--measure); color: var(--muted); margin: 0 0 1rem; }
 
-header p { margin: .25rem 0 0; color: var(--muted); max-width: 62ch; }
+header p { margin: .25rem 0 0; color: var(--muted); max-width: var(--measure); }
 #banner span { display: block; margin-top: .35rem; font-family: var(--mono); font-size: .8rem; }
 
 /* --- tabs ------------------------------------------------------------------ */
@@ -79,13 +113,22 @@ header p { margin: .25rem 0 0; color: var(--muted); max-width: 62ch; }
 #tabs button:hover { color: var(--fg); }
 #tabs button.active { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
 
+/* Inset, because a tab sits directly on the bar's bottom rule: an outline offset OUTWARD puts its
+   bottom edge below that rule, which reads as a stray detached underline rather than as focus. */
+#tabs button:focus-visible { outline-offset: -3px; }
+
 /* Three task tabs are the app; Reference is a lookup and Terminal needs a firmware build almost
-   nobody has. Pushing those two to the right says "these are not steps" without hiding them - five
-   equal-weight tabs read as five decisions to make before starting. */
+   nobody has. They are set apart so five tabs do not read as five decisions to make before starting.
+   A GAP AND A RULE, not `margin-left: auto` - flushing them to the far edge of a 62rem container left
+   a hand's width of nothing in the middle, which reads as a layout bug rather than as grouping. */
 #tabs button.secondary { font-size: .92rem; }
 
 /* The first secondary tab is the one that follows a primary; :first-of-type would match Build. */
-#tabs button:not(.secondary) + button.secondary { margin-left: auto; }
+#tabs button:not(.secondary) + button.secondary {
+  margin-left: 1.25rem;
+  padding-left: 1.5rem;
+  border-left: 1px solid var(--line);
+}
 
 /* --- controls --------------------------------------------------------------- */
 
@@ -101,7 +144,7 @@ button {
   font: inherit;
   padding: .4rem .85rem;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--panel);
   color: var(--fg);
   cursor: pointer;
@@ -109,15 +152,17 @@ button {
 
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: .45; cursor: not-allowed; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 button.danger { border-color: var(--danger); color: var(--danger); }
 button.link { border: 0; background: none; color: var(--accent); padding: .2rem .4rem; }
+
+select, input, textarea { accent-color: var(--accent); }
 
 select, input[type=text], input[type=number] {
   font: inherit;
   padding: .35rem .5rem;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--fg);
 }
@@ -158,7 +203,7 @@ input.slot { width: 7rem; }
 
 /* --- findings --------------------------------------------------------------- */
 
-.verdict { padding: .75rem 1rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid var(--muted); }
+.verdict { padding: .75rem 1rem; border-radius: var(--radius); margin: 1rem 0; border-left: 4px solid var(--muted); }
 .verdict p { margin: .25rem 0 0; color: var(--muted); }
 .verdict.good { border-left-color: var(--good); background: color-mix(in srgb, var(--good) 8%, transparent); }
 .verdict.bad { border-left-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
@@ -169,7 +214,7 @@ input.slot { width: 7rem; }
   padding: .5rem .75rem;
   margin: .5rem 0;
   background: var(--panel);
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
 .finding.error { border-left-color: var(--danger); }
@@ -198,15 +243,41 @@ input.slot { width: 7rem; }
    the landing tab ask for 121 words of reading before offering two buttons. */
 .aside { margin: 1.25rem 0; font-size: .92rem; }
 
+/* Two foldouts in a row are one list of foldouts, not two sections. */
+.aside + .aside { margin-top: .35rem; }
+
+/*
+ * The marker is drawn rather than inherited.
+ *
+ * The default disclosure triangle is positioned OUTSIDE the summary's box, so it hangs into the page
+ * padding and every foldout starts ten pixels left of every other line on the page - a ragged left
+ * edge that reads as a mistake. Drawing it as a border triangle puts it exactly where we say, costs
+ * no glyph, and rotates on open.
+ */
 .aside > summary {
   cursor: pointer;
   color: var(--muted);
-  padding: .25rem 0;
-  list-style-position: outside;
+  padding: .25rem 0 .25rem 1.1rem;
+  position: relative;
+  list-style: none;
 }
 
+.aside > summary::-webkit-details-marker { display: none; }
+
+.aside > summary::before {
+  content: "";
+  position: absolute;
+  left: .1rem;
+  top: .7em;
+  border: .3rem solid transparent;
+  border-left-color: currentColor;
+  transform-origin: .15rem .3rem;
+  transition: transform .12s;
+}
+
+.aside[open] > summary::before { transform: rotate(90deg); }
 .aside > summary:hover { color: var(--fg); }
-.aside > * { max-width: 62ch; }
+.aside > * { max-width: var(--measure); }
 .aside > p { margin: .5rem 0 .5rem 1.1rem; color: var(--muted); }
 .aside > table { margin-left: 1.1rem; width: calc(100% - 1.1rem); }
 .aside[open] > summary { color: var(--fg); margin-bottom: .25rem; }
@@ -233,10 +304,9 @@ input.filter { width: 100%; max-width: 24rem; }
 .field.inline { flex-direction: row; align-items: center; gap: .4rem; }
 
 .ref-bank { margin: 1.75rem 0; }
-.ref-bank[hidden] { display: none; }
 .ref-bank h3 { margin-bottom: .2rem; text-transform: uppercase; letter-spacing: .02em; }
 .ref-bank h3 span { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: .85rem; }
-.ref-bank p { max-width: 62ch; margin: .2rem 0 .5rem; }
+.ref-bank p { max-width: var(--measure); margin: .2rem 0 .5rem; }
 
 /* The label column is a th inside tbody, so it needs its own width and its own top border - the
    base .layout rule only borders td, which on a two-column spec row draws half a line. */
@@ -257,7 +327,7 @@ table.spec td { vertical-align: top; word-break: break-word; }
   overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--radius) var(--radius) 0 0;
   padding: .5rem .75rem;
   font-family: var(--mono);
   font-size: .82rem;
@@ -271,7 +341,7 @@ table.spec td { vertical-align: top; word-break: break-word; }
 
 input.cmdline {
   width: 100%;
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 var(--radius) var(--radius);
   border-top: 0;
   font-family: var(--mono);
   font-size: .85rem;
@@ -294,19 +364,31 @@ input.cmdline {
 .actions { display: flex; flex-wrap: wrap; gap: .35rem; }
 .actions button { font-family: var(--mono); font-size: .82rem; }
 
-canvas.plot { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; margin: .5rem 0; }
+canvas.plot { width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); margin: .5rem 0; }
 
 footer {
-  margin-top: 3rem;
+  margin-top: 2rem;
   padding-top: 1rem;
   border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: .87rem;
 }
 
-footer p { max-width: 62ch; }
+footer p { max-width: var(--measure); }
 
 @media (max-width: 640px) {
   .row { grid-template-columns: 1fr; }
   .row .value { text-align: left; }
+
+  /* Tables are the one thing here that cannot reflow. The format column carries strings like "WAV,
+     32-bit IEEE float (WAV AudioFormat 3) ..." and the firmware column carries unbroken paths, either
+     of which can push the whole page sideways - and a body that scrolls horizontally is the classic
+     way a page reads as broken on a phone. Wrap hard rather than overflow. */
+  table.layout { font-size: .82rem; }
+  table.layout th, table.layout td { padding: .3rem .35rem; overflow-wrap: anywhere; }
+  table.spec th { width: 6.5rem; }
+
+  /* The spec label column plus a nine-rem value does not fit; let the pair stack instead. */
+  .fields { gap: .6rem; }
+  .console { height: 14rem; }
 }

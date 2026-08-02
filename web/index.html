@@ -22,20 +22,23 @@
      Reference sits after the three task tabs because it is not a step in the job - it is the lookup
      you consult while doing one of them - and Terminal stays last because it needs a firmware build
      almost nobody has. -->
-<nav id="tabs" role="tablist">
-  <button data-view="build" role="tab" aria-selected="true">Build</button>
-  <button data-view="convert" role="tab" aria-selected="false">Convert</button>
-  <button data-view="verify" role="tab" aria-selected="false">Verify</button>
-  <button data-view="reference" role="tab" aria-selected="false" class="secondary">Reference</button>
-  <button data-view="terminal" role="tab" aria-selected="false" class="secondary">Terminal</button>
+<!-- The roving tabindex is part of the contract, not decoration: `role="tablist"` means the whole
+     group is ONE stop in the page's tab order and the arrow keys move within it. main.ts keeps
+     tabindex in step with aria-selected; these are the values for the tab that loads selected. -->
+<nav id="tabs" role="tablist" aria-label="Card tools">
+  <button id="tab-build" data-view="build" role="tab" aria-selected="true" aria-controls="panel-build" tabindex="0">Build</button>
+  <button id="tab-convert" data-view="convert" role="tab" aria-selected="false" aria-controls="panel-convert" tabindex="-1">Convert</button>
+  <button id="tab-verify" data-view="verify" role="tab" aria-selected="false" aria-controls="panel-verify" tabindex="-1">Verify</button>
+  <button id="tab-reference" data-view="reference" role="tab" aria-selected="false" aria-controls="panel-reference" tabindex="-1" class="secondary">Reference</button>
+  <button id="tab-terminal" data-view="terminal" role="tab" aria-selected="false" aria-controls="panel-terminal" tabindex="-1" class="secondary">Terminal</button>
 </nav>
 
 <main id="panels">
-  <section id="panel-build" role="tabpanel"></section>
-  <section id="panel-convert" role="tabpanel" hidden></section>
-  <section id="panel-verify" role="tabpanel" hidden></section>
-  <section id="panel-reference" role="tabpanel" hidden></section>
-  <section id="panel-terminal" role="tabpanel" hidden></section>
+  <section id="panel-build" role="tabpanel" aria-labelledby="tab-build"></section>
+  <section id="panel-convert" role="tabpanel" aria-labelledby="tab-convert" hidden></section>
+  <section id="panel-verify" role="tabpanel" aria-labelledby="tab-verify" hidden></section>
+  <section id="panel-reference" role="tabpanel" aria-labelledby="tab-reference" hidden></section>
+  <section id="panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden></section>
 </main>
 
 <footer>

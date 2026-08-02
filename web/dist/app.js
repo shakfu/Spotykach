@@ -443,8 +443,11 @@ function fromFileList(list) {
 }
 async function fromDataTransfer(dt) {
   const items = [...dt.items].filter((i) => i.kind === "file");
-  if (items.length === 1 && typeof items[0].getAsFileSystemHandle === "function") {
-    const handle = await items[0].getAsFileSystemHandle();
+  const roots = items.map((i) => i.webkitGetAsEntry ? i.webkitGetAsEntry() : null).filter((e) => Boolean(e));
+  const plainFiles = [...dt.files];
+  const pendingHandle = items.length === 1 && typeof items[0].getAsFileSystemHandle === "function" ? items[0].getAsFileSystemHandle() : null;
+  if (pendingHandle) {
+    const handle = await pendingHandle;
     if (handle && handle.kind === "directory")
       return fromDirectoryHandle(handle);
   }
@@ -471,7 +474,6 @@ async function fromDataTransfer(dt) {
       resolve();
     }
   });
-  const roots = items.map((i) => i.webkitGetAsEntry ? i.webkitGetAsEntry() : null).filter((e) => Boolean(e));
   if (roots.length === 1 && roots[0].isDirectory) {
     const reader = roots[0].createReader();
     await new Promise((resolve) => {
@@ -487,7 +489,7 @@ async function fromDataTransfer(dt) {
   }
   await Promise.all(roots.map((e) => readEntry(e, "")));
   if (!roots.length) {
-    for (const f of Array.from(dt.files))
+    for (const f of plainFiles)
       files.push(entryFor(f.name, f));
   }
   return { files, dirs, handle: null };
@@ -562,7 +564,7 @@ function mountBuild(root, ctx) {
   });
   const status = el("div", { class: "status" });
   const out = el("div", { class: "results" });
-  const inPlace = el("button", { class: "primary", onclick: () => model.writeInPlace() }, "Write onto a card");
+  const inPlace = el("button", { onclick: () => model.writeInPlace() }, "Write onto a card");
   if (!model.canWriteInPlace()) {
     inPlace.disabled = true;
     inPlace.title = "This browser has no File System Access API - use the zip";
@@ -2346,6 +2348,24 @@ function mountTerminal(root, _ctx) {
   ]);
 }
 
+// src/ui/tabs.ts
+function nextTabIndex(key, current, count) {
+  if (count <= 0 || current < 0)
+    return null;
+  switch (key) {
+    case "ArrowRight":
+      return (current + 1) % count;
+    case "ArrowLeft":
+      return (current - 1 + count) % count;
+    case "Home":
+      return 0;
+    case "End":
+      return count - 1;
+    default:
+      return null;
+  }
+}
+
 // src/ui/main.ts
 var VIEWS = {
   build: mountBuild,
@@ -2378,8 +2398,10 @@ This page is generated: run \`make web-data\` and serve web/ over http ` + "(fil
     if (!VIEWS[name])
       name = DEFAULT_VIEW;
     for (const tab of $$("#tabs button")) {
-      tab.classList.toggle("active", tab.dataset.view === name);
-      tab.setAttribute("aria-selected", String(tab.dataset.view === name));
+      const selected = tab.dataset.view === name;
+      tab.classList.toggle("active", selected);
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
     }
     for (const panel of $$("#panels > section"))
       panel.hidden = panel.id !== `panel-${name}`;
@@ -2395,9 +2417,19 @@ This page is generated: run \`make web-data\` and serve web/ over http ` + "(fil
     if (location.hash.slice(1) !== name)
       history.replaceState(null, "", `#${name}`);
   }
-  for (const tab of $$("#tabs button")) {
+  const tabs = $$("#tabs button");
+  for (const tab of tabs) {
     tab.addEventListener("click", () => show(tab.dataset.view ?? DEFAULT_VIEW));
   }
+  $("#tabs").addEventListener("keydown", (e) => {
+    const ev = e;
+    const next = nextTabIndex(ev.key, tabs.indexOf(document.activeElement), tabs.length);
+    if (next == null)
+      return;
+    ev.preventDefault();
+    tabs[next].focus();
+    show(tabs[next].dataset.view ?? DEFAULT_VIEW);
+  });
   window.addEventListener("hashchange", () => show(location.hash.slice(1)));
   $("#banner").append(el("span", { class: "muted" }, `${ctx.layout.banks.length} banks, scan floor ${ctx.layout.scan.min_bytes / 1024} KB, ` + `name limit ${ctx.layout.scan.max_name}`));
   show(location.hash.slice(1) || DEFAULT_VIEW);
@@ -2407,5 +2439,5 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 }
 main();
 
-//# debugId=174E19FE926E743464756E2164756E21
+//# debugId=39AC183EF25BCF2164756E2164756E21
 //# sourceMappingURL=app.js.map

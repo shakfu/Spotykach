@@ -10,6 +10,7 @@ import './verify.test.ts';
 import './build.test.ts';
 import './terminal.test.ts';
 import './misc.test.ts';
+import './cardsource.test.ts';
 import './model.test.ts';
 import './ui.test.ts';
 import './offline.test.ts';

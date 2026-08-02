@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { suite, test, ok, eq, readWeb, layoutData } from './harness.ts';
 import { installDom, tags, textOf, type ShimNode } from './dom_shim.ts';
 import { makeLayout } from '../src/core/layout.ts';
+import { nextTabIndex } from '../src/ui/tabs.ts';
 
 suite('ui');
 
@@ -84,8 +85,15 @@ test('the landing tab is Build, and the tabs run in the order a person needs the
   const panels = [...html.matchAll(/id="panel-(\w+)"/g)].map((m) => m[1]);
   eq(panels, TAB_ORDER, 'panels must follow the tabs, or the wrong one is visible on load');
   ok(/data-view="build"[^>]*aria-selected="true"/.test(html), 'Build is selected on load');
-  ok(html.includes('<section id="panel-build" role="tabpanel"></section>'),
-    'and its panel is the one not hidden');
+  // By meaning rather than by literal markup: the build panel is the one WITHOUT `hidden`, and every
+  // other panel has it. Matching the exact tag made this fail the moment the panel gained an
+  // aria-labelledby, which is a test breaking on something it was not there to check.
+  const panelTag = (view: string) =>
+    html.match(new RegExp(`<section id="panel-${view}"[^>]*>`))![0];
+  ok(!panelTag('build').includes('hidden'), 'the build panel is visible on load');
+  for (const view of TAB_ORDER.slice(1)) {
+    ok(panelTag(view).includes('hidden'), `${view}: every other panel starts hidden`);
+  }
 });
 
 test('main.ts defaults to the same tab the markup pre-selects', () => {
@@ -95,6 +103,49 @@ test('main.ts defaults to the same tab the markup pre-selects', () => {
   const order = [...js.matchAll(/^ {2}(\w+): mount/gm)].map((m) => m[1]);
   eq(order, TAB_ORDER);
   ok(js.includes('Object.keys(VIEWS)[0]'), 'the default is derived from the map, not restated');
+});
+
+test('the tablist honours the contract its roles promise', () => {
+  // Declaring role=tablist/role=tab tells assistive tech two things: the group is ONE stop in the tab
+  // order, and the arrows move within it. Declaring them without implementing them is worse than
+  // using plain buttons - the widget is then broken rather than merely plain.
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const tabs = [...html.matchAll(/<button id="tab-(\w+)"[^>]*>/g)];
+  eq(tabs.map((m) => m[1]), TAB_ORDER, 'every tab carries an id, which the panel refers back to');
+
+  for (const [tag, view] of tabs) {
+    ok(tag.includes(`aria-controls="panel-${view}"`), `${view}: tab must name its panel`);
+    // Exactly one tab is reachable by Tab; the rest are reached with the arrows.
+    const wants = view === TAB_ORDER[0] ? '0' : '-1';
+    ok(tag.includes(`tabindex="${wants}"`), `${view}: roving tabindex should start at ${wants}`);
+  }
+  for (const view of TAB_ORDER) {
+    ok(html.includes(`id="panel-${view}" role="tabpanel" aria-labelledby="tab-${view}"`),
+      `${view}: panel must point back at its tab`);
+  }
+  ok(/id="tabs"[^>]*aria-label=/.test(html), 'the tablist is named');
+
+  const js = readFileSync(new URL('../src/ui/main.ts', import.meta.url), 'utf8');
+  ok(js.includes('tab.tabIndex = selected ? 0 : -1'), 'and tabindex is kept in step with selection');
+});
+
+test('arrow keys move around the tab row, and wrap', () => {
+  const n = TAB_ORDER.length;
+  eq(nextTabIndex('ArrowRight', 0, n), 1);
+  eq(nextTabIndex('ArrowLeft', 1, n), 0);
+  eq(nextTabIndex('ArrowRight', n - 1, n), 0, 'the last tab wraps forward to the first');
+  eq(nextTabIndex('ArrowLeft', 0, n), n - 1, 'and the first wraps back to the last');
+  eq(nextTabIndex('Home', 3, n), 0);
+  eq(nextTabIndex('End', 0, n), n - 1);
+});
+
+test('the tab row ignores keys that are not its own', () => {
+  // Returning null rather than a number is what lets main.ts leave preventDefault alone - otherwise
+  // Tab, Enter and every character key would be swallowed by the tablist.
+  for (const key of ['Tab', 'Enter', ' ', 'a', 'ArrowUp', 'Escape']) {
+    eq(nextTabIndex(key, 0, 5), null, key);
+  }
+  eq(nextTabIndex('ArrowRight', -1, 5), null, 'and it does nothing when focus is outside the row');
 });
 
 test('the page loads the built bundle, not the sources', () => {
