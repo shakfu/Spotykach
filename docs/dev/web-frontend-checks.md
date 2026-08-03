@@ -203,6 +203,20 @@ Then:
 
 ### C10 — flashing real firmware (Chrome only)
 
+> **Status, 2026-08-03.** C10a and C10b **pass** on hardware (Daisy + spotykach bootloader, Chrome on
+> Linux): the device enumerates and its interface is claimed, images are identified from their banner,
+> the bootloader binary and a non-firmware file are both refused, and a real write of `bard`
+> (`0.6.1-11-g8871468`, 163 KB) boots and runs. **C10c is OUTSTANDING** — see the warning on it below.
+>
+> Two findings from that session are now baked into the code and worth not re-discovering:
+> - The download loop must re-issue `SET_ADDRESS` before **every** chunk and always write **block 2**.
+>   Setting the address once and incrementing the block number is a legal reading of DFuSe, and it
+>   does not work here — it produced a device whose first byte did not match what was sent.
+> - This bootloader is **not** a full DfuSe implementation: it acknowledges `UPLOAD` and answers with
+>   an uninitialised buffer rather than QSPI contents or an honest stall. Read-back verification is
+>   therefore gated on a capability probe after the erase, and *unverified* is the normal result.
+>   Before that was understood, two good flashes were reported as failures.
+
 The one check on this list whose failure mode is a device that needs recovering rather than a page that
 needs reloading, so it is written to be run in an order where nothing is risked until the safe parts
 have already passed. `web/test/flash.test.ts` covers the protocol against a scripted device — every
@@ -236,8 +250,10 @@ white.
 8. Power-cycle. The engine must boot and its banner must match what the page said it wrote — confirm
    over the Terminal tab, or by ear.
 
-**C10c — the interruption, which is the whole safety argument.** Do this deliberately, and do it on an
-engine you are willing to re-flash.
+**C10c — the interruption, which is the whole safety argument. OUTSTANDING as of 2026-08-03.** Do this
+deliberately, and do it on an engine you are willing to re-flash. Until it passes, the Flash tab's
+central claim — that an interrupted write costs a re-flash rather than a device — is reasoned from the
+memory map and confirmed by no one.
 
 9. Start a flash of a QSPI engine (`chuck` or `csound` — big enough to leave a window) and hit
    **Cancel** partway through.
@@ -264,9 +280,9 @@ WebUSB is unavailable and show the `dfu-util` command, with no enabled buttons.
 | C7 reference | | | |
 | C8 terminal | | n/a | |
 | C9 offline | | | |
-| C10a refusals | | | must refuse the bootloader image |
-| C10b real write | | n/a | note whether read-back verify ran |
-| C10c cancel + recover | | n/a | **the safety claim** |
+| C10a refusals | PASS 2026-08-03 | | bootloader image and a non-firmware file both refused |
+| C10b real write | PASS 2026-08-03 | n/a | bard 0.6.1-11-g8871468; *unverified* by design, boots and runs |
+| C10c cancel + recover | **OUTSTANDING** | n/a | **the safety claim — untested** |
 | C10d platform notes | | | |
 
 Record failures as issues against `web/`, and add a regression test to `web/test/` for anything the
