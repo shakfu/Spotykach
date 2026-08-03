@@ -139,14 +139,42 @@ This is also the one place CMake is structurally *better* than the canonical bui
 
 ### Verified
 
-All 22 engines build under both systems. Sizes were compared on clean trees — note that a Makefile build of engine B on top of engine A's `build/` is **not** a valid baseline: the stamps force only `app.o`, `version.o` and the three stream TUs to rebuild, so TUs like `card.o` and `storage.o` keep the previous engine's `SPK_USE_STREAM` setting. That contamination read as a 6 KB size difference until the tree was cleaned.
+All 22 engines build under both systems.
 
-| engine | Make `SRAM_EXEC` | CMake `SRAM_EXEC` | delta |
-|---|---|---|---|
-| pstretch | 164448 B (80.30%) | 165704 B (80.91%) | +1256 B |
-| reverb | 185796 B (60.48%) | 187060 B (60.89%) | +1264 B |
+Sizes must be compared on **clean trees**. A Makefile build of engine B on top of engine A's `build/` is not a valid baseline: the stamps force only `app.o`, `version.o` and the three stream TUs to rebuild, so TUs like `card.o` and `storage.o` keep the previous engine's `SPK_USE_STREAM` setting. That contamination read as a 6 KB difference until the tree was cleaned. `make dist` / `make dist-cmake` avoid the trap by construction — the canonical path cleans per engine, and the CMake path gives each engine its own directory.
 
-`SRAM` matches exactly. The residual ~1.26 KB is Cause 3 above (newlib's `_impure_data`), still present and still deliberate.
+Full published set, `.bin` sizes at `0.6.1-14-g3327c33`, produced by those two targets:
+
+| engine | make | cmake | delta | | engine | make | cmake | delta |
+|---|---:|---:|---:|---|---|---:|---:|---:|
+| bard | 167184 | 168448 | +1264 | | pstretch | 164448 | 165704 | +1256 |
+| chuck | 1415352 | 1416900 | +1548 | | qdelay | 155376 | 156632 | +1256 |
+| csound | 2345828 | 2346992 | +1164 | | radio | 159816 | 161072 | +1256 |
+| delay | 154440 | 155696 | +1256 | | reso | 184140 | 185404 | +1264 |
+| edrums | 163388 | 164644 | +1256 | | reverb | 185796 | 187060 | +1264 |
+| filter | 158424 | 159680 | +1256 | | shuttle | 173864 | 175120 | +1256 |
+| glitch | 158056 | 159312 | +1256 | | softcut | 179340 | 180784 | +1444 |
+| graincloud | 184492 | 185856 | +1364 | | tape | 173376 | 174632 | +1256 |
+| mosc | 304820 | 306188 | +1368 | | voice | 160256 | 161504 | +1248 |
+
+CMake is larger on **18 of 18**, range 1164–1548 B, mean 1290 B, mode **1256 B** (nine engines). That mode is Cause 3 measured exactly: `.text` +272, `.data` +972, `.init_array` +4 = 1248 B, plus alignment. Thirteen of eighteen sit in a 1248–1264 B band. `.bss` matches exactly everywhere.
+
+The point of the table is the **absence of an outlier**. No engine diverges by a different order of magnitude, which is the failure a whole-set comparison exists to rule out.
+
+Five engines sit outside the band: `csound` +1164 (*below* it), `graincloud` +1364, `mosc` +1368, `softcut` +1444, `chuck` +1548. The four highest are the largest or most libc-hungry engines, and `csound` coming in low is consistent with `libcsound.a` already pulling `atexit`/`__register_exitproc` in **both** builds, leaving only the `impure_data` delta. That reading is **inference from the shape of the data** — the symbol-level breakdown was verified on `chorus` only. Pinning it down is one `nm` diff per engine if it ever matters.
+
+In proportion the delta is negligible: 0.05% on `csound`, ~0.8% on the small SRAM engines. Nor is any budget threatened. Since the `SRAM_EXEC` rebalance to 300K the loaded image sits near 60% on every SRAM engine, so 1.25 KB is ~0.4 percentage points:
+
+```
+reso        SRAM_EXEC 60.35%   SRAM 23.97%
+graincloud            60.49%        74.91%
+reverb                60.89%        27.79%
+bard                  54.83%        62.60%
+```
+
+The one engine where it could have mattered — `pstretch`, at 93.17% of its data region — takes the delta in `SRAM_EXEC` (80.91% vs 80.30%), not in the region that is nearly full.
+
+**Regenerating this table:** `make dist VERSION=<v>` then `make dist-cmake VERSION=<v>`, and diff the two `MANIFEST.txt` files. The comparison is only valid when the firmware source is identical and the two version strings are the **same length** — the banner is baked into the image, so a shorter or longer version string shifts every size by that difference.
 
 ### Building a full release through CMake
 
