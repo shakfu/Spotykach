@@ -1,0 +1,48 @@
+/* themes/dark.css - Plain, after dark.
+ *
+ * Loaded on top of vendor/water.css/dark.css. This is the SAME theme as Plain in every respect that
+ * is not a colour: same framework, same structure, same type. So it does not restate any of that -
+ * it imports Plain's skin and overrides the palette.
+ *
+ * WHY AN IMPORT RATHER THAN A COPY. A theme is two <link>s, and there is no third slot to put a
+ * shared layer in. The alternative was two hundred duplicated lines that would drift the first time
+ * either was touched - the exact failure app.css exists to prevent. One extra request, same origin,
+ * precached by sw.js, and @import is hoisted above everything below it so the cascade order is
+ * right: Plain's rules, then these.
+ *
+ * WHAT ACTUALLY DIFFERS. Four things, and they are all colour:
+ *   - color-scheme, so the browser's own chrome (scrollbars, the ::backdrop, form controls) follows;
+ *   - the three severity hues, lightened to clear 4.5:1 on water's dark slate ground;
+ *   - the two places white text sat on the accent, which is unreadable on a light-blue link colour;
+ *   - shadows, which are invisible as black-on-dark and have to become a border instead.
+ * Everything else - the greys, the rules, the panel fills - is already derived from water.css's own
+ * custom properties by Plain, and the dark build supplies a different set of those. That is the
+ * whole reason this file is short.
+ */
+
+@import url("./plain.css");
+
+:root {
+  /* Overrides Plain's `light`. Without it the scrollbars, the modal backdrop and every select and
+     checkbox render in light chrome on a dark page. */
+  color-scheme: dark;
+
+  /* Plain's reds and greens are chosen against white and are far too dark to read on #202b38. */
+  --danger: #ff8a80;
+  --warn: #e0a336;
+  --good: #6ee7a8;
+}
+
+/* water.css's dark accent is a light blue (#41adff). White on it fails contrast; the page ground
+   passes comfortably and reads as a filled button either way. */
+button.primary { color: var(--background-body, #202b38); }
+.chips button.on { color: var(--background-body, #202b38); }
+
+/* A black drop shadow does nothing over a dark ground, so the menu is separated by a line instead.
+   Kept subtle: this is the one element that floats, and it only has to look detached. */
+#menubar [role=menu] {
+  border-color: var(--line);
+  box-shadow: 0 6px 20px rgb(0 0 0 / .5);
+}
+
+dialog#about { box-shadow: 0 12px 40px rgb(0 0 0 / .6); }

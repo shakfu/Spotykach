@@ -15,13 +15,18 @@
 <link rel="stylesheet" id="theme-skin" href="./themes/system6.css">
 <script>
   // Inline, in the head, and deliberately: the theme has to be settled BEFORE the first paint, or a
-  // reader who chose the plain theme gets a flash of Chicago on every page load. Five lines here beats
-  // that. The list is duplicated in src/ui/theme.ts and a test asserts the two agree.
+  // reader who chose another theme gets a flash of Chicago on every page load - and a reader who
+  // chose Dark gets a white one. The list is duplicated in src/ui/theme.ts and a test asserts the
+  // two agree. Only the non-default themes are here: System 6 is what the two hrefs above say.
   try {
     var t = localStorage.getItem('sk-card-theme');
-    if (t === 'plain') {
-      document.getElementById('theme-framework').href = './vendor/water.css/water.css';
-      document.getElementById('theme-skin').href = './themes/plain.css';
+    var sheets = {
+      'plain': ['./vendor/water.css/water.css', './themes/plain.css'],
+      'dark': ['./vendor/water.css/dark.css', './themes/dark.css']
+    };
+    if (sheets[t]) {
+      document.getElementById('theme-framework').href = sheets[t][0];
+      document.getElementById('theme-skin').href = sheets[t][1];
     }
   } catch (e) { /* private mode: the default theme is a fine answer */ }
 </script>

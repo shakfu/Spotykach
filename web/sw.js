@@ -11,17 +11,20 @@
 // One bundle rather than the twenty modules this used to list: the sources are TypeScript now, so the
 // browser is served `dist/app.js` and the hand-maintained module list - the thing that could silently
 // go stale and break offline - is gone with it. The remaining entries are the page and its data.
-const CACHE = 'sk-card-v7';
+const CACHE = 'sk-card-v8';
 
 const ASSETS = [
   './',
   './index.html',
   './app.css',
-  // Both themes, not just the active one: switching theme while offline must not produce an
-  // unstyled page, and the inactive skin is 6 KB.
+  // All three themes, not just the active one: switching theme while offline must not produce an
+  // unstyled page, and a skin is 6 KB. dark.css @imports plain.css, so both are needed for it to
+  // render at all - caching only the one that is linked would give an offline reader a bare page.
   './themes/system6.css',
   './themes/plain.css',
+  './themes/dark.css',
   './vendor/water.css/water.css',
+  './vendor/water.css/dark.css',
   './card_layout.json',
   './patches.json',
   './engines.json',

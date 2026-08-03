@@ -5,10 +5,19 @@ terminal for `TERMINAL=1` builds. TypeScript, bundled by [bun](https://bun.sh) i
 no server, no JavaScript dependencies. Design rationale and the constraints that shaped it are in
 [`../docs/dev/web-frontend.md`](../docs/dev/web-frontend.md).
 
-It ships **two themes**, switched from the View menu and remembered in `localStorage`:
-**System 6** (the default, via [system.css](https://github.com/sakofchit/system.css)) and **Plain**
-(via [water.css](https://watercss.kognise.dev/), light and dark, ordinary system type - the one for
-reading the engine manuals). Both are MIT and vendored in `vendor/`.
+It ships **three themes**, switched from the View menu and remembered in `localStorage`:
+**System 6** (the default, via [system.css](https://github.com/sakofchit/system.css)), **Plain**
+(via [water.css](https://watercss.kognise.dev/), ordinary system type on white - the one for reading
+the engine manuals) and **Dark** (the same theme on water.css's dark build). Both frameworks are MIT
+and vendored in `vendor/`.
+
+Dark is a **choice, not a preference**: the vendored water.css files are its separate `light` and
+`dark` builds rather than the `auto` one, which follows `prefers-color-scheme`. With auto, Plain
+changed appearance on its own - the plain, white, for-reading theme came up on a dark slate ground
+for anyone whose system was in dark mode, which is the opposite of what it is for. Now the reader
+picks, in the View menu, and it is remembered. `themes/dark.css` is Plain's skin plus a palette: it
+`@import`s `plain.css` and overrides the four things that are actually colour, because a theme is two
+`<link>`s and there is no third slot for a shared layer.
 
 A theme is two files: the vendored framework and a skin in `themes/`. Everything structural lives in
 `app.css` and is written against tokens, so a theme is a palette plus the places a framework's
@@ -78,7 +87,9 @@ from `scripts/`; `make test-web` fails if this side disagrees with the Python.
 ```
 index.html  app.css  sw.js         the page, its shared styles, and offline caching
 themes/system6.css  plain.css      one skin per theme: palette, chrome, severity reinforcement
+       dark.css                    ... and dark.css is plain.css @imported, plus a palette
 vendor/system.css/                 VENDORED - system.css + the fonts and button frames it references
+vendor/water.css/                  VENDORED - the light and dark builds; see the README.txt beside them
 card_layout.json  patches.json     GENERATED - do not edit, run `make web-data`
 engines.json                       GENERATED from docs/engines/*.md - the Engines menu + Reference
 engines/<name>.html                GENERATED - each engine's manual, rendered from its markdown

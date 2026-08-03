@@ -1,14 +1,19 @@
 /* themes/plain.css - the readable alternative.
  *
  * Loaded on top of vendor/water.css and app.css. water.css is fully CLASSLESS, which is exactly what
- * makes it a good second theme: it styles elements, has no opinion about this app's components, and
- * carries both a light and a dark palette that follow the system preference. Everything it does not
- * know about is what app.css already handles through tokens, so this file is mostly a mapping.
+ * makes it a good second theme: it styles elements and has no opinion about this app's components.
+ * Everything it does not know about is what app.css already handles through tokens, so this file is
+ * mostly a mapping.
  *
- * WHY A SECOND THEME AT ALL. System 6 costs two real things: dark mode, and legibility over length.
- * That did not matter much when the app was five short screens of controls, and it matters now that
- * it renders full manuals - bard.md is fifty kilobytes of prose, and a bitmap face designed for
- * twelve-pixel menu labels is not the thing to read it in. This theme is the one for reading.
+ * WHY A SECOND THEME AT ALL. System 6 costs legibility over length. That did not matter much when
+ * the app was five short screens of controls, and it matters now that it renders full manuals -
+ * bard.md is fifty kilobytes of prose, and a bitmap face designed for twelve-pixel menu labels is
+ * not the thing to read it in. This theme is the one for reading.
+ *
+ * WHITE, ALWAYS. The vendored file is water.css's LIGHT build, not the auto one, and color-scheme is
+ * pinned above. The auto build follows prefers-color-scheme, so on a dark-mode system this theme -
+ * the plain one, the reading one - came up on a dark slate-green ground, which is neither. Plain
+ * means white paper and black text and no second guess about it. Neither theme has a dark mode.
  *
  * SEVERITY WITH COLOUR. The word (ERROR / WARNING / OK) is in the markup and does not change between
  * themes - that is what makes the two interchangeable at all. What changes is the reinforcement: here
@@ -17,7 +22,9 @@
  */
 
 :root {
-  color-scheme: light dark;
+  /* Light, and only light. Declaring it stops the browser rendering form controls, scrollbars and
+     the ::backdrop in dark chrome on a dark-mode system, which is what a bare `light dark` did. */
+  color-scheme: light;
 
   /* water.css exposes its own palette as custom properties; borrowing them keeps the two layers in
      step through a theme change instead of hardcoding a second set of greys beside it. */
@@ -38,16 +45,6 @@
   --measure: 68ch;
   --radius: 8px;
   --radius-sm: 6px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* Lightened so they still clear 4.5:1 against water.css's dark background - the light-mode reds
-       and greens are far too dark to read on it. */
-    --danger: #ff8a80;
-    --warn: #e0a336;
-    --good: #6ee7a8;
-  }
 }
 
 body {

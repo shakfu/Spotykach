@@ -4,7 +4,7 @@
 // structure, spacing, the components - is in app.css and written against tokens, so switching is
 // swapping two hrefs rather than reloading a different application.
 //
-// The same list appears as five inline lines in index.html's <head>, because the choice has to be
+// The same list appears as a lookup table in index.html's <head>, because the choice has to be
 // applied before the first paint or the reader sees a flash of the wrong theme on every load. A test
 // asserts the two copies agree, since a silent disagreement is a page that flickers.
 
@@ -30,7 +30,14 @@ export const THEMES: Theme[] = [
     label: 'Plain',
     framework: './vendor/water.css/water.css',
     skin: './themes/plain.css',
-    note: 'Light or dark, system font. The one for reading the manuals.',
+    note: 'White paper, system font. The one for reading the manuals.',
+  },
+  {
+    id: 'dark',
+    label: 'Dark',
+    framework: './vendor/water.css/dark.css',
+    skin: './themes/dark.css',
+    note: 'Plain, on a dark ground. For a dim room.',
   },
 ];
 

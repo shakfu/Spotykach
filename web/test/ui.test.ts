@@ -186,7 +186,7 @@ test('the page loads the built bundle, not the sources', () => {
   ok(!html.includes('src="./src/'), 'and must not try to load a .ts entry point');
 });
 
-for (const sheet of ['app.css', 'themes/system6.css', 'themes/plain.css']) {
+for (const sheet of ['app.css', 'themes/system6.css', 'themes/plain.css', 'themes/dark.css']) {
   test(`${sheet} defines no class the app never uses`, () => {
   // The visual vocabulary is the thing that made this page feel complicated - six boxed styles
   // competing at the same weight. Rules outliving their markup is how that grows back: `.steps`
@@ -607,7 +607,7 @@ test('a theme cannot collapse a field the app sized', () => {
   // their default width. An id in the app's selector puts it out of reach of any element-level rule.
   const app = readFileSync(new URL('../app.css', import.meta.url), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '');
-  const themeResets = ['themes/system6.css', 'themes/plain.css']
+  const themeResets = ['themes/system6.css', 'themes/plain.css', 'themes/dark.css']
     .map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8'))
     .some((css) => /input\[type=text\][\s\S]{0,120}width:/.test(css));
   ok(themeResets, 'a theme still resets input widths - this test is guarding a live hazard');

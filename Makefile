@@ -914,10 +914,17 @@ test-web:
 # web/index.html directly does not work. Still a plain static server: the TypeScript is bundled ahead
 # of time, so serving needs no toolchain at all.
 #   make web-serve                   # builds, then http://localhost:8000
+#   make web-serve SERVE_BIND=0.0.0.0   # ...and reachable from the LAN, to test on a phone
+#
+# Bound to the loopback address, NOT python's 0.0.0.0 default: this target said localhost while
+# actually listening on every interface, so a laptop on a cafe network was serving the tree to it.
+# Nothing here is secret, but a static server that follows symlinks and has no path allowlist is not
+# something to hand to a strange network by accident. Override SERVE_BIND when LAN access is the point.
 SERVE_PORT ?= 8000
+SERVE_BIND ?= 127.0.0.1
 web-serve: web-build
 	@echo "http://localhost:$(SERVE_PORT)  (Ctrl-C to stop)"
-	@cd web && $(REL_PY) -m http.server $(SERVE_PORT)
+	@cd web && $(REL_PY) -m http.server $(SERVE_PORT) --bind $(SERVE_BIND)
 
 # Vendored Daisy archives. The core Makefile's link step (-ldaisy -ldaisysp) needs these built, but a
 # fresh checkout has source-only submodules, so a bare `make` used to fail at link with "cannot find

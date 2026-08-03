@@ -2610,7 +2610,14 @@ var THEMES = [
     label: "Plain",
     framework: "./vendor/water.css/water.css",
     skin: "./themes/plain.css",
-    note: "Light or dark, system font. The one for reading the manuals."
+    note: "White paper, system font. The one for reading the manuals."
+  },
+  {
+    id: "dark",
+    label: "Dark",
+    framework: "./vendor/water.css/dark.css",
+    skin: "./themes/dark.css",
+    note: "Plain, on a dark ground. For a dim room."
   }
 ];
 var DEFAULT_THEME = THEMES[0].id;
@@ -2800,5 +2807,5 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 }
 main();
 
-//# debugId=5C09306187DF745B64756E2164756E21
+//# debugId=7D6D0F95632CCDF664756E2164756E21
 //# sourceMappingURL=app.js.map
