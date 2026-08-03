@@ -14,7 +14,8 @@ import { TerminalModel, type ConsoleLine } from '../app/terminal_model.ts';
 import { isDestructive, vocabulary, type ParamDesc, type QueryDesc } from '../core/protocol.ts';
 import { webSerial } from '../platform/serial.ts';
 import { browserClock } from '../platform/clock.ts';
-import { append, aside, clear, confirmDestructive, el } from './dom.ts';
+import { append, clear, confirmDestructive, el } from './dom.ts';
+import { mountPoint } from './slots.ts';
 import { drawCpuPlot } from './cpu_plot.ts';
 import type { ViewContext } from './context.ts';
 
@@ -281,17 +282,14 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
 
   // `append` rather than root.append: the WebSerial notice is conditional, and this helper is what
   // drops a `false` child instead of stringifying it.
-  append(root, [
-    el('div', { class: 'callout warn' },
-      el('strong', {}, 'Released firmware has no terminal. '),
-      'Needs a build you make yourself: ',
-      el('code', {}, 'make ENGINE=<engine> TERMINAL=1'),
-      '.'),
+  // The prose and the "no terminal in releases" callout are in index.html; what is built here is the
+  // console, the live panels, and the one message that depends on the BROWSER rather than being static.
+  append(mountPoint(root), [
     el('div', { class: 'controls' }, connectBtn, allPortsBtn, status),
     !model.supported() && el('div', { class: 'callout' },
       el('strong', {}, 'This browser has no WebSerial. '),
-      'Talking to hardware needs Chrome or Edge - and unlike the card tabs there is no fallback here, '
-      + 'because there is no zip-shaped substitute for a serial port.'),
+      'Talking to hardware needs Chrome or Edge - and unlike the card screens there is no fallback '
+      + 'here, because there is no zip-shaped substitute for a serial port.'),
     el('h3', {}, 'Console'),
     log,
     input,
@@ -301,15 +299,5 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
     surface,
     el('h3', {}, 'USB bring-up'),
     usbPanel,
-    aside('Why released firmware has no terminal, and what it costs',
-      el('p', {},
-        'scripts/build_release.py never passes TERMINAL=1, so every binary in dist/ lacks the command '
-        + 'channel and this tab finds nothing to talk to. Shipping terminal-enabled releases is an open '
-        + 'firmware decision: it costs ~19-25 KB of SRAM_EXEC everywhere, and on the QSPI engines '
-        + '(chuck, csound, mosc) it costs USB MIDI, which claims the same OTG core.'),
-      el('p', {},
-        'The control surface above is generated from the device\'s own `describe` reply - every control '
-        + 'is one this build actually advertises, and nothing appears for the enum entries it ignores. '
-        + 'Destructive verbs ask before firing.')),
   ]);
 }

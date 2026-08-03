@@ -51,6 +51,14 @@ async function mount(
   name: string,
   capabilities: Parameters<typeof installDom>[0] = {},
   during: ((m: Mounted) => Promise<void> | void) | null = null,
+  /**
+   * Populate the root BEFORE the view mounts.
+   *
+   * For every view but one the root is empty, because the view builds its own contents. The overview
+   * is the exception: its content is markup in index.html and `mountHome` only fills the derived
+   * counts and wires the actions, so a test of that wiring has to supply the markup it wires.
+   */
+  prepare: ((root: ShimNode, doc: ReturnType<typeof installDom>['document']) => void) | null = null,
 ): Promise<Mounted> {
   const dom = installDom(capabilities);
   try {
@@ -63,6 +71,7 @@ async function mount(
         ((root: unknown, ctx: unknown) => void) | undefined;
     ok(fn, `${name}.ts exports no mount function`);
     const root = dom.document.createElement('section') as ShimNode;
+    prepare?.(root, dom.document);
     // Navigation is recorded rather than performed: a view's job is to ASK to go somewhere, and the
     // router's job is to do it. Capturing the request is what lets a test assert a card leads to the
     // right engine without booting the whole application.
@@ -244,10 +253,25 @@ test('the verify view enables in-place access where the browser has it', async (
 });
 
 test('the verify view states the rules that fail silently', async () => {
-  const { root } = await mount('verify_view');
-  const text = textOf(root);
-  ok(text.includes(String(layout.scan.max_name)), 'the filename limit, taken from the layout');
-  ok(text.includes('plays as noise'), 'the reason a wrong format is not simply rejected');
+  // Split in two when the prose moved to index.html: the WORDS are markup, the NUMBERS are filled from
+  // the layout. Both halves still matter - the explanation is the point of the panel, and a hardcoded
+  // count is what went stale last time ("eight folder layouts" became nine when softcut landed).
+  const panel = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+    .match(/<section id="panel-verify"[\s\S]*?<\/section>/)![0];
+  ok(panel.includes('plays as noise'), 'the reason a wrong format is not simply rejected');
+  for (const name of ['banks', 'formats', 'maxname']) {
+    ok(panel.includes(`data-fill="${name}"`), `${name}: no placeholder for a derived count`);
+  }
+  ok(!new RegExp(`\\b${layout.scan.max_name}\\b`).test(panel), 'and no count written into the markup');
+
+  const { root } = await mount('verify_view', {}, null, (r, doc) => {
+    for (const name of ['banks', 'formats', 'maxname']) {
+      const n = doc.createElement('span');
+      n.setAttribute('data-fill', name);
+      r.appendChild(n);
+    }
+  });
+  ok(textOf(root).includes(String(layout.scan.max_name)), 'the filename limit, taken from the layout');
 });
 
 test('the verify view counts layouts and formats from the data, not from prose', () => {
@@ -302,10 +326,14 @@ test('the build view names every engine that reads a folder, not just the owning
   eq(layout.bank('tape')!.readers, ['tape'], 'a bank with one reader stays unadorned');
 });
 
-test('the build view points at the released card for demo audio rather than synthesizing it', async () => {
-  const { root } = await mount('build_view');
-  ok(textOf(root).includes('sk-card-<version>.zip'));
-  ok(tags(root, 'a').some((a) => a.href.includes('/releases/')));
+test('the build view points at the released card for demo audio rather than synthesizing it', () => {
+  // Now asserted against the markup: this is static prose, so it lives in index.html and the view no
+  // longer builds it. The claim is unchanged - the page must not offer to generate demo audio, because
+  // the release zip is the checksummed copy everyone else has.
+  const panel = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+    .match(/<section id="panel-build"[\s\S]*?<\/section>/)![0];
+  ok(/releases\/latest/.test(panel), 'it must link the release rather than synthesize audio');
+  ok(/sk-card-&lt;version&gt;\.zip/.test(panel), 'and name the artefact');
 });
 
 // --- convert ------------------------------------------------------------------------------------
@@ -342,9 +370,13 @@ test('switching to bard exposes the rate control and defaults it to 24 kHz', asy
   });
 });
 
-test('the convert view is honest about resampling not matching the CLI', async () => {
-  const { root } = await mount('convert_view');
-  ok(textOf(root).includes('not bit-identical'), 'the caveat must be on the page, not only in the docs');
+test('the convert view is honest about resampling not matching the CLI', () => {
+  // Static prose, so it is asserted against the markup now. The claim is the one that matters: this
+  // page cannot reproduce a card byte for byte, and it says so rather than letting someone find out.
+  const panel = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+    .match(/<section id="panel-convert"[\s\S]*?<\/section>/)![0];
+  ok(panel.includes('not bit-identical'), 'it must admit the resampler differs');
+  ok(/byte for byte/.test(panel), 'and say what that costs');
 });
 
 test('convert starts with nothing to do', async () => {
@@ -439,12 +471,15 @@ test('the reference view hardcodes no fact the layout owns', () => {
 
 // --- terminal -----------------------------------------------------------------------------------
 
-test('the terminal view mounts and leads with the firmware caveat', async () => {
-  const { root } = await mount('terminal_view');
-  const text = textOf(root);
-  ok(text.includes('Released firmware has no terminal'),
+test('the terminal screen leads with the firmware caveat', () => {
+  // In the markup now, which is a STRONGER guarantee than the assertion it replaced: the caveat used
+  // to be built by the view, so it could be lost behind a capability branch. It cannot be now - it is
+  // not browser-dependent, and it no longer lives anywhere that could make it conditional.
+  const panel = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+    .match(/<section id="panel-terminal"[\s\S]*?<\/section>/)![0];
+  ok(panel.includes('Released firmware has no terminal'),
     'a user must not spend an afternoon wondering why nothing answers');
-  ok(text.includes('TERMINAL=1'), 'and must be told what build does work');
+  ok(panel.includes('TERMINAL=1'), 'and must be told what build does work');
 });
 
 test('the terminal view says WebSerial is missing rather than silently doing nothing', async () => {
@@ -454,10 +489,11 @@ test('the terminal view says WebSerial is missing rather than silently doing not
 });
 
 test('the terminal view drops the WebSerial notice where the browser has it', async () => {
+  // This one IS browser-dependent, so it stays in the view and stays tested through a mount.
   const { root } = await mount('terminal_view', { serial: true });
   ok(!textOf(root).includes('no WebSerial'));
-  // The firmware caveat is not browser-dependent and must stay in both cases.
-  ok(textOf(root).includes('Released firmware has no terminal'));
+  const { root: bare } = await mount('terminal_view');
+  ok(textOf(bare).includes('no WebSerial'), 'and appears where the browser lacks it');
 });
 
 test('the terminal command line starts disabled until a device is connected', async () => {
@@ -529,9 +565,15 @@ test('selecting an unknown engine changes nothing', async () => {
 test('the engines menu is built from the catalogue, not from the markup', () => {
   const js = readFileSync(new URL('../src/ui/main.ts', import.meta.url), 'utf8');
   ok(js.includes('ctx.engines.entries.map'), 'the menu iterates the catalogue');
+  // Scoped to the menu item, not the whole document. Checking the whole file made this fail on
+  // ordinary prose the moment the overview moved into index.html: one catalogue entry is named
+  // `platform` - it is the shared SK/ card folder, not an engine - and the overview's first paragraph
+  // legitimately contains the word. What the test is actually about is the MENU being generated, so
+  // that is what it reads.
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const menu = html.match(/<li[^>]*id="engines-menu"[\s\S]*?<\/li>/)![0];
   for (const entry of engines.entries) {
-    ok(!html.includes(`>${entry.doc.name}<`), `${entry.doc.name} is hardcoded into the menu markup`);
+    ok(!menu.includes(`>${entry.doc.name}<`), `${entry.doc.name} is hardcoded into the menu markup`);
   }
 });
 
@@ -650,36 +692,66 @@ test('the source stylesheet holds no colour outside the palette', () => {
 
 // --- the front page and the catalogue ---------------------------------------------------------------
 
-test('the front page says what this is and offers the global actions', async () => {
-  const { root } = await mount('home_view');
-  const text = textOf(root);
-  ok(text.includes('Spotykach'), 'it names the instrument this is firmware for');
-  ok(text.includes('platform') && text.includes('engine'),
+test('the front page is markup, not string literals in a view', () => {
+  // The complaint this pins: the overview is a document, and it was being assembled from prose passed
+  // to el() inside TypeScript. Content belongs in the markup - editable without a build, reviewable as
+  // writing, and painted before the bundle loads. The view keeps only what markup cannot do.
+  const panel = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+    .match(/<section id="panel-home"[\s\S]*?<\/section>/)![0];
+  ok(panel.includes('Spotykach'), 'it names the instrument this is firmware for');
+  ok(panel.includes('platform') && panel.includes('engine'),
     'and states the platform/engine split, which is what the fork is FOR');
-  // And does NOT repeat the project name. The menu bar names it and the window header says which
-  // page you are on; a third "sk-engines" inside the panel told the reader nothing twice.
-  ok(!text.includes('sk-engines'), 'the panel must not restate the project name');
-  const labels = tags(root, 'button').map((b) => b.textContent);
-  for (const want of ['Build a card', 'Convert audio', 'Verify a card', 'Flash firmware']) {
-    ok(labels.some((l) => l?.includes(want)), `${want}: missing from the front page`);
+  ok(!panel.includes('sk-engines'), 'the panel must not restate the project name');
+  for (const view of ['build', 'convert', 'verify', 'flash', 'engines']) {
+    ok(panel.includes(`data-view="${view}"`), `${view}: no action on the front page routes to it`);
   }
+
+  // And the view is now small enough to be obviously about wiring rather than content.
+  const src = code('home_view');
+  const prose = [...src.matchAll(/'([^'\\\n]{40,})'/g)].map((m) => m[1]).filter((s) => s.includes(' '));
+  eq(prose, [], 'prose belongs in index.html, not in the view');
 });
 
 test('the front page counts engines rather than stating a number', () => {
-  // The figure that goes stale the first time an engine is added and nobody greps for "22".
   const src = code('home_view');
   ok(/ctx\.engines\.entries/.test(src), 'the counts must be derived from the catalogue');
   ok(/\.length/.test(src), 'and counted, not quoted');
   // Any plausible engine or bank count, written down. The page claimed "23 engines" for exactly this
   // reason once - not a stale literal, but a count taken over the wrong set.
   ok(!/\b(1[0-9]|2[0-9])\b/.test(src), 'no engine or bank count may be written into the view');
+  const panel = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+    .match(/<section id="panel-home"[\s\S]*?<\/section>/)![0];
+  ok(!/\b(1[0-9]|2[0-9]) engines\b/.test(panel), 'nor into the markup');
 });
 
-test('a front-page action asks the router to go where it says', async () => {
-  const { navigated } = await mount('home_view', {}, async ({ root }) => {
-    await tags(root, 'button').find((b) => b.textContent?.includes('Verify a card'))!.fire('click');
+test('the front page fills its counts and wires its actions', async () => {
+  // mountHome only does these two things, so this is the whole of its behaviour.
+  const realEngines = engines.entries.filter((e) => e.doc.page).length;
+  const { root, navigated } = await mount('home_view', {}, async ({ root }) => {
+    await root.querySelector('[data-view="verify"]')!.fire('click');
+  }, (root, doc) => {
+    // The markup mountHome expects to find, in miniature.
+    const stats = doc.createElement('p');
+    stats.id = 'home-stats';
+    const count = doc.createElement('span');
+    count.id = 'home-engine-count';
+    const action = doc.createElement('button');
+    action.setAttribute('data-view', 'verify');
+    root.appendChild(stats);
+    root.appendChild(count);
+    root.appendChild(action);
   });
-  eq(navigated, [['view', 'verify']]);
+  eq(navigated, [['view', 'verify']], 'a [data-view] action must reach the router');
+  ok(root.querySelector('#home-stats')!.textContent!.includes(`${realEngines} engines`),
+    'the stats line must be filled from the catalogue');
+  eq(root.querySelector('#home-engine-count')!.textContent, String(realEngines));
+});
+
+test('mountHome does not clear the panel it was given', () => {
+  // The failure this prevents is a blank front page rather than an error: the content is in the
+  // markup now, so a stray clear(root) would delete the page and nothing would report it.
+  const src = code('home_view');
+  ok(!/clear\(/.test(src), 'the overview must not clear its root - the markup IS the page');
 });
 
 test('the catalogue shows every engine, with a shareable link each', async () => {
@@ -712,4 +784,29 @@ test('a catalogue card routes to that engine', async () => {
     await card.fire('click');
   });
   eq(navigated, [['engine', 'bard']]);
+});
+
+test('a view builds no intro prose - that is the markup\'s job', () => {
+  // The split this pins: static prose lives in index.html, and a view builds only what depends on
+  // state. The `lead` paragraph is the tell, because it is always the static intro - if one reappears
+  // in a view it means the next screen's copy went back into a template literal.
+  const uiDir = new URL('../src/ui/', import.meta.url).pathname;
+  for (const file of readdirSync(uiDir).filter((f) => f.endsWith('_view.ts'))) {
+    const src = code(file.replace(/\.ts$/, ''));
+    ok(!/class: 'lead'/.test(src), `${file}: builds a lead paragraph instead of declaring it in markup`);
+  }
+});
+
+test('every panel offers a mount point for its view', () => {
+  // A panel with prose but no [data-mount] would render its dynamic half at the end, after the
+  // asides - which looks like a layout bug and is really a missing hook. mountPoint() falls back to
+  // the root rather than failing, so nothing would throw; this is what notices.
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  for (const view of VIEW_ORDER) {
+    const panel = html.match(new RegExp(`<section id="panel-${view}"[\\s\\S]*?</section>`))![0];
+    const hasProse = /<p|<details/.test(panel);
+    if (!hasProse) continue; // a bare panel is fine: the view owns the whole of it
+    ok(panel.includes('data-mount') || view === 'home',
+      `${view}: has prose but no mount point, so its view would render after the asides`);
+  }
 });

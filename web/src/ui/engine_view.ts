@@ -82,7 +82,7 @@ export function mountEngine(root: HTMLElement, ctx: ViewContext): void {
       el('strong', {}, bank ? 'On the card: ' : 'No card needed: '),
       formatLine(s.entry),
       bank && el('span', { class: 'muted' }, '  Full format on the '),
-      bank && el('a', { href: '#reference' }, 'Reference tab'),
+      bank && el('a', { href: '#reference' }, 'Card reference'),
       bank && '.',
     ]);
 

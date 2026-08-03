@@ -60,6 +60,12 @@ test('the service worker caches the bundle and the data, and nothing that has mo
 // They are checked SEPARATELY, against their own inputs. Lumping them together would blame the JS
 // bundle for a CSS edit and - worse - would let dist/app.css go unguarded entirely, which is how the
 // stylesheet ends up shipping a state nobody has seen.
+//
+// The CSS build ends in `touch`, and that is what makes this check usable rather than a trap.
+// Tailwind skips writing when the output would be byte-identical, and a COMMENT-ONLY edit to
+// src/app.css produces exactly that - comments do not survive minification. Without the touch the
+// source is newer than an artifact the build refuses to rewrite, so this test goes red and no amount
+// of rebuilding clears it. The build did run; the timestamp should say so.
 for (const [artifact, exts] of [
   ['dist/app.js', ['.ts']],
   ['dist/app.css', ['.css']],
@@ -147,4 +153,14 @@ test('every module is reachable from the entry point', () => {
   };
   walk('src/ui/main.ts');
   eq(sources('src').filter((f) => !seen.has(f)), [], 'these ship but nothing imports them');
+});
+
+test('a modal dialog is still centred despite Preflight', () => {
+  // Tailwind's Preflight sets `margin: 0` on every element, which overrides the browser's own
+  // `dialog:modal { margin: auto }` and pins About and the diagram viewer to the top-left corner.
+  // src/app.css puts it back. Asserted against the BUILT stylesheet because the failure is an
+  // interaction between two stylesheets, and only the compiled result shows who won.
+  const css = read('dist/app.css');
+  ok(/dialog:modal\{[^}]*margin:\s*auto/.test(css),
+    'without this every modal falls to the top-left corner');
 });

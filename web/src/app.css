@@ -56,15 +56,24 @@
   --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* The reading measure. Prose gets it; tables, diagrams and code deliberately do not - see .engine-doc.
+  /* The app's reading measure.
+   *
+   * Was 68ch - the classic figure, and the wrong one HERE. The pane it sits in is ~58rem wide, so
+   * prose filled about 62% of it and the empty right-hand third read as a layout bug rather than as
+   * typography. A measure only looks deliberate when it is CLOSE to its container; far short of one,
+   * it just looks like the text failed to reach the margin. 92ch nearly fills the pane at the card's
+   * full width and still caps the line before it becomes hard to track back to.
+   */
+  --container-measure: 92ch;
+
+  /* The measure for rendered engine manuals, which are their own column inside the pane.
    *
    * `--container-doc`, NOT `--container-prose`: Tailwind ships a built-in `max-w-prose` hardcoded to
    * 65ch, and it SHADOWS a same-named theme token rather than being overridden by it. Defining
    * `--container-prose: 88ch` compiled without complaint and silently emitted 65ch, which is the
-   * measure this page was widened away from - 65ch left half the window empty beside a control table
-   * that then had to scroll. A test now pins the built value.
+   * measure the manuals were widened away from - 65ch left half the window empty beside a control
+   * table that then had to scroll. A test pins the built value.
    */
-  --container-measure: 68ch;
   --container-doc: 88ch;
 }
 
@@ -142,6 +151,18 @@
 
   dialog { @apply text-ink; }
   dialog::backdrop { background: rgb(0 0 0 / .45); }
+
+  /* Put back what Preflight took away.
+   *
+   * A modal <dialog> is centred by the browser's own `dialog:modal { margin: auto }`, and Tailwind's
+   * Preflight zeroes `margin` on every element - which outranks the UA sheet and pins every modal to
+   * the top-left corner. It is not a layout bug in the dialog's own rules, which is what makes it
+   * confusing to chase: `.modal-dialog` looks correct and the dialog is still in the wrong place.
+   * `:modal` rather than `[open]` on purpose - a non-modal dialog is positioned in flow and should
+   * NOT be centred. A test asserts this survives, because a Preflight interaction is exactly the kind
+   * of fix that vanishes silently on a major upgrade.
+   */
+  dialog:modal { margin: auto; }
 
   [hidden] { display: none !important; }
 }
@@ -254,7 +275,9 @@
   .fields { @apply mt-4 mb-2 flex flex-wrap gap-4; }
   .field { @apply flex flex-col gap-0.5 text-sm; }
   .field.inline { @apply flex-row items-center gap-1.5; }
-  .lead { @apply mb-4 max-w-measure; }
+  /* No cap of its own: an intro paragraph is the widest thing on a screen and should meet the same
+     margin as the controls beneath it. The pane and --container-measure bound it already. */
+  .lead { @apply mb-4; }
   .note { @apply text-sm; }
   .muted { @apply text-muted; }
   .mono { @apply font-mono text-[.92em]; }

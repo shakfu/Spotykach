@@ -17,6 +17,7 @@
 // clothes - worth doing, but not as a side effect of building a grid.
 
 import { el, clear } from './dom.ts';
+import { mountPoint } from './slots.ts';
 import type { ViewContext } from './context.ts';
 import type { EngineEntry } from '../core/engines.ts';
 
@@ -73,12 +74,8 @@ export function mountEngines(root: HTMLElement, ctx: ViewContext): void {
   // in a grid of instruments. They are recognisable by having no rendered page.
   const entries = ctx.engines.entries.filter((e) => e.doc.page);
 
-  clear(root).append(
-    // The window header already says "Engines"; repeating it here is a heading that adds nothing.
-    el('p', { class: 'lead text-base' },
-      'One firmware image each: flash the one you want, and the device becomes that instrument. '
-      + 'Pick one to see what it does and what it expects on the card.'),
-
+  // The lead is in index.html; the grid is the only part that comes from data.
+  clear(mountPoint(root)).append(
     el('div', { class: 'engine-grid' }, entries.map((e) => {
       const name = e.doc.name;
       // A real link, not a div with a click handler: it has to be middle-clickable, copyable and

@@ -6,7 +6,7 @@
   "scripts": {
     "build": "bun run build:js && bun run build:css",
     "build:js": "bun build src/ui/main.ts --outdir dist --entry-naming app.js --sourcemap=linked --target browser",
-    "build:css": "tailwindcss -i src/app.css -o dist/app.css --minify",
+    "build:css": "tailwindcss -i src/app.css -o dist/app.css --minify && touch dist/app.css",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test",
     "test": "bun test/run.ts"
   },

@@ -8,7 +8,8 @@
 import { VerifyModel } from '../app/verify_model.ts';
 import type { Layout } from '../core/layout.ts';
 import * as source from '../platform/cardsource.ts';
-import { aside, clear, dropTarget, el, finding, humanBytes } from './dom.ts';
+import { clear, dropTarget, el, finding, humanBytes } from './dom.ts';
+import { fill, mountPoint } from './slots.ts';
 import type { ViewContext } from './context.ts';
 
 /** Distinct folder layouts: every bank except the platform's own config entry. */
@@ -25,7 +26,7 @@ export function mountVerify(root: HTMLElement, ctx: ViewContext): void {
   const status = el('div', { class: 'status' });
   const drop = el('div', { class: 'dropzone' },
     el('p', {}, 'Drop the card folder here'),
-    el('p', { class: 'muted' }, 'or pick it below. Nothing is uploaded - the check runs in this tab.'));
+    el('p', { class: 'muted' }, 'or pick it below. Nothing is uploaded - the check runs in your browser.'));
 
   const pickBtn = el('button', {
     class: 'primary',
@@ -84,23 +85,11 @@ export function mountVerify(root: HTMLElement, ctx: ViewContext): void {
 
   const controls = el('div', { class: 'controls' }, pickBtn, browseBtn, fileInput);
 
-  root.append(
-    el('p', { class: 'lead' }, 'Checks a card and explains anything that will not work.'),
-    controls,
-    drop,
-    status,
-    results,
-    aside('Why a bad card gives no error on the device',
-      el('p', {},
-        // Counts derived from the layout, not written down: the "eight folder layouts" figure in the
-        // docs silently became nine the moment softcut was added, and prose does not have a test.
-        `Engines read this card using ${engineBanks(ctx.layout)} folder layouts and `
-        + `${audioFormats(ctx.layout)} incompatible audio formats, and the firmware converts nothing. A `
-        + 'file in the wrong format is not rejected, it is read as raw bytes and plays as noise; a '
-        + `filename over ${ctx.layout.scan.max_name} characters is skipped by the directory scan with `
-        + 'no error shown. The hardware\'s only feedback is an LED, so every one of these fails '
-        + 'silently. This finds all of it.')),
-  );
+  // The prose is in index.html; the view supplies the controls, the live results and the counts.
+  mountPoint(root).append(controls, drop, status, results);
+  fill(root, 'banks', String(engineBanks(ctx.layout)));
+  fill(root, 'formats', String(audioFormats(ctx.layout)));
+  fill(root, 'maxname', String(ctx.layout.scan.max_name));
 
   if (!source.hasFileSystemAccess()) {
     pickBtn.disabled = true;

@@ -200,6 +200,15 @@ export class ShimNode {
   matches(sel: string): boolean {
     if (sel.startsWith('#')) return this.id === sel.slice(1);
     if (sel.startsWith('.')) return this.classList.contains(sel.slice(1));
+    // `[attr]` and `[attr="value"]`. Added when the overview moved into index.html: its actions are
+    // static markup carrying `data-view`, and the view finds them by attribute. The shim models what
+    // the app uses, so it grows when the app does - bending the app to the double would be backwards.
+    if (sel.startsWith('[') && sel.endsWith(']')) {
+      const [name, ...rest] = sel.slice(1, -1).split('=');
+      const value = rest.join('=').replace(/^["']|["']$/g, '');
+      const have = this.getAttribute(name);
+      return rest.length ? have === value : have != null;
+    }
     return this.tagName === sel.toUpperCase();
   }
 

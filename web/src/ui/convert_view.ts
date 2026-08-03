@@ -9,7 +9,8 @@ import { ConvertModel, type InputFile } from '../app/convert_model.ts';
 import { cardAccess } from '../platform/cardsource.ts';
 import { browserDecoder } from '../platform/audio.ts';
 import { deflateRaw, downloader } from '../platform/download.ts';
-import { aside, clear, dropTarget, el, finding, humanBytes } from './dom.ts';
+import { clear, dropTarget, el, finding, humanBytes } from './dom.ts';
+import { mountPoint } from './slots.ts';
 import type { ViewContext } from './context.ts';
 
 /** A browser File, reduced to what the model needs. */
@@ -114,9 +115,8 @@ export function mountConvert(root: HTMLElement, ctx: ViewContext): void {
     }
   });
 
-  root.append(
-    el('p', { class: 'lead' },
-      'Converts your audio to exactly what the target engine reads. mp3, flac, wav, ogg, m4a.'),
+  // The prose is in index.html; the view supplies the form, the queue and the results.
+  mountPoint(root).append(
     el('div', { class: 'fields' },
       field('Engine', engineSel), deckField, bankField, tapeField, slotField, rateField),
     targetNote,
@@ -127,15 +127,5 @@ export function mountConvert(root: HTMLElement, ctx: ViewContext): void {
     fileList,
     status,
     out,
-    aside('On resampling, and why this is not the CLI',
-      el('p', {},
-        'The browser\'s resampler is not bit-identical to libsox\'s or ffmpeg\'s. None of the three '
-        + 'agree with each other today, so this is not a regression - but it does mean this page cannot '
-        + 'reproduce a particular card byte for byte. For a 50x pstretch source, where artefacts have a '
-        + 'long time to become audible, converting with ffmpeg is worth comparing against.'),
-      el('p', {},
-        'The upside is the reason this tab exists: decoding happens in the browser\'s own audio engine, '
-        + 'so there is no install and no format-support lottery. The CLI needs ffmpeg, or cysox plus a '
-        + 'libsox built with the right handlers.')),
   );
 }

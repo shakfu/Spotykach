@@ -1,6 +1,6 @@
-// flash_view.ts - the Flash tab.
+// flash_view.ts - the Flash screen.
 //
-// The tab that `web/README.md` said would never exist, and the reasoning that changed is in
+// The screen that `web/README.md` said would never exist, and the reasoning that changed is in
 // flash_model.ts: this writes the APP region only, so a failed write costs a re-flash rather than a
 // device. The page states that where a nervous person will read it, because "what happens if I unplug
 // it halfway" is the actual question standing between somebody and this button.
@@ -13,7 +13,8 @@
 import { FlashModel } from '../app/flash_model.ts';
 import { APP_ADDRESS, type ImageInfo } from '../core/image.ts';
 import { webUsbDfu } from '../platform/usb.ts';
-import { append, aside, clear, confirmDestructive, dropTarget, el, finding, humanBytes } from './dom.ts';
+import { append, clear, confirmDestructive, dropTarget, el, finding, humanBytes } from './dom.ts';
+import { fill, mountPoint } from './slots.ts';
 import type { ViewContext } from './context.ts';
 
 const PHASE_LABEL: Record<string, string> = {
@@ -24,7 +25,7 @@ const PHASE_LABEL: Record<string, string> = {
 };
 
 /**
- * The chosen image, as findings - the same shape a bad card gets on the Verify tab.
+ * The chosen image, as findings - the same shape a bad card gets on the Verify screen.
  *
  * Built with dom.ts's `finding()` rather than by hand. That helper nests the badge and the path INSIDE
  * `.problem` and puts the separating spaces in, which is not decoration: assembling the three spans as
@@ -82,35 +83,21 @@ export function mountFlash(root: HTMLElement, _ctx: ViewContext): void {
     if (f) model.select(f.name, await f.arrayBuffer());
   });
 
-  append(root, [
+  // The prose is in index.html; the view supplies the controls and everything that reports state.
+  append(mountPoint(root), [
     el('div', { class: 'controls' }, [connectBtn, flashBtn, cancelBtn]),
     status,
     drop,
     report,
     bar,
     result,
-
-    aside('Why this is safe to interrupt, and what it will not do',
-      el('p', {}, 'This page writes one address and one only: the application region at ' +
-        `0x${APP_ADDRESS.toString(16)}, in QSPI. The bootloader lives somewhere else entirely - ` +
-        'internal flash at 0x08000000 - and nothing here can address it.'),
-      el('p', {}, 'So the worst case is a device with a half-written app and a working bootloader. ' +
-        'Hold Reset for about 3 seconds until the pad LEDs breathe white, and flash it again. ' +
-        'That is a retry, not a brick.'),
-      el('p', {}, 'Installing a bootloader is the operation that genuinely can brick a device, it is ' +
-        'done once per unit, and it is not offered here. Use dfu-util for it.'),
-      el('p', {}, 'Where the device allows it, the image is read back and compared byte for byte ' +
-        'after writing, so a successful flash is measured rather than assumed.')),
-
-    aside('If the device does not appear',
-      el('p', {}, 'The device must be in bootloader mode first: hold Reset for about 3 seconds until ' +
-        'the pad LEDs breathe white. It then enumerates as 0483:df11.'),
-      el('p', {}, 'WebUSB is Chromium-only - Chrome or Edge. Firefox and Safari do not implement it ' +
-        'and will not; the command-line path works everywhere:'),
-      el('pre', {}, `dfu-util -a 0 -s 0x${APP_ADDRESS.toString(16)}:leave -D sk-<engine>-<version>.bin -d ,0483:df11`),
-      el('p', {}, 'On Linux, a udev rule is needed for a non-root browser to claim the interface - ' +
-        'the same rule dfu-util needs.')),
   ]);
+
+  // The one address this page may write, read from the module that enforces it. Written into the
+  // prose it would be a second copy of the fact the whole safety argument rests on.
+  fill(root, 'appaddr', `0x${APP_ADDRESS.toString(16)}`);
+  fill(root, 'dfucmd',
+    `dfu-util -a 0 -s 0x${APP_ADDRESS.toString(16)}:leave -D sk-<engine>-<version>.bin -d ,0483:df11`);
 
   model.store.subscribe((s) => {
     // --- what the page can do at all -----------------------------------------------------------
@@ -129,7 +116,7 @@ export function mountFlash(root: HTMLElement, _ctx: ViewContext): void {
     file.disabled = s.busy;
     cancelBtn.hidden = !s.busy;
 
-    // The button is the point of the tab and it stays off until every precondition is met, each of
+    // The button is the point of the screen and it stays off until every precondition is met, each of
     // which the status line names rather than leaving the reader to guess which one is missing.
     const ready = !!s.device && !!s.image?.flashable && !s.busy;
     flashBtn.disabled = !ready;

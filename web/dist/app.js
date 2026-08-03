@@ -161,9 +161,6 @@ function clear(node) {
   node.replaceChildren();
   return node;
 }
-function aside(summary, ...children) {
-  return el("details", { class: "aside" }, el("summary", {}, summary), ...children);
-}
 function humanBytes(n) {
   if (n < 1024)
     return `${n} B`;
@@ -594,6 +591,19 @@ var deflateRaw = async (bytes) => {
   }
 };
 
+// src/ui/slots.ts
+function mountPoint(root) {
+  return root.querySelector("[data-mount]") ?? root;
+}
+function slot(root, name) {
+  return root.querySelector(`[data-slot="${name}"]`) ?? mountPoint(root);
+}
+function fill(root, name, text) {
+  const node = root.querySelector(`[data-fill="${name}"]`);
+  if (node)
+    node.textContent = text;
+}
+
 // src/ui/build_view.ts
 function mountBuild(root, ctx) {
   const model = new BuildModel(ctx.layout, ctx.patches, {
@@ -623,11 +633,10 @@ function mountBuild(root, ctx) {
   });
   const b = model.built();
   const folders = el("table", { class: "layout" }, el("thead", {}, el("tr", {}, el("th", {}, "Folder"), el("th", {}, "Engine"), el("th", {}, "Format"))), el("tbody", {}, ctx.layout.banks.map((bank) => el("tr", {}, el("td", { class: "mono" }, folderLabel(bank.dirs)), el("td", {}, bank.readers.join(", ")), el("td", { class: "muted" }, bank.fmt.describe)))));
-  root.append(el("p", { class: "lead" }, "Makes an empty card the firmware can read. Format it FAT32 first."), el("div", { class: "controls" }, el("button", { class: "primary", onclick: () => model.downloadZip() }, "Download a starter card (.zip)"), inPlace), status, el("p", { class: "muted note" }, "Unpack it so the folders sit at the card's root. Then add audio on ", el("a", { href: "#convert" }, "Convert"), ", and if anything misbehaves later, point ", el("a", { href: "#verify" }, "Verify"), " at the card."), out, aside(`What it creates - ${b.files.length} files, ${b.dirs.length} folders`, el("p", {}, "Every folder the firmware looks for, a README in each one restating that folder's " + "rules, the default SK/config.txt, radio/rate.txt, bard/BARD.CFG, and the example chuck and " + "csound patches. Byte for byte the card ", el("code", {}, "sk_card.py init --no-demo"), " builds, and it passes Verify with nothing to report."), folders), aside("Want demo audio too?", el("p", {}, "The released ", el("code", {}, "sk-card-<version>.zip"), " is a complete card with synthesized audio for every engine, and it is checksummed. This page " + "builds the skeleton only rather than regenerating that content, so what you download from " + "the release is what everyone else has. ", el("a", {
-    href: "https://github.com/shakfu/sk-engines/releases/latest",
-    target: "_blank",
-    rel: "noreferrer"
-  }, "Get it from the latest release"), ".")));
+  mountPoint(root).append(el("div", { class: "controls" }, el("button", { class: "primary", onclick: () => model.downloadZip() }, "Download a starter card (.zip)"), inPlace), status, out);
+  fill(root, "files", String(b.files.length));
+  fill(root, "dirs", String(b.dirs.length));
+  slot(root, "folders").append(folders);
 }
 
 // src/core/wav.ts
@@ -1076,7 +1085,7 @@ function mountConvert(root, ctx) {
       out.append(finding("ok", `${r.path}`, `${humanBytes(r.bytes.length)}, from ${r.sourceRate} Hz ` + `${r.sourceChannels === 2 ? "stereo" : "mono"}`, r.notes.length ? r.notes.join("; ") : undefined));
     }
   });
-  root.append(el("p", { class: "lead" }, "Converts your audio to exactly what the target engine reads. mp3, flac, wav, ogg, m4a."), el("div", { class: "fields" }, field("Engine", engineSel), deckField, bankField, tapeField, slotField, rateField), targetNote, el("div", { class: "controls" }, el("button", { onclick: () => picker.click() }, "Choose audio files"), convertBtn, zipBtn, saveBtn, picker), drop, fileList, status, out, aside("On resampling, and why this is not the CLI", el("p", {}, "The browser's resampler is not bit-identical to libsox's or ffmpeg's. None of the three " + "agree with each other today, so this is not a regression - but it does mean this page cannot " + "reproduce a particular card byte for byte. For a 50x pstretch source, where artefacts have a " + "long time to become audible, converting with ffmpeg is worth comparing against."), el("p", {}, "The upside is the reason this tab exists: decoding happens in the browser's own audio engine, " + "so there is no install and no format-support lottery. The CLI needs ffmpeg, or cysox plus a " + "libsox built with the right handlers.")));
+  mountPoint(root).append(el("div", { class: "fields" }, field("Engine", engineSel), deckField, bankField, tapeField, slotField, rateField), targetNote, el("div", { class: "controls" }, el("button", { onclick: () => picker.click() }, "Choose audio files"), convertBtn, zipBtn, saveBtn, picker), drop, fileList, status, out);
 }
 
 // src/core/verify.ts
@@ -1356,7 +1365,7 @@ function mountVerify(root, ctx) {
   const model = new VerifyModel(ctx.layout);
   const results = el("div", { class: "results" });
   const status = el("div", { class: "status" });
-  const drop = el("div", { class: "dropzone" }, el("p", {}, "Drop the card folder here"), el("p", { class: "muted" }, "or pick it below. Nothing is uploaded - the check runs in this tab."));
+  const drop = el("div", { class: "dropzone" }, el("p", {}, "Drop the card folder here"), el("p", { class: "muted" }, "or pick it below. Nothing is uploaded - the check runs in your browser."));
   const pickBtn = el("button", {
     class: "primary",
     onclick: () => model.run(() => pickDirectory("read"))
@@ -1401,7 +1410,10 @@ function mountVerify(root, ctx) {
     }
   });
   const controls = el("div", { class: "controls" }, pickBtn, browseBtn, fileInput);
-  root.append(el("p", { class: "lead" }, "Checks a card and explains anything that will not work."), controls, drop, status, results, aside("Why a bad card gives no error on the device", el("p", {}, `Engines read this card using ${engineBanks(ctx.layout)} folder layouts and ` + `${audioFormats(ctx.layout)} incompatible audio formats, and the firmware converts nothing. A ` + "file in the wrong format is not rejected, it is read as raw bytes and plays as noise; a " + `filename over ${ctx.layout.scan.max_name} characters is skipped by the directory scan with ` + "no error shown. The hardware's only feedback is an LED, so every one of these fails " + "silently. This finds all of it.")));
+  mountPoint(root).append(controls, drop, status, results);
+  fill(root, "banks", String(engineBanks(ctx.layout)));
+  fill(root, "formats", String(audioFormats(ctx.layout)));
+  fill(root, "maxname", String(ctx.layout.scan.max_name));
   if (!hasFileSystemAccess()) {
     pickBtn.disabled = true;
     pickBtn.title = "This browser has no File System Access API";
@@ -1543,7 +1555,7 @@ function mountReference(root, ctx) {
     model.select(engine);
     sections.get(engine)?.scrollIntoView?.({ block: "start" });
   });
-  root.append(el("p", { class: "lead" }, "Every engine, what it does, and what it expects on the card."), el("div", { class: "controls" }, filter, el("label", { class: "field inline" }, srcToggle, el("span", {}, "firmware sources"))), chips, status, everywhere(model.scan()), banksEl, aside("Where these facts come from", el("p", {}, "The card rules are generated from the same table the firmware and the command-line tools " + "read, so this page cannot disagree with ", el("code", {}, "python3 scripts/sk_card.py layout"), ". The engine descriptions are the opening paragraph of each ", el("code", {}, "docs/engines/<name>.md"), ", so they cannot drift from the documentation either.")));
+  mountPoint(root).append(el("div", { class: "controls" }, filter, el("label", { class: "field inline" }, srcToggle, el("span", {}, "firmware sources"))), chips, status, everywhere(model.scan()), banksEl);
 }
 
 // src/core/protocol.ts
@@ -2391,10 +2403,9 @@ function mountTerminal(root, _ctx) {
   cpuPanel.append(el("div", { class: "controls" }, readout, el("button", {
     onclick: () => model.resetCpu()
   }, "reset cpu"), el("button", { onclick: () => model.togglePolling() }, "start / stop polling")), canvas, el("p", { class: "muted note" }, "min and max are extremes since the last reset, not a rolling window. The sequence a measurement " + "wants is: reset, drive the engine, then watch whether max stops climbing."));
-  append(root, [
-    el("div", { class: "callout warn" }, el("strong", {}, "Released firmware has no terminal. "), "Needs a build you make yourself: ", el("code", {}, "make ENGINE=<engine> TERMINAL=1"), "."),
+  append(mountPoint(root), [
     el("div", { class: "controls" }, connectBtn, allPortsBtn, status),
-    !model.supported() && el("div", { class: "callout" }, el("strong", {}, "This browser has no WebSerial. "), "Talking to hardware needs Chrome or Edge - and unlike the card tabs there is no fallback here, " + "because there is no zip-shaped substitute for a serial port."),
+    !model.supported() && el("div", { class: "callout" }, el("strong", {}, "This browser has no WebSerial. "), "Talking to hardware needs Chrome or Edge - and unlike the card screens there is no fallback " + "here, because there is no zip-shaped substitute for a serial port."),
     el("h3", {}, "Console"),
     log,
     input,
@@ -2403,8 +2414,7 @@ function mountTerminal(root, _ctx) {
     el("h3", {}, "Control surface"),
     surface,
     el("h3", {}, "USB bring-up"),
-    usbPanel,
-    aside("Why released firmware has no terminal, and what it costs", el("p", {}, "scripts/build_release.py never passes TERMINAL=1, so every binary in dist/ lacks the command " + "channel and this tab finds nothing to talk to. Shipping terminal-enabled releases is an open " + "firmware decision: it costs ~19-25 KB of SRAM_EXEC everywhere, and on the QSPI engines " + "(chuck, csound, mosc) it costs USB MIDI, which claims the same OTG core."), el("p", {}, "The control surface above is generated from the device's own `describe` reply - every control " + "is one this build actually advertises, and nothing appears for the enum entries it ignores. " + "Destructive verbs ask before firing."))
+    usbPanel
   ]);
 }
 
@@ -2924,16 +2934,16 @@ function mountFlash(root, _ctx) {
     if (f)
       model.select(f.name, await f.arrayBuffer());
   });
-  append(root, [
+  append(mountPoint(root), [
     el("div", { class: "controls" }, [connectBtn, flashBtn, cancelBtn]),
     status,
     drop,
     report,
     bar,
-    result,
-    aside("Why this is safe to interrupt, and what it will not do", el("p", {}, "This page writes one address and one only: the application region at " + `0x${APP_ADDRESS.toString(16)}, in QSPI. The bootloader lives somewhere else entirely - ` + "internal flash at 0x08000000 - and nothing here can address it."), el("p", {}, "So the worst case is a device with a half-written app and a working bootloader. " + "Hold Reset for about 3 seconds until the pad LEDs breathe white, and flash it again. " + "That is a retry, not a brick."), el("p", {}, "Installing a bootloader is the operation that genuinely can brick a device, it is " + "done once per unit, and it is not offered here. Use dfu-util for it."), el("p", {}, "Where the device allows it, the image is read back and compared byte for byte " + "after writing, so a successful flash is measured rather than assumed.")),
-    aside("If the device does not appear", el("p", {}, "The device must be in bootloader mode first: hold Reset for about 3 seconds until " + "the pad LEDs breathe white. It then enumerates as 0483:df11."), el("p", {}, "WebUSB is Chromium-only - Chrome or Edge. Firefox and Safari do not implement it " + "and will not; the command-line path works everywhere:"), el("pre", {}, `dfu-util -a 0 -s 0x${APP_ADDRESS.toString(16)}:leave -D sk-<engine>-<version>.bin -d ,0483:df11`), el("p", {}, "On Linux, a udev rule is needed for a non-root browser to claim the interface - " + "the same rule dfu-util needs."))
+    result
   ]);
+  fill(root, "appaddr", `0x${APP_ADDRESS.toString(16)}`);
+  fill(root, "dfucmd", `dfu-util -a 0 -s 0x${APP_ADDRESS.toString(16)}:leave -D sk-<engine>-<version>.bin -d ,0483:df11`);
   model.store.subscribe((s) => {
     if (!s.supported) {
       clear(status);
@@ -3120,7 +3130,7 @@ function mountEngine(root, ctx) {
       el("strong", {}, bank ? "On the card: " : "No card needed: "),
       formatLine(s.entry),
       bank && el("span", { class: "muted" }, "  Full format on the "),
-      bank && el("a", { href: "#reference" }, "Reference tab"),
+      bank && el("a", { href: "#reference" }, "Card reference"),
       bank && "."
     ]);
     clear(doc);
@@ -3151,27 +3161,22 @@ function mountEngine(root, ctx) {
 }
 
 // src/ui/home_view.ts
-var ACTIONS = [
-  { view: "build", label: "Build a card", note: "A complete, valid, minimal card in one click." },
-  { view: "convert", label: "Convert audio", note: "Re-encode anything to what an engine reads." },
-  { view: "verify", label: "Verify a card", note: "Check a card and get told exactly what is wrong." },
-  { view: "flash", label: "Flash firmware", note: "Write an engine to the device over USB." }
-];
-var PLATFORM = [
-  "Encoders with pickup behaviour and LED ring feedback",
-  "Pad gestures and transport controls",
-  "CV and gate I/O, and MIDI",
-  "SD-card storage, and a clock every engine can sync to"
-];
 function mountHome(root, ctx) {
   const engines = ctx.engines.entries.filter((e) => e.doc.page);
   const released = engines.filter((e) => e.doc.released).length;
   const cardReaders = engines.filter((e) => e.bank).length;
-  clear(root).append(el("p", { class: "lead text-base" }, "A fork of the Synthux Academy ", el("a", { href: "https://synthux.academy/store/spotykach", target: "_blank", rel: "noreferrer" }, "Spotykach"), " firmware, restructured so the instrument is a fixed hardware and UI ", el("strong", {}, "platform"), " with a swappable DSP ", el("strong", {}, "engine"), ". Each firmware build replaces only the engine and its parameters."), el("p", { class: "max-w-measure" }, "The panel does not change when you flash a different engine. The same controls mean the same " + "things, so what you learn once keeps working - and an engine is free to be a looper, an " + "effect, a sampler or a whole scripting language behind it."), el("p", { class: "muted note max-w-measure" }, `${engines.length} engines in the tree, ${released} of them in the released set. ` + `${cardReaders} read the SD card; the rest need no card at all. ` + `${ctx.layout.banks.length} card layouts, names up to ${ctx.layout.scan.max_name} ` + `characters, files from ${ctx.layout.scan.min_bytes / 1024} KB.`), el("div", { class: "action-grid" }, ACTIONS.map((a) => el("button", {
-    type: "button",
-    class: "action-card",
-    onclick: () => ctx.go(a.view)
-  }, el("span", { class: "action-label" }, a.label), el("span", { class: "action-note" }, a.note)))), el("h3", {}, "Browse the engines"), el("p", { class: "max-w-measure" }, "Every engine has a page: what it does, what it expects on the card, and how to get it onto " + "the device."), el("div", { class: "controls" }, el("button", { type: "button", class: "primary", onclick: () => ctx.go("engines") }, `All ${engines.length} engines`)), el("details", { class: "aside" }, el("summary", {}, "What stays the same across every engine"), el("ul", { class: "ml-4 list-disc pl-4" }, PLATFORM.map((p) => el("li", {}, p))), el("p", {}, "The platform is decoupled from any engine by construction - the hardware, UI, memory and " + "transport code carries no engine-specific dependency, and a build-time check fails the " + "build if one is introduced.")), el("details", { class: "aside" }, el("summary", {}, "Engines are written three ways"), el("p", {}, "In C++ against the engine interface; in Faust, from a .dsp source and a small manifest with " + "no hand-written C++ at all; or in Max/MSP gen~, translated to C++. The generated paths are " + "not toys - the reverb and several others ship from them.")), el("details", { class: "aside" }, el("summary", {}, "Nothing here is uploaded"), el("p", {}, "Every tool on this page runs in this tab. Cards are read and written through the browser's " + "own file APIs, and the device is reached over WebSerial and WebUSB - there is no server, " + "no account and no install. The card rules are generated from the same source the " + "command-line tools use, so the two cannot disagree about them.")));
+  const stats = root.querySelector("#home-stats");
+  if (stats) {
+    stats.textContent = `${engines.length} engines in the tree, ${released} of them in the released set. ` + `${cardReaders} read the SD card; the rest need no card at all. ` + `${ctx.layout.banks.length} card layouts, names up to ${ctx.layout.scan.max_name} ` + `characters, files from ${ctx.layout.scan.min_bytes / 1024} KB.`;
+  }
+  const count = root.querySelector("#home-engine-count");
+  if (count)
+    count.textContent = String(engines.length);
+  for (const node of root.querySelectorAll("[data-view]")) {
+    const view = node.getAttribute("data-view");
+    if (view)
+      node.addEventListener("click", () => ctx.go(view));
+  }
 }
 
 // src/ui/engines_view.ts
@@ -3197,7 +3202,7 @@ function describe(entry, max = MAX_CHARS) {
 }
 function mountEngines(root, ctx) {
   const entries = ctx.engines.entries.filter((e) => e.doc.page);
-  clear(root).append(el("p", { class: "lead text-base" }, "One firmware image each: flash the one you want, and the device becomes that instrument. " + "Pick one to see what it does and what it expects on the card."), el("div", { class: "engine-grid" }, entries.map((e) => {
+  clear(mountPoint(root)).append(el("div", { class: "engine-grid" }, entries.map((e) => {
     const name = e.doc.name;
     return el("a", {
       class: "engine-card",
@@ -3351,8 +3356,7 @@ This page is generated: run \`make web-data\` and serve web/ over http ` + "(fil
     else
       show(route2.view);
   });
-  const provenance = `${ctx.layout.banks.length} banks, ` + `scan floor ${ctx.layout.scan.min_bytes / 1024} KB, name limit ${ctx.layout.scan.max_name}`;
-  wireAboutMenu(provenance);
+  wireAboutMenu();
   $("#home-link")?.addEventListener("click", () => {
     document.activeElement?.blur?.();
     show(DEFAULT_VIEW);
@@ -3371,15 +3375,12 @@ This page is generated: run \`make web-data\` and serve web/ over http ` + "(fil
   else
     show(route.view || DEFAULT_VIEW);
 }
-function wireAboutMenu(provenance) {
+function wireAboutMenu() {
   const dialog = $("#about");
   const open = $("#about-open");
   const close = $("#about-close");
-  const facts = $("#about-facts");
   if (!dialog || !open || !close)
     return;
-  if (facts)
-    facts.textContent = provenance;
   open.addEventListener("click", () => {
     open.blur();
     if (typeof dialog.showModal === "function")
@@ -3438,5 +3439,5 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 }
 main();
 
-//# debugId=33F1B7A25219198264756E2164756E21
+//# debugId=F5739F08F605F60364756E2164756E21
 //# sourceMappingURL=app.js.map

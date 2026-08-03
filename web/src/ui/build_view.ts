@@ -8,7 +8,8 @@ import { BuildModel } from '../app/build_model.ts';
 import { folderLabel } from '../core/layout.ts';
 import { cardAccess } from '../platform/cardsource.ts';
 import { deflateRaw, downloader } from '../platform/download.ts';
-import { aside, clear, el, finding } from './dom.ts';
+import { clear, el, finding } from './dom.ts';
+import { fill, mountPoint, slot } from './slots.ts';
 import type { ViewContext } from './context.ts';
 
 export function mountBuild(root: HTMLElement, ctx: ViewContext): void {
@@ -54,39 +55,18 @@ export function mountBuild(root: HTMLElement, ctx: ViewContext): void {
       el('td', {}, bank.readers.join(', ')),
       el('td', { class: 'muted' }, bank.fmt.describe)))));
 
-  root.append(
-    el('p', { class: 'lead' }, 'Makes an empty card the firmware can read. Format it FAT32 first.'),
+  // The prose is in index.html; what is left here is the controls, the live status and the results.
+  mountPoint(root).append(
     el('div', { class: 'controls' },
       el('button', { class: 'primary', onclick: () => model.downloadZip() },
         'Download a starter card (.zip)'),
       inPlace),
     status,
-    el('p', { class: 'muted note' },
-      'Unpack it so the folders sit at the card\'s root. Then add audio on ',
-      el('a', { href: '#convert' }, 'Convert'),
-      ', and if anything misbehaves later, point ',
-      el('a', { href: '#verify' }, 'Verify'),
-      ' at the card.'),
     out,
-    aside(`What it creates - ${b.files.length} files, ${b.dirs.length} folders`,
-      el('p', {}, 'Every folder the firmware looks for, a README in each one restating that folder\'s '
-        + 'rules, the default SK/config.txt, radio/rate.txt, bard/BARD.CFG, and the example chuck and '
-        + 'csound patches. Byte for byte the card ',
-      el('code', {}, 'sk_card.py init --no-demo'),
-      ' builds, and it passes Verify with nothing to report.'),
-      folders),
-    aside('Want demo audio too?',
-      el('p', {},
-        'The released ',
-        el('code', {}, 'sk-card-<version>.zip'),
-        ' is a complete card with synthesized audio for every engine, and it is checksummed. This page '
-        + 'builds the skeleton only rather than regenerating that content, so what you download from '
-        + 'the release is what everyone else has. ',
-        el('a', {
-          href: 'https://github.com/shakfu/sk-engines/releases/latest',
-          target: '_blank',
-          rel: 'noreferrer',
-        }, 'Get it from the latest release'),
-        '.')),
   );
+
+  // Counts and the folder table are derived from the layout, so they are filled rather than written.
+  fill(root, 'files', String(b.files.length));
+  fill(root, 'dirs', String(b.dirs.length));
+  slot(root, 'folders').append(folders);
 }

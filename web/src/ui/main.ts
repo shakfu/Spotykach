@@ -153,12 +153,7 @@ async function main(): Promise<void> {
     else show(route.view);
   });
 
-  // The card layout is versioned with the firmware so the rules on this page match the binaries it
-  // sits beside; say which, rather than leaving the user to guess whether the page is current.
-  const provenance = `${ctx.layout.banks.length} banks, `
-    + `scan floor ${ctx.layout.scan.min_bytes / 1024} KB, name limit ${ctx.layout.scan.max_name}`;
-
-  wireAboutMenu(provenance);
+  wireAboutMenu();
   // Home: back to the front page, and drop the fragment so the URL is the bare page again.
   $('#home-link')?.addEventListener('click', () => {
     (document.activeElement as HTMLElement | null)?.blur?.();
@@ -184,19 +179,21 @@ async function main(): Promise<void> {
 }
 
 /**
- * The Apple menu's one item.
+ * The project menu's one item.
  *
  * A `<dialog>` rather than a div, so Escape and the focus trap come from the platform instead of from
- * three more event listeners. The menu itself needs no JavaScript at all - system.css opens it on
- * `:focus-within` - so this is only the About box.
+ * three more event listeners. The menu itself needs no JavaScript at all - it opens on
+ * `:focus-within` in CSS - so this is only the About box.
+ *
+ * It takes no arguments any more: the dialog used to carry a generated facts line (engine and bank
+ * counts, the scan floor) that was threaded in from the layout, and that line is gone. Nothing here
+ * writes text, so nothing here needs data.
  */
-function wireAboutMenu(provenance: string): void {
+function wireAboutMenu(): void {
   const dialog = $<HTMLDialogElement>('#about');
   const open = $<HTMLButtonElement>('#about-open');
   const close = $<HTMLButtonElement>('#about-close');
-  const facts = $('#about-facts');
   if (!dialog || !open || !close) return;
-  if (facts) facts.textContent = provenance;
 
   open.addEventListener('click', () => {
     // Blur first: the menu is held open by focus, so it would stay painted over the dialog.

@@ -7,7 +7,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>sk-engines - engines, cards and firmware tools</title>
-<meta name="description" content="Check, build and fill an SD card for the spotykach engines, in the browser. Nothing is uploaded.">
+<meta name="description" content="sk-engines: browse the engines, prepare an SD card, and flash firmware to a Spotykach - in the browser. Nothing is uploaded.">
 <!-- One stylesheet. Built from src/app.css by `make web-build` (Tailwind), generated and committed so
      GitHub Pages can serve web/ as-is; edit src/app.css, never dist/. -->
 <link rel="stylesheet" href="./dist/app.css">
@@ -63,11 +63,8 @@
 <dialog id="about" class="modal-dialog" aria-labelledby="about-title">
   <div class="modal-contents">
     <h2 id="about-title" class="mb-2 text-lg font-bold">sk-engines</h2>
-    <p>SD card tools for the spotykach engines. Everything runs in this tab: nothing is uploaded,
-      and no account, install or server is involved.</p>
-    <p id="about-facts" class="mono"></p>
-    <p>The card rules are generated from <code>scripts/card_layout.py</code>, so this page and the
-      command-line tools cannot disagree about them.</p>
+    <p>The browser front end for <strong>sk-engines</strong>: the engine catalogue and their manuals,
+      SD card tools, and a way to flash firmware and talk to a device.</p>
     <div class="controls">
       <button id="about-close" class="primary" type="button">OK</button>
       <a href="https://github.com/shakfu/sk-engines" target="_blank" rel="noreferrer">Project page</a>
@@ -94,33 +91,263 @@
          front page repeats the common ones as buttons so nothing important is hidden behind a click.
          Every panel below is reached by exactly one route, from the menu or from the front page. -->
     <main id="panels">
-      <section id="panel-home" aria-label="Overview"></section>
-      <section id="panel-engines" aria-label="Engines" hidden></section>
-      <section id="panel-build" aria-label="Build a card" hidden></section>
-      <section id="panel-convert" aria-label="Convert audio" hidden></section>
-      <section id="panel-verify" aria-label="Verify a card" hidden></section>
-      <section id="panel-reference" aria-label="Card reference" hidden></section>
-      <section id="panel-terminal" aria-label="Terminal" hidden></section>
-      <section id="panel-flash" aria-label="Flash firmware" hidden></section>
+      <!-- The overview is a DOCUMENT, so it lives here as markup rather than being assembled from
+           string literals in TypeScript. It is the one screen with no state: every other panel is
+           built in code because its content comes from a card, a device or the layout data, and only
+           this one is prose that happens to have two numbers in it.
+           Keeping it here means the copy can be edited without a build step, it is readable as
+           writing rather than as arguments to el(), and it paints before dist/app.js has loaded.
+           home_view.ts fills the two derived counts and wires [data-view] - nothing else. -->
+      <section id="panel-home" aria-label="Overview">
+        <p class="lead text-base">
+          A fork of the Synthux Academy
+          <a href="https://synthux.academy/store/spotykach" target="_blank" rel="noreferrer">Spotykach</a>
+          firmware, restructured so the instrument is a fixed hardware and UI <strong>platform</strong>
+          with a swappable DSP <strong>engine</strong>. Each firmware build replaces only the engine
+          and its parameters.
+        </p>
+
+        <p>
+          The panel does not change when you flash a different engine. The same controls mean the same
+          things, so what you learn once keeps working &mdash; and an engine is free to be a looper, an
+          effect, a sampler or a whole scripting language behind it.
+        </p>
+
+        <!-- Filled by home_view.ts from the catalogue and the layout. Empty here on purpose: a count
+             written into the markup is the thing that goes stale the first time an engine is added. -->
+        <p id="home-stats" class="muted note"></p>
+
+        <div class="action-grid">
+          <button type="button" class="action-card" data-view="build">
+            <span class="action-label">Build a card</span>
+            <span class="action-note">A complete, valid, minimal card in one click.</span>
+          </button>
+          <button type="button" class="action-card" data-view="convert">
+            <span class="action-label">Convert audio</span>
+            <span class="action-note">Re-encode anything to what an engine reads.</span>
+          </button>
+          <button type="button" class="action-card" data-view="verify">
+            <span class="action-label">Verify a card</span>
+            <span class="action-note">Check a card and get told exactly what is wrong.</span>
+          </button>
+          <button type="button" class="action-card" data-view="flash">
+            <span class="action-label">Flash firmware</span>
+            <span class="action-note">Write an engine to the device over USB.</span>
+          </button>
+        </div>
+
+        <h3>Browse the engines</h3>
+        <p>
+          Every engine has a page: what it does, what it expects on the card, and how to get it onto
+          the device.
+        </p>
+        <div class="controls">
+          <button type="button" class="primary" data-view="engines">All <span id="home-engine-count">the</span> engines</button>
+        </div>
+
+        <details class="aside">
+          <summary>What stays the same across every engine</summary>
+          <ul class="ml-4 list-disc pl-4">
+            <li>Encoders with pickup behaviour and LED ring feedback</li>
+            <li>Pad gestures and transport controls</li>
+            <li>CV and gate I/O, and MIDI</li>
+            <li>SD-card storage, and a clock every engine can sync to</li>
+          </ul>
+          <p>
+            The platform is decoupled from any engine by construction &mdash; the hardware, UI, memory
+            and transport code carries no engine-specific dependency, and a build-time check fails the
+            build if one is introduced.
+          </p>
+        </details>
+
+        <details class="aside">
+          <summary>Engines are written three ways</summary>
+          <p>
+            In C++ against the engine interface; in Faust, from a <code>.dsp</code> source and a small
+            manifest with no hand-written C++ at all; or in Max/MSP <code>gen~</code>, translated to
+            C++. The generated paths are not toys &mdash; the reverb and several others ship from them.
+          </p>
+        </details>
+
+      </section>
+      <section id="panel-engines" aria-label="Engines" hidden>
+        <p class="lead text-base">
+          One firmware image each: flash the one you want, and the device becomes that instrument.
+          Pick one to see what it does and what it expects on the card.
+        </p>
+        <div data-mount></div>
+      </section>
+      <section id="panel-build" aria-label="Build a card" hidden>
+        <p class="lead">Makes an empty card the firmware can read. Format it FAT32 first.</p>
+        <div data-mount></div>
+        <p class="muted note">
+          Unpack it so the folders sit at the card's root. Then add audio on
+          <a href="#convert">Convert</a>, and if anything misbehaves later, point
+          <a href="#verify">Verify</a> at the card.
+        </p>
+        <details class="aside">
+          <summary>What it creates &mdash; <span data-fill="files">the</span> files,
+            <span data-fill="dirs">the</span> folders</summary>
+          <p>
+            Every folder the firmware looks for, a README in each one restating that folder's rules,
+            the default <code>SK/config.txt</code>, <code>radio/rate.txt</code>,
+            <code>bard/BARD.CFG</code>, and the example chuck and csound patches. Byte for byte the
+            card <code>sk_card.py init --no-demo</code> builds, and it passes Verify with nothing to
+            report.
+          </p>
+          <div data-slot="folders"></div>
+        </details>
+        <details class="aside">
+          <summary>Want demo audio too?</summary>
+          <p>
+            The released <code>sk-card-&lt;version&gt;.zip</code> is a complete card with synthesized
+            audio for every engine, and it is checksummed. This page builds the skeleton only rather
+            than regenerating that content, so what you download from the release is what everyone
+            else has.
+            <a href="https://github.com/shakfu/sk-engines/releases/latest" target="_blank" rel="noreferrer">Get
+            it from the latest release</a>.
+          </p>
+        </details>
+      </section>
+      <section id="panel-convert" aria-label="Convert audio" hidden>
+        <p class="lead">
+          Converts your audio to exactly what the target engine reads. mp3, flac, wav, ogg, m4a.
+        </p>
+        <div data-mount></div>
+        <details class="aside">
+          <summary>On resampling, and why this is not the CLI</summary>
+          <p>
+            The browser's resampler is not bit-identical to libsox's or ffmpeg's. None of the three
+            agree with each other today, so this is not a regression &mdash; but it does mean this page
+            cannot reproduce a particular card byte for byte. For a 50x pstretch source, where
+            artefacts have a long time to become audible, converting with ffmpeg is worth comparing
+            against.
+          </p>
+          <p>
+            The upside is the reason this screen exists: decoding happens in the browser's own audio
+            engine, so there is no install and no format-support lottery. The CLI needs ffmpeg, or
+            cysox plus a libsox built with the right handlers.
+          </p>
+        </details>
+      </section>
+      <section id="panel-verify" aria-label="Verify a card" hidden>
+        <p class="lead">Checks a card and explains anything that will not work.</p>
+        <div data-mount></div>
+        <details class="aside">
+          <summary>Why a bad card gives no error on the device</summary>
+          <!-- The four counts are filled by the view. They were prose once, and the "eight folder
+               layouts" figure silently became nine the moment softcut was added - prose has no test. -->
+          <p>
+            Engines read this card using <span data-fill="banks">several</span> folder layouts and
+            <span data-fill="formats">several</span> incompatible audio formats, and the firmware
+            converts nothing. A file in the wrong format is not rejected, it is read as raw bytes and
+            plays as noise; a filename over <span data-fill="maxname">a few</span> characters is
+            skipped by the directory scan with no error shown. The hardware's only feedback is an LED,
+            so every one of these fails silently. This finds all of it.
+          </p>
+        </details>
+      </section>
+      <section id="panel-reference" aria-label="Card reference" hidden>
+        <p class="lead">Every engine, what it does, and what it expects on the card.</p>
+        <div data-mount></div>
+        <details class="aside">
+          <summary>Where these facts come from</summary>
+          <p>
+            The card rules are generated from the same table the firmware and the command-line tools
+            read, so this page cannot disagree with
+            <code>python3 scripts/sk_card.py layout</code>. The engine descriptions are the opening
+            paragraph of each <code>docs/engines/&lt;name&gt;.md</code>, so they cannot drift from the
+            documentation either.
+          </p>
+        </details>
+      </section>
+      <section id="panel-terminal" aria-label="Terminal" hidden>
+        <div class="callout warn">
+          <strong>Released firmware has no terminal. </strong>
+          Needs a build you make yourself: <code>make ENGINE=&lt;engine&gt; TERMINAL=1</code>.
+        </div>
+        <div data-mount></div>
+        <details class="aside">
+          <summary>Why released firmware has no terminal, and what it costs</summary>
+          <p>
+            <code>scripts/build_release.py</code> never passes <code>TERMINAL=1</code>, so every binary
+            in <code>dist/</code> lacks the command channel and this screen finds nothing to talk to.
+            Shipping terminal-enabled releases is an open firmware decision: it costs ~19-25 KB of
+            SRAM_EXEC everywhere, and on the QSPI engines (chuck, csound, mosc) it costs USB MIDI,
+            which claims the same OTG core.
+          </p>
+          <p>
+            The control surface above is generated from the device's own <code>describe</code> reply
+            &mdash; every control is one this build actually advertises, and nothing appears for the
+            enum entries it ignores. Destructive verbs ask before firing.
+          </p>
+        </details>
+      </section>
+      <section id="panel-flash" aria-label="Flash firmware" hidden>
+        <div data-mount></div>
+        <details class="aside">
+          <summary>Why this is safe to interrupt, and what it will not do</summary>
+          <!-- The address is filled from core/image.ts. It is the single fact this whole explanation
+               rests on, so it is read from the code that enforces it rather than retyped here. -->
+          <p>
+            This page writes one address and one only: the application region at
+            <code data-fill="appaddr">the app region</code>, in QSPI. The bootloader lives somewhere
+            else entirely &mdash; internal flash at <code>0x08000000</code> &mdash; and nothing here
+            can address it.
+          </p>
+          <p>
+            So the worst case is a device with a half-written app and a working bootloader. Hold Reset
+            for about 3 seconds until the pad LEDs breathe white, and flash it again. That is a retry,
+            not a brick.
+          </p>
+          <p>
+            Installing a bootloader is the operation that genuinely can brick a device, it is done
+            once per unit, and it is not offered here. Use <code>dfu-util</code> for it.
+          </p>
+          <p>
+            Where the device allows it, the image is read back and compared byte for byte after
+            writing, so a successful flash is measured rather than assumed.
+          </p>
+        </details>
+        <details class="aside">
+          <summary>If the device does not appear</summary>
+          <p>
+            The device must be in bootloader mode first: hold Reset for about 3 seconds until the pad
+            LEDs breathe white. It then enumerates as <code>0483:df11</code>.
+          </p>
+          <p>
+            WebUSB is Chromium-only &mdash; Chrome or Edge. Firefox and Safari do not implement it and
+            will not; the command-line path works everywhere:
+          </p>
+          <pre data-fill="dfucmd">dfu-util</pre>
+          <p>
+            On Linux, a udev rule is needed for a non-root browser to claim the interface &mdash; the
+            same rule <code>dfu-util</code> needs.
+          </p>
+        </details>
+        <!-- A <footer> scoped to this panel, not to the page. It was a page-level footer and therefore
+             appeared under every screen, including the overview, where "writes the application region
+             only" is an answer to a question nobody on that page had asked. -->
+        <footer>
+          <p>
+            This screen writes the application region only, so an interrupted write costs a re-flash
+            rather than a device. Installing a <em>bootloader</em> is not done here: that
+            is the write that can genuinely brick a unit, and the
+            <a href="https://electro-smith.github.io/Programmer/" target="_blank" rel="noreferrer">Daisy Web
+            Programmer</a> and <code>dfu-util</code> both do it.
+          </p>
+          <p>
+            The rules on this page are generated from <code>scripts/card_layout.py</code>, so they match the
+            firmware rather than paraphrasing it. Same checks as
+            <code>python3 scripts/sk_card.py verify</code>.
+          </p>
+        </footer>
+      </section>
       <!-- One page per engine, reached from the catalogue, the Engines menu, or an #engine/<name>
            link. Its actions are the ones only meaningful once an engine is known. -->
       <section id="panel-engine" aria-label="Engine documentation" hidden></section>
     </main>
 
-    <footer>
-      <p>
-        The <strong>Flash</strong> tab writes the application region only, so an interrupted write
-        costs a re-flash rather than a device. Installing a <em>bootloader</em> is not done here: that
-        is the write that can genuinely brick a unit, and the
-        <a href="https://electro-smith.github.io/Programmer/" target="_blank" rel="noreferrer">Daisy Web
-        Programmer</a> and <code>dfu-util</code> both do it.
-      </p>
-      <p>
-        The rules on this page are generated from <code>scripts/card_layout.py</code>, so they match the
-        firmware rather than paraphrasing it. Same checks as
-        <code>python3 scripts/sk_card.py verify</code>.
-      </p>
-    </footer>
 
   </div>
 </div>

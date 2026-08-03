@@ -13,7 +13,8 @@ import { ReferenceModel } from '../app/reference_model.ts';
 import { folderLabel } from '../core/layout.ts';
 import type { Layout } from '../core/layout.ts';
 import type { EngineEntry } from '../core/engines.ts';
-import { aside, el } from './dom.ts';
+import { el } from './dom.ts';
+import { mountPoint } from './slots.ts';
 import type { ViewContext } from './context.ts';
 
 /** `[a, b]` -> `a-b`, for the config property ranges. */
@@ -174,21 +175,13 @@ export function mountReference(root: HTMLElement, ctx: ViewContext): void {
     sections.get(engine)?.scrollIntoView?.({ block: 'start' });
   });
 
-  root.append(
-    el('p', { class: 'lead' }, 'Every engine, what it does, and what it expects on the card.'),
+  // The prose is in index.html; the view supplies the filter, the chips and the generated tables.
+  mountPoint(root).append(
     el('div', { class: 'controls' }, filter,
       el('label', { class: 'field inline' }, srcToggle, el('span', {}, 'firmware sources'))),
     chips,
     status,
     everywhere(model.scan()),
     banksEl,
-    aside('Where these facts come from',
-      el('p', {},
-        'The card rules are generated from the same table the firmware and the command-line tools '
-        + 'read, so this page cannot disagree with ',
-        el('code', {}, 'python3 scripts/sk_card.py layout'),
-        '. The engine descriptions are the opening paragraph of each ',
-        el('code', {}, 'docs/engines/<name>.md'),
-        ', so they cannot drift from the documentation either.')),
   );
 }
