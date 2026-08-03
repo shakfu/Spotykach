@@ -2,48 +2,12 @@
 
 Deferred work, in priority order (highest first). See `docs/` for the platform/engine design and `CHANGELOG.md` for done work.
 
-> **Update 2026-08-01 - the bench session is now instrumented.** This file was written as if P2 could
-> only be a manual listening pass. That predates the USB-C terminal channel, which was fixed and verified
-> on hardware 2026-07-31 (root cause: the panel jack is on OTG_HS, not OTG_FS - see
-> [`terminal-impl.md`](docs/dev/terminal-impl.md)). Two things landed since, both host-verified:
->
-> - **`query cpu` / `cpumin` / `cpumax` + `reset cpu`** - the platform's `CpuLoadMeter` is now readable
->   over the channel, so P2's headroom numbers are `reset cpu` -> drive the engine -> `query cpumax`,
->   scripted per engine. Previously the meter needed `METER=1`, which brings up a second USB device on
->   the same OTG core the terminal uses - the numbers and the channel that would collect them were
->   mutually exclusive.
-> - **`live_params()`/`live_configs()` on every engine** - the stated blocker on `make test-hw`. The
->   generic sweep no longer sets params engines ignore, so the mechanical half of P2 can run unattended.
->
-> Neither is hardware-verified yet; both fold into the P2 session.
->
-> **And one regression found on the way - now FIXED and hardware-verified.** `pstretch` had stopped
-> building entirely: not "cannot host the terminal" but no link at all, terminal or not, at either
-> window (`region SRAM overflowed by 80576 bytes` on the committed `v0.6.1` tree). Commit `993210f`
-> moved 114K from the data `SRAM` region into `SRAM_EXEC` (186K -> 300K) so the channel would fit
-> everywhere; pstretch's FFT working set needed 297664 B of exactly that region.
->
-> Fixed with a per-engine linker script, `linker/alt_sram_pstretch.lds` (200K/312K instead of
-> 300K/212K), selected automatically on `ENGINE=pstretch` so a plain `make ENGINE=pstretch` is correct
-> too. Same approach and precedent as `linker/alt_qspi_chuck.lds`, and it leaves the other 20 engines on
-> the 300K split untouched. **All three pstretch images flashed and confirmed working on hardware
-> 2026-08-01** (8192 with and without the terminal, and 4096 with it) - so the moved code/data boundary
-> boots, which a link check could not have established.
->
-> **P2 is therefore no longer purely pending - its first engine is measured.** `make test-hw` ran
-> against real hardware for the first time (`30 passed, 3 skipped`), and pstretch has CPU numbers:
->
+> **Update 2026-08-01 - the bench session is now instrumented.** This file was written as if P2 could > only be a manual listening pass. That predates the USB-C terminal channel, which was fixed and verified > on hardware 2026-07-31 (root cause: the panel jack is on OTG_HS, not OTG_FS - see > [`terminal-impl.md`](docs/dev/terminal-impl.md)). Two things landed since, both host-verified: > > - **`query cpu` / `cpumin` / `cpumax` + `reset cpu`** - the platform's `CpuLoadMeter` is now readable >   over the channel, so P2's headroom numbers are `reset cpu` -> drive the engine -> `query cpumax`, >   scripted per engine. Previously the meter needed `METER=1`, which brings up a second USB device on >   the same OTG core the terminal uses - the numbers and the channel that would collect them were >   mutually exclusive. > - **`live_params()`/`live_configs()` on every engine** - the stated blocker on `make test-hw`. The >   generic sweep no longer sets params engines ignore, so the mechanical half of P2 can run unattended. > > Neither is hardware-verified yet; both fold into the P2 session. > > **And one regression found on the way - now FIXED and hardware-verified.** `pstretch` had stopped > building entirely: not "cannot host the terminal" but no link at all, terminal or not, at either > window (`region SRAM overflowed by 80576 bytes` on the committed `v0.6.1` tree). Commit `993210f` > moved 114K from the data `SRAM` region into `SRAM_EXEC` (186K -> 300K) so the channel would fit > everywhere; pstretch's FFT working set needed 297664 B of exactly that region. > > Fixed with a per-engine linker script, `linker/alt_sram_pstretch.lds` (200K/312K instead of > 300K/212K), selected automatically on `ENGINE=pstretch` so a plain `make ENGINE=pstretch` is correct > too. Same approach and precedent as `linker/alt_qspi_chuck.lds`, and it leaves the other 20 engines on > the 300K split untouched. **All three pstretch images flashed and confirmed working on hardware > 2026-08-01** (8192 with and without the terminal, and 4096 with it) - so the moved code/data boundary > boots, which a link check could not have established. > > **P2 is therefore no longer purely pending - its first engine is measured.** `make test-hw` ran > against real hardware for the first time (`30 passed, 3 skipped`), and pstretch has CPU numbers: >
 > | | WINDOW=8192 | WINDOW=4096 |
 > |---|---|---|
 > | CPU avg / max | 41.5% / **87.6 -> 91.3% (still climbing)** | 33.3% / **63.6% (converged)** |
 > | `SRAM` (312K) | 97.40% | 82.01% |
->
-> **Open decision - pstretch's default window is now a voicing call with evidence attached.** 4096 is
-> the only config with real margin on both axes at once (~36% CPU, ~50 KB data, vs ~9% and ~8 KB), and
-> its peak has converged where 8192's had not - so 8192's true worst case is unknown and worse than
-> 91%. But 4096 is a shorter smear (~85 ms vs ~171 ms) and the long wash may be the point of the
-> engine. **Default stays 8192 until someone listens to both.** Numbers in
-> [`docs/engines/pstretch.md`](docs/engines/pstretch.md).
+> > **Open decision - pstretch's default window is now a voicing call with evidence attached.** 4096 is > the only config with real margin on both axes at once (~36% CPU, ~50 KB data, vs ~9% and ~8 KB), and > its peak has converged where 8192's had not - so 8192's true worst case is unknown and worse than > 91%. But 4096 is a shorter smear (~85 ms vs ~171 ms) and the long wash may be the point of the > engine. **Default stays 8192 until someone listens to both.** Numbers in > [`docs/engines/pstretch.md`](docs/engines/pstretch.md).
 
 Priority is driven less by size than by what unblocks/gates what, and by whether an item is **build-verifiable on the host** vs. **hardware-gated** (needs a flash to verify). Most of the open work is now hardware-gated and has piled up: several engines have been *flashed and heard informally but not rigorously measured/voiced* - they sound alive, but CPU headroom (`Meter::cpu`) and the full voicing range haven't been pinned down. The dominant move is therefore a single bench session (P2) that does that measured pass; the remaining items are a deliberate code refactor (P3), an optional voicing tweak (P4), and a strategic build-system decision (P5). Ahead of all of them sits **P0**: the desk/host audit of whether every engine uses the full UI/indicator grammar is **done** (see `indicator-comparison.md` §7), leaving the ranked toolkit migration as the top actionable item (its apply step is hardware-gated and folds into P2).
 
@@ -69,18 +33,27 @@ Priority is driven less by size than by what unblocks/gates what, and by whether
 **Done (the mechanical dedup):**
 
 - **`ring::selector` / `ring::slots`** — retired all 9 hand-rolled Alt-held selectors (bard shelves, csound+chuck patches [shared verbatim], softcut slots, radio banks, glitch algos, pstretch clips, reso models, mosc engines).
+
 - **`led::route_leds`** — replaced the byte-for-byte route L/C/R block in bard, softcut, radio, glitch, pstretch, mosc, delay, qdelay; **added** to edrums (previously showed no route feedback).
+
 - **`pal::` sweep** — unified the palette across every migrated engine, killing the `0x00c0ff`/`0x00aaff`/`0x00a0ff`-near-`kCyan` drift and reso's Reel/Slice/Drift hue drift.
+
 - **`ring::level` / `ring::playhead`** — meters + markers (csound/chuck meters, reverb baseline+decay, delay/qdelay division arcs, radio/glitch/pstretch markers, reso/mosc pitch dots).
+
 - **`motion::breathe_standby` + `transport_view`/`led::transport`** — softcut (replaced its hand-rolled cos breathe + transport-colour ladder; `kErrColor` was already `== pal::kErr`).
+
 - **Faust floor** — `chorus`/`filter`/`voice` meter path → `ring::level`; added a static dim mode-hued "on, ready" floor for the `meter=false` case (no `ITimeSource` in that render, so static rather than a breathe).
+
 - **`led::cycle`** — bard (follow/duck indicator).
 
 **Deferred — net-NEW indicators needing per-engine data plumbing + hardware verification (fold into P2):**
 
 - **`ring::value` pickup feedback** — the biggest remaining expressive gap. Needs each engine to track edit-param/knob/picked-up in `render()` (as `shuttle` does); `softcut`/`pstretch`/`reso` don't yet.
+
 - **`led::clock`** for `reso`(CapTransport)/`delay`/`qdelay`(tempo-synced)/`edrums` — needs the clock source surfaced into `render()`.
+
 - **`led::cycle`** for the LFO/mod engines (`reso` arp/drift, `mosc` CV, `delay`/`qdelay` mod LFO, `reverb` greyhole ModDepth) — needs the modulator phase/depth in `render()`.
+
 - **Breathe** on the still-static-when-idle engines (reso/mosc/delay/qdelay/reverb) — their `render()` has no `ITimeSource`.
 
 **Note:** LED changes are **not** hardware-verified yet (render() is hardware-only; host tests can't exercise it — and the host harness is separately broken pre-existing on `granular/detector.h`). Confirm on the panel during the P2 bench session.
@@ -97,33 +70,11 @@ Highest-leverage *decision* before any code: answering one hardware fact either 
 
 ## P1.5 - SD card onboarding: there is no base card, and the format rules fail silently (IMPLEMENTED 2026-08-01)
 
-> **Status: all three deliverables built and host-tested** (`scripts/sk_card.py` + `card_layout.py` +
-> `card_audio.py`, 60 tests in `scripts/test_sk_card.py`, `make sdcard` / `make check-sdcard`, docs at
-> [`docs/sd-card.md`](docs/sd-card.md)). Verified on the host: `init` produces a card its own `verify`
-> passes clean; `verify` catches all ten failure modes below on a deliberately broken card and exits
-> non-zero; `convert` round-trips mp3/wav through both cysox and ffmpeg with pitch and level intact;
-> `make sdcard` emits an 11.9 MB byte-reproducible zip into `dist/<version>/`.
->
-> **Two things learned while building it, both now encoded in the tooling.** (1) `cysox` writing a
-> `.wav` produces 32-bit **integer** PCM — precisely the format that is the classic "looks like float,
-> plays as noise" trap on this device — so the backend decodes to headerless `.f32` and re-encodes
-> through our own writer instead. (2) libsox format support is a build-time property: this machine's
-> has no mp3 or flac handler, so a fixed cysox-first preference would fail on most real user input.
-> Backend choice is therefore per-file, probed with `cysox.sox.find_format`.
->
-> **Remaining, hardware-gated (fold into P2):** flash each SD engine and confirm a generated card
-> actually mounts, scans and plays — the one claim the host cannot establish. Also unverified on
-> hardware: whether the synthesized demo content is *musically* useful per engine, as opposed to merely
-> well-formed.
+> **Status: all three deliverables built and host-tested** (`scripts/sk_card.py` + `card_layout.py` + > `card_audio.py`, 60 tests in `scripts/test_sk_card.py`, `make sdcard` / `make check-sdcard`, docs at > [`docs/sd-card.md`](docs/sd-card.md)). Verified on the host: `init` produces a card its own `verify` > passes clean; `verify` catches all ten failure modes below on a deliberately broken card and exits > non-zero; `convert` round-trips mp3/wav through both cysox and ffmpeg with pitch and level intact; > `make sdcard` emits an 11.9 MB byte-reproducible zip into `dist/<version>/`. > > **Two things learned while building it, both now encoded in the tooling.** (1) `cysox` writing a > `.wav` produces 32-bit **integer** PCM — precisely the format that is the classic "looks like float, > plays as noise" trap on this device — so the backend decodes to headerless `.f32` and re-encodes > through our own writer instead. (2) libsox format support is a build-time property: this machine's > has no mp3 or flac handler, so a fixed cysox-first preference would fail on most real user input. > Backend choice is therefore per-file, probed with `cysox.sox.find_format`. > > **Remaining, hardware-gated (fold into P2):** flash each SD engine and confirm a generated card > actually mounts, scans and plays — the one claim the host cannot establish. Also unverified on > hardware: whether the synthesized demo content is *musically* useful per engine, as opposed to merely > well-formed.
 
-**The gap (as originally written).** A working card exists on the developer's desk; a new user has no way to get one. There is no
-downloadable base card, no single command that builds one, and the conversion tooling is three separate
-Python scripts (`scripts/convert_tape_audio.py`, `convert_radio_audio.py`, `prepare_audiobooks.py`) that
-assume the reader already knows which script their engine needs. Ten engines read the card and **eight
-distinct layouts across four incompatible audio formats** are in play - none converted on-device.
+**The gap (as originally written).** A working card exists on the developer's desk; a new user has no way to get one. There is no downloadable base card, no single command that builds one, and the conversion tooling is three separate Python scripts (`scripts/convert_tape_audio.py`, `convert_radio_audio.py`, `prepare_audiobooks.py`) that assume the reader already knows which script their engine needs. Ten engines read the card and **eight distinct layouts across four incompatible audio formats** are in play - none converted on-device.
 
-**What the card actually has to look like** (path literals read out of the source, not the prose docs -
-this table does not exist anywhere else in one place):
+**What the card actually has to look like** (path literals read out of the source, not the prose docs - this table does not exist anywhere else in one place):
 
 | Engine | Path | Format | Source |
 |---|---|---|---|
@@ -138,89 +89,35 @@ this table does not exist anywhere else in one place):
 
 Plus `SK/config.txt` (see the manual) and `SK/MEM` (`memory/storage.h:22-23`).
 
-**Why this is worse than a missing download: every rule fails silently or near-silently.** The firmware
-does no conversion - it reads file body bytes straight into frames - so a wrong-format file is not
-rejected, it is **reinterpreted as garbage**. A filename over 12 chars is simply **invisible** to the
-directory scan (`prepare_audiobooks.py` documents this for bard; it applies to every scanned bank). A
-leading `/` in a path silently resolves to the wrong volume (the bug that made the csound bank look
-empty - `csound-impl.md:163`). 32-bit *integer* PCM is the easy mistake for 32-bit *float*
-(`preparing-audio.md`). The device's only feedback is an LED: steady amber = empty slot, strobing amber =
-wrong format (tape), red vs magenta pad (pstretch). A newcomer with a correct-*looking* card gets noise or
-silence and no way to tell which of four rules they broke.
+**Why this is worse than a missing download: every rule fails silently or near-silently.** The firmware does no conversion - it reads file body bytes straight into frames - so a wrong-format file is not rejected, it is **reinterpreted as garbage**. A filename over 12 chars is simply **invisible** to the directory scan (`prepare_audiobooks.py` documents this for bard; it applies to every scanned bank). A leading `/` in a path silently resolves to the wrong volume (the bug that made the csound bank look empty - `csound-impl.md:163`). 32-bit *integer* PCM is the easy mistake for 32-bit *float* (`preparing-audio.md`). The device's only feedback is an LED: steady amber = empty slot, strobing amber = wrong format (tape), red vs magenta pad (pstretch). A newcomer with a correct-*looking* card gets noise or silence and no way to tell which of four rules they broke.
 
 **Deliverable - three parts, in dependency order:**
 
-1. **`sk-card verify <card-root>`: the diagnostic. Highest value per line of code, so build it first.**
-   Walk an existing card and report every violation with the fix: wrong rate/depth/channel-count, name too
-   long for the scan, wrong case, stray AppleDouble/`._*` files (a real past red herring - see
-   `radio-impl.md:75`), files in a folder no engine reads. This converts the silent-garbage failure into a
-   line of text, and it helps existing users with a card they already built, not just new ones. Pure host
-   code, fully unit-testable against fixture trees (`scripts/test_*.py` is the precedent).
+1. **`sk-card verify <card-root>`: the diagnostic. Highest value per line of code, so build it first.** Walk an existing card and report every violation with the fix: wrong rate/depth/channel-count, name too long for the scan, wrong case, stray AppleDouble/`._*` files (a real past red herring - see `radio-impl.md:75`), files in a folder no engine reads. This converts the silent-garbage failure into a line of text, and it helps existing users with a card they already built, not just new ones. Pure host code, fully unit-testable against fixture trees (`scripts/test_*.py` is the precedent).
 
-2. **`make sdcard` -> a base card zipped into `dist/<version>/`.** The full folder skeleton, `config.txt`,
-   `BARD.CFG`, `radio/rate.txt`, the `examples/{chuck,csound}` patches copied into `chuck/`+`csound/`, and
-   a short `README.TXT` **inside each folder** restating that folder's exact format - the rules arrive
-   where the user is standing. Then **synthesized** demo audio (tones/sweeps/noise beds/rhythmic test
-   patterns generated procedurally, in each engine's exact format) so every engine makes sound on a fresh
-   card. Landing it in `dist/` means `make gh-release` ships it beside the binaries for free.
+2. **`make sdcard` -> a base card zipped into `dist/<version>/`.** The full folder skeleton, `config.txt`, `BARD.CFG`, `radio/rate.txt`, the `examples/{chuck,csound}` patches copied into `chuck/`+`csound/`, and a short `README.TXT` **inside each folder** restating that folder's exact format - the rules arrive where the user is standing. Then **synthesized** demo audio (tones/sweeps/noise beds/rhythmic test patterns generated procedurally, in each engine's exact format) so every engine makes sound on a fresh card. Landing it in `dist/` means `make gh-release` ships it beside the binaries for free.
 
-3. **One `sk-card` front-end over the three converters.** They already encode all the format knowledge and
-   are good; what is missing is that a newcomer must choose among them and know the target layout. One
-   command taking a card root plus a pile of audio, dispatching per engine and writing files to the right
-   place in the right format. This is mostly a dispatcher - resist rewriting the converters.
+3. **One `sk-card` front-end over the three converters.** They already encode all the format knowledge and are good; what is missing is that a newcomer must choose among them and know the target layout. One command taking a card root plus a pile of audio, dispatching per engine and writing files to the right place in the right format. This is mostly a dispatcher - resist rewriting the converters.
 
-**Dependency strategy - keep the decoder off the critical path.** Only step 3 needs to decode arbitrary
-user audio. Steps 1 and 2 must not:
+**Dependency strategy - keep the decoder off the critical path.** Only step 3 needs to decode arbitrary user audio. Steps 1 and 2 must not:
 
-- **`verify` needs no decoder.** It only inspects files already on the card, and those are WAV or
-  headerless raw - both parseable with `struct` in ~20 lines. Keep it stdlib so the diagnostic always
-  runs, including for a user whose problem *is* a broken toolchain.
-- **`make sdcard` needs no decoder.** Demo content is synthesized (`struct` + `math`), and the target
-  lands in `dist/`, where `build_release.py` is deliberately stdlib-only so plain `python3` suffices with
-  no venv (Makefile:793). Adding a third-party import to the release path would forfeit that.
-- **`convert` gets a backend registry**, extending the one `convert_tape_audio.py` already has
-  (`CONVERTERS` + `available()` probe + `--tool`, `:71-122`). Add [`cysox`](https://github.com/shakfu/cysox)
-  (in-process libsox via Cython) as the preferred backend and keep ffmpeg as fallback. Two reasons not to
-  make it mandatory: it needs **system libsox** (`libsox-dev` / `brew install sox`) rather than bundling
-  it, so it relocates the install barrier rather than removing it; and **mp3 depends on the libsox build**
-  (`libsox-fmt-mp3` is separate on Debian) - which bites exactly where it hurts, since LibriVox ships mp3
-  and that is bard's primary source. Probe at runtime, prefer cysox, fall back to ffmpeg, and say which
-  one ran.
+- **`verify` needs no decoder.** It only inspects files already on the card, and those are WAV or headerless raw - both parseable with `struct` in ~20 lines. Keep it stdlib so the diagnostic always runs, including for a user whose problem *is* a broken toolchain.
 
-  Where cysox is a clear win: structured metadata via `cysox.info()` instead of parsing `ffprobe` output
-  or shelling out to `soxi`, real exceptions instead of `CalledProcessError` + stderr scraping, and
-  `cysox.stream()` for chunked reads (the headerless `.raw` radio writer and `prepare_audiobooks.py`'s
-  silence detection both want that). `cysox` is already in the `dev` group in `pyproject.toml`.
+- **`make sdcard` needs no decoder.** Demo content is synthesized (`struct` + `math`), and the target lands in `dist/`, where `build_release.py` is deliberately stdlib-only so plain `python3` suffices with no venv (Makefile:793). Adding a third-party import to the release path would forfeit that.
 
-**Explicitly out of scope: bundling real recordings.** LibriVox (public domain) is the natural bard source
-and the Music Thing RadioMusic library the natural radio source, but both bloat the download and drag in
-provenance tracking. Ship them as a documented `fetch` step, not as release payload. Synthesized demo
-content has the same "it works on first boot" effect with zero rights questions.
+- **`convert` gets a backend registry**, extending the one `convert_tape_audio.py` already has (`CONVERTERS` + `available()` probe + `--tool`, `:71-122`). Add [`cysox`](https://github.com/shakfu/cysox) (in-process libsox via Cython) as the preferred backend and keep ffmpeg as fallback. Two reasons not to make it mandatory: it needs **system libsox** (`libsox-dev` / `brew install sox`) rather than bundling it, so it relocates the install barrier rather than removing it; and **mp3 depends on the libsox build** (`libsox-fmt-mp3` is separate on Debian) - which bites exactly where it hurts, since LibriVox ships mp3 and that is bard's primary source. Probe at runtime, prefer cysox, fall back to ffmpeg, and say which one ran.
 
-**Verification.** Parts 1-3 are host-verifiable and unit-testable - which is why this is the top
-actionable item while everything else queues behind the bench. The one hardware-gated step is confirming a
-generated card actually boots and plays on each SD engine; fold that into P2.
+  Where cysox is a clear win: structured metadata via `cysox.info()` instead of parsing `ffprobe` output or shelling out to `soxi`, real exceptions instead of `CalledProcessError` + stderr scraping, and `cysox.stream()` for chunked reads (the headerless `.raw` radio writer and `prepare_audiobooks.py`'s silence detection both want that). `cysox` is already in the `dev` group in `pyproject.toml`.
+
+**Explicitly out of scope: bundling real recordings.** LibriVox (public domain) is the natural bard source and the Music Thing RadioMusic library the natural radio source, but both bloat the download and drag in provenance tracking. Ship them as a documented `fetch` step, not as release payload. Synthesized demo content has the same "it works on first boot" effect with zero rights questions.
+
+**Verification.** Parts 1-3 are host-verifiable and unit-testable - which is why this is the top actionable item while everything else queues behind the bench. The one hardware-gated step is confirming a generated card actually boots and plays on each SD engine; fold that into P2.
 
 ## P2 - One bench session: measure + voice the engines that work but aren't quantified (HARDWARE-GATED)
 
 These engines **have been flashed and heard** - they boot and sound alive on the unit. What's missing is the *measured* pass: real CPU headroom (`Meter::cpu`) and a deliberate sweep of the full voicing range, neither of which a host test or a casual listen establishes. Do it as a single bench session and capture the numbers:
 
-> **The measured pass is now scripted, and pstretch is done (2026-08-01).** Read CPU over the terminal
-> instead of `METER=1` (which cannot coexist with the channel - it wants the same OTG core):
->
-> ```
-> make ENGINE=<e> TERMINAL=1 && make ENGINE=<e> TERMINAL=1 program-dfu   # device in DFU
-> reset cpu  ->  drive the engine  ->  query cpu / cpumin / cpumax
-> make test-hw                                                          # 30-case sweep, needs dialout
-> ```
->
-> **Sample the peak more than once.** `max` is "worst block since `reset cpu`", so re-reading it shows
-> whether it has converged. pstretch at 8192 was still climbing after six seconds (87.6 -> 91.3%) while
-> 4096 settled within 0.3 pp - a difference invisible in a single reading, and the thing that actually
-> decides whether an engine has headroom. Also read `min`: it is the platform floor (~2%) with the
-> engine's DSP idle, which separates "expensive" from "spiky".
->
-> Done: **pstretch** (41.5% avg / 91.3%+ max at 8192; 33.3% / 63.6% at 4096 - see the header note).
+> **The measured pass is now scripted, and pstretch is done (2026-08-01).** Read CPU over the terminal > instead of `METER=1` (which cannot coexist with the channel - it wants the same OTG core): > > ``` > make ENGINE=<e> TERMINAL=1 && make ENGINE=<e> TERMINAL=1 program-dfu   # device in DFU > reset cpu  ->  drive the engine  ->  query cpu / cpumin / cpumax > make test-hw                                                          # 30-case sweep, needs dialout > ``` > > **Sample the peak more than once.** `max` is "worst block since `reset cpu`", so re-reading it shows > whether it has converged. pstretch at 8192 was still climbing after six seconds (87.6 -> 91.3%) while > 4096 settled within 0.3 pp - a difference invisible in a single reading, and the thing that actually > decides whether an engine has headroom. Also read `min`: it is the platform floor (~2%) with the > engine's DSP idle, which separates "expensive" from "spiky". > > Done: **pstretch** (41.5% avg / 91.3%+ max at 8192; 33.3% / 63.6% at 4096 - see the header note).
 
 - **reverb + tape Faust DSP - CPU + voicing.** Heard on hardware, but the Jiles-Atherton hysteresis (tape) and FDN/plate reverb DSP cost hasn't been measured. CPU: flash `ENGINE=reverb` and `ENGINE=tape`, read `Meter::cpu` for the stereo paths (J-A runs 4 substeps/sample x 2 voices/decks; estimated ~10-25% of 480 MHz but unmeasured). If too hot, the levers are a polynomial Langevin approx or an ADAA-tanh saturator. Voicing: walk the full range - the tape `drive*54` dB clean->crunch sweep across its span, and the reverb's three Faust voices (Dattorro plate / Zita hall / Greyhole, `kReverbCount = 3`, selected per deck on the Mode switch) with a click-free algorithm switch. Levers live in `src/engine/{reverb,tape}/*.dsp`; re-tune and `make faust-gen`. (reverb and tape are already released on `main` - this is a voicing/CPU pass, **not** a merge gate. gigaverb is **excluded** from the reverb engine - the optional `REVERB_GIGAVERB=1` fourth voice overflows SRAM_EXEC and stays out; gigaverb ships only as the standalone `ENGINE=gigaverb`.)
 
@@ -286,65 +183,26 @@ The boot path is the one real risk and it collapsed to one define: `BOOT_APP` (t
 
 ## P6 - Web front-end: browser-based SD card builder + terminal (BUILT 2026-08-01, host-verified only)
 
-**Built.** Both phases landed in [`web/`](web) — a static page, no dependencies, no build step
-(`make web-serve`, `make test-web`, `make web-data`). Design and the outcome against it are in
-[`docs/dev/web-frontend.md`](docs/dev/web-frontend.md); the app's own notes are in
-[`web/README.md`](web/README.md). In-browser DFU flashing stayed out of scope (the Daisy Web Programmer
-already covers it, and a half-written image is the worst failure in the system).
+**Built.** Both phases landed in [`web/`](web) — a static page, no dependencies, no build step (`make web-serve`, `make test-web`, `make web-data`). Design and the outcome against it are in [`docs/dev/web-frontend.md`](docs/dev/web-frontend.md); the app's own notes are in [`web/README.md`](web/README.md). In-browser DFU flashing stayed out of scope (the Daisy Web Programmer already covers it, and a half-written image is the worst failure in the system).
 
 All three constraints were resolved as the doc proposed:
 
-1. **Chromium only** — handled by designing around the read-only path. Verify, Build and Convert all
-   work in Safari and Firefox via drag-in-files → download-a-zip; only in-place card editing and the
-   terminal need Chromium, and each says so where it is missing rather than failing silently.
-2. **The terminal does not exist on released firmware** — **still an open firmware decision, unchanged
-   by this work.** Phase 2 is built and tested against a scripted fake device, so writing it cost
-   nothing and gated nothing, but it remains close to useless to anyone who does not build their own
-   image. The Terminal tab leads with that fact. Deciding whether to ship `TERMINAL=1` releases (~19-25
-   KB `SRAM_EXEC` everywhere, and USB MIDI on the QSPI engines only) is the item that is actually left.
-3. **One source of truth** — done, and taken further than the doc asked. `card_layout.py --json` now
-   exports the table *and every piece of generated text* (the per-folder READMEs, the root README, the
-   default config), so the browser builds a card byte-identical to `sk_card.py init` — asserted per
-   file by SHA-256 — while declaring none of it. Convert's target-naming became a per-bank template
-   (`Bank.target`) consumed by both front-ends, replacing six per-engine branches in `sk_card.py`.
+1. **Chromium only** — handled by designing around the read-only path. Verify, Build and Convert all work in Safari and Firefox via drag-in-files → download-a-zip; only in-place card editing and the terminal need Chromium, and each says so where it is missing rather than failing silently.
 
-Drift is guarded from both sides: `make test-scripts` regenerates the export and fails if the committed
-copy has moved (`scripts/test_web_export.py`), and `make test-web` fails if the JS disagrees with the
-Python — the WAV writers by byte equality against `card_audio.py` fixtures, and the checker by
-reaching the same verdicts *and the same fix text* as `verify_card` on a deliberately-broken card.
+2. **The terminal does not exist on released firmware** — **still an open firmware decision, unchanged by this work.** Phase 2 is built and tested against a scripted fake device, so writing it cost nothing and gated nothing, but it remains close to useless to anyone who does not build their own image. The Terminal tab leads with that fact. Deciding whether to ship `TERMINAL=1` releases (~19-25 KB `SRAM_EXEC` everywhere, and USB MIDI on the QSPI engines only) is the item that is actually left.
 
-**What is NOT verified, and is what remains:** no real browser has loaded the page, no real card has
-been read through the File System Access API, no mp3 has been converted and heard on the device, and no
-`TERMINAL=1` build has been driven over WebSerial. The full list is under "Remaining verification" in
-the design doc. Items 3 and 4 there fold naturally into the P2 bench session.
+3. **One source of truth** — done, and taken further than the doc asked. `card_layout.py --json` now exports the table *and every piece of generated text* (the per-folder READMEs, the root README, the default config), so the browser builds a card byte-identical to `sk_card.py init` — asserted per file by SHA-256 — while declaring none of it. Convert's target-naming became a per-bank template (`Bank.target`) consumed by both front-ends, replacing six per-engine branches in `sk_card.py`.
 
-**That pass is now scripted**, in [`docs/dev/web-frontend-checks.md`](docs/dev/web-frontend-checks.md):
-nine checks with exact steps, the expected output, and the CLI command to diff each result against, so
-it is about thirty minutes rather than exploratory poking. Writing it against the source turned up two
-things worth targeting rather than discovering: `fromDataTransfer` reads `dt.items` *after* an `await`,
-by which time the drag data store may be invalidated (C4 aims at it — a dropped loose file is the
-likely casualty), and the service worker registers only when `location.protocol === 'https:'`, so the
-offline check cannot be run against `make web-serve` and needs a real deploy or a local HTTPS cert.
+Drift is guarded from both sides: `make test-scripts` regenerates the export and fails if the committed copy has moved (`scripts/test_web_export.py`), and `make test-web` fails if the JS disagrees with the Python — the WAV writers by byte equality against `card_audio.py` fixtures, and the checker by reaching the same verdicts *and the same fix text* as `verify_card` on a deliberately-broken card.
 
-**Rewritten in TypeScript** (`web/src/`, bundled by bun to a committed `web/dist/app.js`), and
-re-layered: `core/` holds the rules and touches no browser API, `platform/` holds the four browser-only
-APIs, `app/` holds one view-model per tab with all the state and none of the DOM, and `ui/` renders.
-Every browser capability enters through an interface in `core/ports.ts`, so the view-models are tested
-against fakes with no DOM and no device - including the two behaviours that previously needed hardware
-(an empty port chooser, a device unplugged mid-session). Tests enforce the layering rather than
-asserting it, and one fails when the committed bundle is older than `src/`. 206 tests, up from 113 at
-the original landing.
+**What is NOT verified, and is what remains:** no real browser has loaded the page, no real card has been read through the File System Access API, no mp3 has been converted and heard on the device, and no `TERMINAL=1` build has been driven over WebSerial. The full list is under "Remaining verification" in the design doc. Items 3 and 4 there fold naturally into the P2 bench session.
+
+**That pass is now scripted**, in [`docs/dev/web-frontend-checks.md`](docs/dev/web-frontend-checks.md): nine checks with exact steps, the expected output, and the CLI command to diff each result against, so it is about thirty minutes rather than exploratory poking. Writing it against the source turned up two things worth targeting rather than discovering: `fromDataTransfer` reads `dt.items` *after* an `await`, by which time the drag data store may be invalidated (C4 aims at it — a dropped loose file is the likely casualty), and the service worker registers only when `location.protocol === 'https:'`, so the offline check cannot be run against `make web-serve` and needs a real deploy or a local HTTPS cert.
+
+**Rewritten in TypeScript** (`web/src/`, bundled by bun to a committed `web/dist/app.js`), and re-layered: `core/` holds the rules and touches no browser API, `platform/` holds the four browser-only APIs, `app/` holds one view-model per tab with all the state and none of the DOM, and `ui/` renders. Every browser capability enters through an interface in `core/ports.ts`, so the view-models are tested against fakes with no DOM and no device - including the two behaviours that previously needed hardware (an empty port chooser, a device unplugged mid-session). Tests enforce the layering rather than asserting it, and one fails when the committed bundle is older than `src/`. 206 tests, up from 113 at the original landing.
 
 **Two additions since the build**, both host-verifiable and so done rather than deferred:
 
-- **A Reference tab**, the web counterpart of `sk_card.py layout` — the one subcommand that had no
-  screen. It states what every engine expects on the card, the constraints that fail silently, the
-  sidecar defaults (`radio/rate.txt` sets the playback rate for a whole bank and appeared nowhere in
-  the UI), and the `SK/config.txt` properties with their ranges. It asks nothing of the browser, which
-  makes it the one tab that behaves identically in Safari, and a test asserts it writes down no figure
-  the layout owns.
-- **A drift guard on the service-worker asset list**, which was hand-maintained with nothing checking
-  it. The failure it invited was silent and one-sided — a forgotten entry breaks only offline, only for
-  users who already installed the worker. Now checked against a filesystem walk in both directions,
-  plus an import-graph walk from the entry point, with all three confirmed to fail on the drift they
-  describe.
+- **A Reference tab**, the web counterpart of `sk_card.py layout` — the one subcommand that had no screen. It states what every engine expects on the card, the constraints that fail silently, the sidecar defaults (`radio/rate.txt` sets the playback rate for a whole bank and appeared nowhere in the UI), and the `SK/config.txt` properties with their ranges. It asks nothing of the browser, which makes it the one tab that behaves identically in Safari, and a test asserts it writes down no figure the layout owns.
+
+- **A drift guard on the service-worker asset list**, which was hand-maintained with nothing checking it. The failure it invited was silent and one-sided — a forgotten entry breaks only offline, only for users who already installed the worker. Now checked against a filesystem walk in both directions, plus an import-graph walk from the entry point, with all three confirmed to fail on the drift they describe.

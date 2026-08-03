@@ -332,8 +332,13 @@ LDFLAGS += -u _printf_float
 # Route ChucK's C-malloc family to the SDRAM pool (chuck_alloc.cpp); the platform heap stays in SRAM.
 LDFLAGS += -Wl,--wrap=malloc,--wrap=free,--wrap=calloc,--wrap=realloc
 else
-$(error Unknown ENGINE '$(ENGINE)' - use 'granular', 'passthrough', 'delay', 'qdelay', 'edrums', 'reso', 'mosc', 'graincloud', 'tape', 'reverb', 'shuttle', 'radio', 'bard', 'chorus', 'filter', 'voice', 'csound', or 'chuck')
+$(error Unknown ENGINE '$(ENGINE)' - use 'granular', 'passthrough', 'delay', 'qdelay', 'edrums', 'reso', 'mosc', 'graincloud', 'tape', 'radio', 'bard', 'glitch', 'pstretch', 'reverb', 'shuttle', 'softcut', 'gigaverb', 'chorus', 'filter', 'voice', 'csound', or 'chuck')
 endif
+# The engine list in that error is HAND-MAINTAINED and had drifted (it was missing glitch, pstretch,
+# softcut and gigaverb). Add a new engine's name to it, and to the matching message in CMakeLists.txt.
+# Do not put anything between the `else` and the `$(error ...)` line: scripts/gen_engine.py and
+# gen_faust_engine.py locate this switch by the literal string "else\n$(error Unknown ENGINE" and insert
+# generated engine blocks immediately before it, so a line in that gap breaks both generators.
 
 # Opt-in (make ... METER=1): enable the on-device CPU load meter (app.cpp's CpuLoadMeter). It writes
 # Max/Avg/Min processing load % to the external USB CDC (LOGGER_EXTERNAL port) every ~250 ms using a
@@ -819,6 +824,27 @@ RELEASE_ENGINES ?=
 .PHONY: dist
 dist:
 	RELEASE_ENGINES="$(RELEASE_ENGINES)" $(REL_PY) scripts/build_release.py $(VERSION) $(if $(WITH_HEX),--hex,)
+
+# The same release build, driven through the opt-in CMake path instead of this Makefile. Same script,
+# so the manifest, SHA256SUMS, release notes and the in-binary banner check are identical - only the
+# compiler driver differs.
+#
+# Output goes to dist-cmake/<version>/, never dist/. That is deliberate: `make gh-release` globs
+# dist/<version>/* and uploads it, so a shared output directory would make it possible to publish
+# CMake-built binaries as an official release just by running two targets in the wrong order. Keeping
+# the trees apart also lets you build both and diff them, which is the reason to want this at all.
+#
+# These binaries are NOT byte-identical to the canonical ones and are not for shipping: the CMake link
+# resolves newlib's exit/atexit family from full libc rather than nano, costing ~1.25 KB of SRAM_EXEC,
+# and it emits objects in a different order so nearly every address shifts. Both are understood and
+# deliberate - see docs/dev/cmake-gap.md. Use this to compare the two build systems across the whole
+# engine set, not to produce artifacts for users.
+#   make dist-cmake                              # curated engine set, describe-derived version
+#   make dist-cmake VERSION=0.6.2                # explicit version (banner is pinned to it)
+#   make dist-cmake RELEASE_ENGINES="delay reso"  # a subset, for a quick comparison
+.PHONY: dist-cmake
+dist-cmake:
+	RELEASE_ENGINES="$(RELEASE_ENGINES)" $(REL_PY) scripts/build_release.py $(VERSION) --cmake $(if $(WITH_HEX),--hex,)
 
 # Build the base SD card and package it into dist/<version>/sk-card-<version>.zip, so a user can
 # download-and-unzip a correct card instead of hand-authoring eight folder layouts in four audio

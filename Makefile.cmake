@@ -22,30 +22,47 @@ ENGINE ?= granular
 JOBS   ?= 8
 BUILD  := build-cmake/$(ENGINE)
 
-# Config toggles -> CMake -D flags (mirror the old Makefile's DEBUG / LOFI_INT16).
-CMAKE_FLAGS :=
-ifeq ($(DEBUG),1)
-CMAKE_FLAGS += -DDEBUG=1
-endif
-ifeq ($(LOFI_INT16),1)
-CMAKE_FLAGS += -DLOFI_INT16=1
-endif
+# Config toggles -> CMake -D flags, mirroring the canonical Makefile's switches one for one.
+#
+# Every toggle is passed on EVERY configure, with its current value, even when that value is empty.
+# That is deliberate and it is the whole trick: a CMake cache entry is sticky, so passing -DTERMINAL=1
+# once and then omitting it would silently keep building a terminal image. An empty value is falsy to
+# CMake's `if()`, so passing them all unconditionally reproduces make's "absent means off" semantics.
+#
+# TERMINAL/USBDIAG/TERMPORT change TYPE LAYOUT (SPK_TERMINAL adds virtuals to IEngine and members to
+# CoreUI/AppImpl). The canonical Makefile needs stamp files and an object wipe to make a toggle safe;
+# here CMake records the definitions in flags.make, which every object depends on, so a changed toggle
+# rebuilds everything by itself. That is the one place this frontend is structurally simpler.
+CMAKE_FLAGS := \
+	-DDEBUG=$(DEBUG) \
+	-DLOFI_INT16=$(LOFI_INT16) \
+	-DTERMINAL=$(TERMINAL) \
+	-DUSBDIAG=$(USBDIAG) \
+	-DTERMPORT=$(TERMPORT) \
+	-DMETER=$(METER) \
+	-DWINDOW=$(WINDOW) \
+	-DUSB_MIDI=$(USB_MIDI) \
+	-DBRINGUP=$(BRINGUP) \
+	-DNOCHUCK=$(NOCHUCK) \
+	-DCHUCKLVL=$(CHUCKLVL) \
+	-DSOFTCUT_EXTRA=$(SOFTCUT_EXTRA) \
+	-DSPK_VERSION=$(SPK_VERSION)
 
 .PHONY: all build configure clean check-boundary program-dfu program-boot \
         engine-granular engine-passthrough engine-delay engine-qdelay engine-edrums engine-reso engine-mosc engine-graincloud engine-tape \
         engine-reverb engine-shuttle engine-softcut engine-radio engine-bard engine-glitch engine-pstretch engine-gigaverb engine-csound engine-chuck \
         engine-chorus engine-filter engine-voice \
-        faust-gen gen-engines test-scripts test-scripts-deps
+        program-mosc program-csound program-chuck \
+        faust-gen gen-engines test-scripts test-scripts-deps test-hw
 
 all: build
 
-# Configure once per engine dir. `cmake --build` below auto-re-runs cmake if CMakeLists.txt changes,
-# so this rule only fires for a fresh dir.
-$(BUILD)/CMakeCache.txt:
+# Configure on EVERY invocation, not just for a fresh dir. A cached-only configure would ignore a
+# toggle the caller just changed (see CMAKE_FLAGS above); re-running costs ~0.1 s on a warm cache,
+# which is far less than the cost of silently building the wrong image.
+configure:
 	cmake -S . -B $(BUILD) -G "Unix Makefiles" -DENGINE=$(ENGINE) \
 		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON $(CMAKE_FLAGS)
-
-configure: $(BUILD)/CMakeCache.txt
 
 build: check-boundary configure
 	cmake --build $(BUILD) -j$(JOBS)
@@ -112,6 +129,15 @@ engine-csound:
 	$(MAKE) -f $(THIS) ENGINE=csound build program-dfu
 engine-chuck:
 	$(MAKE) -f $(THIS) ENGINE=chuck build program-dfu
+
+# Re-flash the last build of a QSPI engine without rebuilding (board already in DFU) - parity with the
+# canonical Makefile's program-mosc / program-csound / program-chuck.
+program-mosc:
+	$(MAKE) -f $(THIS) ENGINE=mosc program-dfu
+program-csound:
+	$(MAKE) -f $(THIS) ENGINE=csound program-dfu
+program-chuck:
+	$(MAKE) -f $(THIS) ENGINE=chuck program-dfu
 # Generated Faust engines (header-only kernels; no extra sources in CMakeLists).
 engine-chorus:
 	$(MAKE) -f $(THIS) ENGINE=chorus build program-dfu
@@ -136,7 +162,12 @@ engine-voice:
 # && .venv/bin/pip install cyfaust`. Override the interpreter with `CYFAUST_PY=/path/to/python` to pin a
 # different libfaust version. Add a kernel: drop <name>.dsp in its engine dir, add a spec here, and bind it.
 CYFAUST_PY ?= .venv/bin/python
-FAUST_KERNELS ?= src/engine/reverb:rv_:dattorro src/engine/reverb:rv_:zita src/engine/tape:tfx_:tapefx
+# MIRRORED from the canonical Makefile - keep the two lines identical. This copy had drifted: it was
+# missing greyhole, chorus, filter and voice's two stages, so `make -f Makefile.cmake faust-gen`
+# silently regenerated three kernels where the canonical `make faust-gen` regenerates eight. That is the
+# worst shape for a mirrored list, because the command succeeds either way and the difference only shows
+# up later as a kernel nobody rebuilt after a libfaust bump.
+FAUST_KERNELS ?= src/engine/reverb:rv_:dattorro src/engine/reverb:rv_:zita src/engine/reverb:rv_:greyhole src/engine/tape:tfx_:tapefx src/engine/chorus:fx_:chorus src/engine/filter:fx_:filter src/engine/voice:fx_voice_:osc src/engine/voice:fx_voice_:filter
 faust-gen:
 	@for spec in $(FAUST_KERNELS); do \
 	  dir=$${spec%%:*}; rest=$${spec#*:}; pfx=$${rest%%:*}; nm=$${rest##*:}; ns=$$pfx$$nm; \
@@ -186,6 +217,15 @@ gen-engines:
 # installed into the repo-local .venv. Override the interpreter with `TEST_PY=/path/to/python`.
 # `make test-scripts` installs the dev group on first use (when pytest is missing);
 # `make test-scripts-deps` (re)installs it on demand. Needs pip >= 25.1 for `--group`.
+# On-target test harness (docs/dev/terminal-tools.md): drives a flashed, TERMINAL=1 device over the
+# USB-C CDC port via tools/skdev. Needs real hardware and no-ops (pytest.skip) when none is attached.
+# Mirrored verbatim from the canonical Makefile - it does not touch the firmware build system at all.
+PYTHON ?= $(shell if [ -x "$(CURDIR)/.venv/bin/python" ]; then echo "$(CURDIR)/.venv/bin/python"; \
+                  elif command -v uv >/dev/null 2>&1; then echo "uv run python"; \
+                  else echo python3; fi)
+test-hw:
+	cd tools && $(PYTHON) -m pytest -q
+
 TEST_PY ?= .venv/bin/python
 test-scripts-deps:
 	$(TEST_PY) -m pip install -q --group dev

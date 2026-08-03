@@ -111,9 +111,70 @@ extern "C" int __cxa_atexit(void (*)(void*), void*, void*) { return 0; }
 
 If the CMake build is ever promoted to canonical (the deferred option noted in `Makefile.cmake`), revisit this: at that point a firmware `exit` stub — or, better, aligning the CMake link's library list/order with the Makefile so nano resolves first — becomes worth doing, and the stub above is the quick lever.
 
+## Feature-parity re-sync (2026-08-03)
+
+The size analysis above was done when the two builds were feature-equivalent. They then drifted: the Makefile gained switches and per-engine settings that were never mirrored, because nothing forces them to be — the CMake path is opt-in, so a Makefile-only change breaks nothing anyone notices until someone builds that engine the other way.
+
+Seven divergences had accumulated. Two were hard build failures, not differences of degree:
+
+| Gap | Effect before the fix |
+|---|---|
+| `src/terminal/*.cpp` missing from the source list | any `TERMINAL=1` build failed to link on the whole Terminal/dispatch surface |
+| pstretch not on `linker/alt_sram_pstretch.lds` | `region SRAM overflowed by 80584 bytes` — pstretch did not build at all |
+| reverb missing `OPT = -Os` | linked, but ~6 KB larger than the canonical build |
+| csound missing `--wrap=aligned_alloc` | the wrap that keeps nano-libc's `aligned_alloc` from pulling `posix_memalign` (absent under nosys) |
+| `USB_MIDI` default | never defined, so the QSPI engines silently lost device MIDI |
+| `TERMINAL` / `USBDIAG` / `TERMPORT` / `METER` / `WINDOW` / `BRINGUP` / `NOCHUCK` / `CHUCKLVL` | not implemented; passing them did nothing |
+| `SOFTCUT_EXTRA` | not implemented |
+
+`USB_MIDI` needed a stand-in for the Makefile's `APP_TYPE`: the Makefile defaults it on for `BOOT_QSPI` and off otherwise, but `BOOT_SRAM`/`BOOT_QSPI` differ only by linker script here, so CMake carries an explicit `ENGINE_BOOT_QSPI` flag set by the three QSPI engines.
+
+### The one place the frontend had to change shape
+
+Toggles could not simply be forwarded when set. A CMake cache entry is **sticky**: configure once with `-DTERMINAL=1` and every later build in that directory stays a terminal build, even when the caller drops the flag. The old `Makefile.cmake` configured only when `CMakeCache.txt` was absent, which made this worse — a changed toggle was ignored outright.
+
+So `Makefile.cmake` now configures on **every** invocation and passes **every** toggle with its current value, including the empty one. An empty value is falsy to CMake's `if()`, so absent means off, exactly as in make. A warm reconfigure costs ~0.1 s.
+
+This is also the one place CMake is structurally *better* than the canonical build. `SPK_TERMINAL`, `TERM_USBDIAG` and `SPK_TERMINAL_PORT_EXTERNAL` change **type layout** (virtuals on `IEngine`, members on `CoreUI`/`AppImpl`), so a partial rebuild produces a binary whose members sit at the wrong offsets — a frozen panel with a working terminal, which took a hardware session to diagnose. The Makefile defends against it with three stamp files and an object wipe, because GNU Make 3.81 compares mtimes at whole-second resolution. CMake records the definitions in `flags.make`, which every object already depends on, so a toggle change rebuilds everything on its own.
+
+### Verified
+
+All 22 engines build under both systems. Sizes were compared on clean trees — note that a Makefile build of engine B on top of engine A's `build/` is **not** a valid baseline: the stamps force only `app.o`, `version.o` and the three stream TUs to rebuild, so TUs like `card.o` and `storage.o` keep the previous engine's `SPK_USE_STREAM` setting. That contamination read as a 6 KB size difference until the tree was cleaned.
+
+| engine | Make `SRAM_EXEC` | CMake `SRAM_EXEC` | delta |
+|---|---|---|---|
+| pstretch | 164448 B (80.30%) | 165704 B (80.91%) | +1256 B |
+| reverb | 185796 B (60.48%) | 187060 B (60.89%) | +1264 B |
+
+`SRAM` matches exactly. The residual ~1.26 KB is Cause 3 above (newlib's `_impure_data`), still present and still deliberate.
+
+### Building a full release through CMake
+
+`make dist-cmake` runs the same `scripts/build_release.py` as `make dist`, with `--cmake`. The manifest, `SHA256SUMS`, release notes and the in-binary banner check are shared code; only the compiler driver differs. This exists to compare the two build systems across the whole engine set, not to produce artifacts for users.
+
+Three things had to change to make it possible:
+
+- **`SPK_VERSION` was not overridable in CMake.** `execute_process(git describe)` overwrote whatever was passed, so a pinned release version could never reach the binary — and `build_release.py` *verifies* the banner it expects is present, so every artifact would have failed that check. It is now guarded, matching the Makefile's `?=`.
+- **No `clean` step, and no `ENGINE_MAKE_FLAGS`.** The canonical build cleans between engines because `build/` is shared and its stamps only force a subset of TUs to rebuild; CMake's per-engine `build-cmake/<engine>` has no cross-engine contamination to wipe, and cleaning would rebuild libDaisy once per engine. `APP_TYPE`/`LDSCRIPT` are Makefile concepts — `CMakeLists.txt` derives the linker script from `ENGINE` alone.
+- **Output goes to `dist-cmake/<version>/`, never `dist/`.** `make gh-release` globs `dist/<version>/*` and uploads it, so a shared output directory would let someone publish CMake-built binaries as an official release by running two targets in the wrong order. `dist-cmake/` needed its own `.gitignore` entry: `dist/` matches that name exactly and `build-*/` does not apply.
+
+Measured on `delay` and `chorus` at the same pinned version, the CMake artifacts are **+1256 B** and **+1248 B** — the newlib residual above, consistent per engine and independent of engine size.
+
+There is deliberately **one** entry point. Adding a `dist` target to `Makefile.cmake` as well would give two ways to invoke the same script, which is the duplication that produced every drift documented on this page.
+
+### The stale engine list, and why it drifts
+
+Found on the way: the Makefile's own `$(error Unknown ENGINE ...)` message named only 18 of the 22 engines — `glitch`, `pstretch`, `softcut` and `gigaverb` had never been added. Now fixed, and both messages name the same 22.
+
+The list drifts because it is duplicated and hand-maintained, and the obvious repair — a shared `ENGINES` variable — does not actually fix it: `scripts/gen_engine.py` and `scripts/gen_faust_engine.py` locate the engine switch by the literal string `"else\n$(error Unknown ENGINE"` and insert generated blocks immediately before it. They add a branch without touching any list, so a generated engine would still go unnamed. Closing the gap properly means teaching both generators to update the list too; until then it stays a manual step, flagged by a comment beside the switch.
+
+That sentinel also constrains edits here: nothing may be inserted between the `else` and the `$(error ...)` line, or both generators break.
+
 ## Files
 
-- `CMakeLists.txt` — the two applied fixes (`DSY_DISABLE_USB_HOST` on the `daisy` target; `${APP_OPT}` on the `FatFs` target), in the fork-gap / size-parity block after `include(DaisyProject)`.
+- `CMakeLists.txt` — the two size fixes (`DSY_DISABLE_USB_HOST` on the `daisy` target; `${APP_OPT}` on the `FatFs` target) in the fork-gap block after `include(DaisyProject)`, plus the toggle block and the per-engine settings covered by the re-sync above.
+
+- `Makefile.cmake` — the unconditional configure and the full toggle forwarding that give the switches make's absent-means-off semantics.
 
 - `lib/libDaisy/Makefile` (line ~307) — where the fork sets `-DDSY_DISABLE_USB_HOST` for the Make build; the CMake fix mirrors it.
 

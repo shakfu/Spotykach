@@ -163,26 +163,54 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def build_engine(engine: str, version: str, jobs: int, out_dir: Path, emit_hex: bool = False) -> int:
+def build_dir_for(engine: str, use_cmake: bool) -> Path:
+    """Where the chosen build system leaves spotykach.bin/.hex.
+
+    The canonical Makefile builds every engine into one shared build/; the CMake path gives each
+    engine its own build-cmake/<engine>/, which is what lets it skip the per-engine clean.
+    """
+    return REPO_ROOT / "build-cmake" / engine if use_cmake else REPO_ROOT / "build"
+
+
+def build_engine(engine: str, version: str, jobs: int, out_dir: Path, emit_hex: bool = False,
+                 use_cmake: bool = False) -> int:
     """Clean-build one engine, copy + verify its artifacts into out_dir, return .bin size.
 
     The .bin is always produced (both documented flash paths use it); the .hex is copied only
     when emit_hex is set, for users flashing via ST-Link / STM32CubeProgrammer.
+
+    With use_cmake the build goes through the opt-in CMake path (Makefile.cmake -> CMakeLists.txt)
+    instead of the canonical Makefile. See build_dir_for() for why that changes three things.
     """
-    print(f"==> building {engine}")
+    print(f"==> building {engine}{' (cmake)' if use_cmake else ''}")
     for rel, fix in ENGINE_PREREQUISITES.get(engine, []):
         if not (REPO_ROOT / rel).exists():
             raise SystemExit(f"ERROR: {engine} needs {rel} - {fix}")
-    run_make("clean")
-    # SPK_VERSION makes the in-binary banner match the artifact name exactly. Some engines (csound)
-    # add build flags via ENGINE_MAKE_FLAGS - the same ones `make engine-<name>` wraps.
-    run_make(f"-j{jobs}", f"ENGINE={engine}", f"SPK_VERSION={version}", *ENGINE_MAKE_FLAGS.get(engine, []))
 
+    if use_cmake:
+        # No `clean` step. The canonical build needs one because build/ is SHARED across engines and its
+        # stamps only force a subset of TUs to rebuild on a switch (app.o, version.o and the three stream
+        # TUs), so a stale card.o/storage.o from the previous engine would be linked in. CMake gives each
+        # engine its own build-cmake/<engine> directory and tracks flags via flags.make, so there is no
+        # cross-engine contamination to wipe - and wiping would rebuild libDaisy once per engine.
+        #
+        # ENGINE_MAKE_FLAGS is NOT passed either: APP_TYPE/LDSCRIPT are Makefile concepts, and
+        # CMakeLists.txt already selects the per-engine linker script from ENGINE alone.
+        run_make("-f", "Makefile.cmake", f"ENGINE={engine}", f"SPK_VERSION={version}",
+                 f"JOBS={jobs}", "build")
+    else:
+        run_make("clean")
+        # SPK_VERSION makes the in-binary banner match the artifact name exactly. Some engines (csound)
+        # add build flags via ENGINE_MAKE_FLAGS - the same ones `make engine-<name>` wraps.
+        run_make(f"-j{jobs}", f"ENGINE={engine}", f"SPK_VERSION={version}",
+                 *ENGINE_MAKE_FLAGS.get(engine, []))
+
+    build_dir = build_dir_for(engine, use_cmake)
     base = f"{ARTIFACT_PREFIX}-{engine}-{version}"
     bin_path = out_dir / f"{base}.bin"
-    shutil.copyfile(REPO_ROOT / "build" / "spotykach.bin", bin_path)
+    shutil.copyfile(build_dir / "spotykach.bin", bin_path)
     if emit_hex:
-        shutil.copyfile(REPO_ROOT / "build" / "spotykach.hex", out_dir / f"{base}.hex")
+        shutil.copyfile(build_dir / "spotykach.hex", out_dir / f"{base}.hex")
 
     # Sanity-check the baked-in banner before we trust the artifact.
     if banner_bytes(version, engine) not in bin_path.read_bytes():
@@ -348,6 +376,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="also emit .hex artifacts (for ST-Link / STM32CubeProgrammer; the web flasher and "
              "dfu-util both use .bin, so .hex is omitted by default)",
     )
+    parser.add_argument(
+        "--cmake", action="store_true",
+        help="build via the opt-in CMake path instead of the canonical Makefile. Artifacts go to "
+             "dist-cmake/<version>/ so a canonical release is never overwritten. These binaries are "
+             "NOT byte-identical to the Makefile's (see docs/dev/cmake-gap.md) and are for comparison, "
+             "not for shipping.",
+    )
     return parser.parse_args(argv)
 
 
@@ -363,10 +398,15 @@ def main(argv: list[str]) -> int:
 
     git_sha = git_output("rev-parse", "--short", "HEAD") or "unknown"
     dirty = " (dirty tree - not a clean release build)" if is_dirty() else ""
-    out_dir = REPO_ROOT / "dist" / version
+    # A CMake build writes to dist-cmake/, NEVER dist/. `make gh-release` globs dist/<version>/* and
+    # uploads it, so letting the opt-in build land there would make it possible to publish CMake-built
+    # binaries as an official release by running two commands in the wrong order. The separate tree also
+    # means the two can be built and diffed side by side, which is the point of the flag.
+    out_dir = REPO_ROOT / ("dist-cmake" if args.cmake else "dist") / version
 
     print(f"Release version : {version}{dirty}")
     print(f"Git commit      : {git_sha}")
+    print(f"Build system    : {'cmake (opt-in; not byte-identical to make)' if args.cmake else 'make (canonical)'}")
     print(f"Engines         : {' '.join(engines)}")
     print(f"Output          : {out_dir.relative_to(REPO_ROOT)}/\n")
 
@@ -374,7 +414,8 @@ def main(argv: list[str]) -> int:
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
 
-    sizes = {engine: build_engine(engine, version, args.jobs, out_dir, args.hex) for engine in engines}
+    sizes = {engine: build_engine(engine, version, args.jobs, out_dir, args.hex, args.cmake)
+             for engine in engines}
 
     write_manifest(out_dir / "MANIFEST.txt", version, dirty, git_sha, sizes)
     write_release_notes(out_dir / "RELEASE_NOTES.md", version, engines)
