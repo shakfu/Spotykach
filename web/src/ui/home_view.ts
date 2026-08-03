@@ -3,7 +3,13 @@
 // What a first visit should answer, in order: what is this, what is in it, and what can I do from
 // here. Before this existed the page opened straight onto the card builder, which answered the third
 // question for one specific task and none of the first two - fine when the page was only card tools,
-// wrong now that it is the front door to a firmware project with 22 engines behind it.
+// wrong now that it is the front door to a firmware project.
+//
+// The prose here is a precis of the project README, and it has to stay one. An earlier version called
+// this "a family of audio engines for the Electrosmith Daisy", which was wrong in the way that
+// matters: the Daisy is the module inside, the instrument is Synthux Academy's Spotykach, and the
+// point of the project is not that there are many engines but that the PLATFORM is fixed and the
+// engine is swappable. Describing the output instead of the idea missed what the fork is for.
 //
 // The global actions are repeated here as buttons even though every one of them is in a menu. That
 // duplication is deliberate and it is the only kind worth having: the menu bar is where an action
@@ -21,23 +27,47 @@ const ACTIONS: Array<{ view: string; label: string; note: string }> = [
   { view: 'flash', label: 'Flash firmware', note: 'Write an engine to the device over USB.' },
 ];
 
+/** What the platform gives every engine, unchanged. Straight from the README's opening. */
+const PLATFORM = [
+  'Encoders with pickup behaviour and LED ring feedback',
+  'Pad gestures and transport controls',
+  'CV and gate I/O, and MIDI',
+  'SD-card storage, and a clock every engine can sync to',
+];
+
 export function mountHome(root: HTMLElement, ctx: ViewContext): void {
-  const cardReaders = ctx.engines.entries.filter((e) => e.bank).length;
+  // Only entries with a rendered page are engines. The catalogue also carries a synthetic entry per
+  // card bank that no documented engine reads - the shared `SK/` folder is one - and counting those
+  // as engines is how the front page came to claim one more than exists.
+  const engines = ctx.engines.entries.filter((e) => e.doc.page);
+  const released = engines.filter((e) => e.doc.released).length;
+  const cardReaders = engines.filter((e) => e.bank).length;
 
   clear(root).append(
     // No <h2> naming the project: the menu bar names it and the window header says which page this
     // is. Three "sk-engines" on one screen told the reader nothing twice.
     el('p', { class: 'lead text-base' },
-      'A family of audio engines for the Electrosmith Daisy - each one a separate firmware image you '
-      + 'flash to the device, sharing one platform, one control surface and one SD card layout.'),
+      'A fork of the Synthux Academy ',
+      el('a', { href: 'https://synthux.academy/store/spotykach', target: '_blank', rel: 'noreferrer' },
+        'Spotykach'),
+      ' firmware, restructured so the instrument is a fixed hardware and UI ',
+      el('strong', {}, 'platform'),
+      ' with a swappable DSP ',
+      el('strong', {}, 'engine'),
+      '. Each firmware build replaces only the engine and its parameters.'),
 
-    // The numbers are DERIVED, never typed: a prose figure is exactly the thing that goes stale the
-    // first time an engine is added and nobody thinks to grep for "22".
+    el('p', { class: 'max-w-measure' },
+      'The panel does not change when you flash a different engine. The same controls mean the same '
+      + 'things, so what you learn once keeps working - and an engine is free to be a looper, an '
+      + 'effect, a sampler or a whole scripting language behind it.'),
+
+    // Derived, never typed: a count in prose is exactly the thing that goes stale the first time an
+    // engine is added and nobody thinks to grep for the number.
     el('p', { class: 'muted note max-w-measure' },
-      `${ctx.engines.entries.length} engines, ${cardReaders} of which read the SD card. `
-      + `${ctx.layout.banks.length} card layouts, `
-      + `names up to ${ctx.layout.scan.max_name} characters, `
-      + `files from ${ctx.layout.scan.min_bytes / 1024} KB.`),
+      `${engines.length} engines in the tree, ${released} of them in the released set. `
+      + `${cardReaders} read the SD card; the rest need no card at all. `
+      + `${ctx.layout.banks.length} card layouts, names up to ${ctx.layout.scan.max_name} `
+      + `characters, files from ${ctx.layout.scan.min_bytes / 1024} KB.`),
 
     el('div', { class: 'action-grid' }, ACTIONS.map((a) =>
       el('button', {
@@ -54,7 +84,22 @@ export function mountHome(root: HTMLElement, ctx: ViewContext): void {
       + 'the device.'),
     el('div', { class: 'controls' },
       el('button', { type: 'button', class: 'primary', onclick: () => ctx.go('engines') },
-        `All ${ctx.engines.entries.length} engines`)),
+        `All ${engines.length} engines`)),
+
+    el('details', { class: 'aside' },
+      el('summary', {}, 'What stays the same across every engine'),
+      el('ul', { class: 'ml-4 list-disc pl-4' }, PLATFORM.map((p) => el('li', {}, p))),
+      el('p', {},
+        'The platform is decoupled from any engine by construction - the hardware, UI, memory and '
+        + 'transport code carries no engine-specific dependency, and a build-time check fails the '
+        + 'build if one is introduced.')),
+
+    el('details', { class: 'aside' },
+      el('summary', {}, 'Engines are written three ways'),
+      el('p', {},
+        'In C++ against the engine interface; in Faust, from a .dsp source and a small manifest with '
+        + 'no hand-written C++ at all; or in Max/MSP gen~, translated to C++. The generated paths are '
+        + 'not toys - the reverb and several others ship from them.')),
 
     el('details', { class: 'aside' },
       el('summary', {}, 'Nothing here is uploaded'),

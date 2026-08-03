@@ -68,7 +68,10 @@ export function describe(entry: EngineEntry, max = MAX_CHARS): string {
 }
 
 export function mountEngines(root: HTMLElement, ctx: ViewContext): void {
-  const entries = ctx.engines.entries;
+  // Engines only. The catalogue also carries a synthetic entry for every card bank no documented
+  // engine reads - the shared `SK/` config folder is one - which belongs in the card Reference, not
+  // in a grid of instruments. They are recognisable by having no rendered page.
+  const entries = ctx.engines.entries.filter((e) => e.doc.page);
 
   clear(root).append(
     // The window header already says "Engines"; repeating it here is a heading that adds nothing.

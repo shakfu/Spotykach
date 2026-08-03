@@ -3157,13 +3157,21 @@ var ACTIONS = [
   { view: "verify", label: "Verify a card", note: "Check a card and get told exactly what is wrong." },
   { view: "flash", label: "Flash firmware", note: "Write an engine to the device over USB." }
 ];
+var PLATFORM = [
+  "Encoders with pickup behaviour and LED ring feedback",
+  "Pad gestures and transport controls",
+  "CV and gate I/O, and MIDI",
+  "SD-card storage, and a clock every engine can sync to"
+];
 function mountHome(root, ctx) {
-  const cardReaders = ctx.engines.entries.filter((e) => e.bank).length;
-  clear(root).append(el("p", { class: "lead text-base" }, "A family of audio engines for the Electrosmith Daisy - each one a separate firmware image you " + "flash to the device, sharing one platform, one control surface and one SD card layout."), el("p", { class: "muted note max-w-measure" }, `${ctx.engines.entries.length} engines, ${cardReaders} of which read the SD card. ` + `${ctx.layout.banks.length} card layouts, ` + `names up to ${ctx.layout.scan.max_name} characters, ` + `files from ${ctx.layout.scan.min_bytes / 1024} KB.`), el("div", { class: "action-grid" }, ACTIONS.map((a) => el("button", {
+  const engines = ctx.engines.entries.filter((e) => e.doc.page);
+  const released = engines.filter((e) => e.doc.released).length;
+  const cardReaders = engines.filter((e) => e.bank).length;
+  clear(root).append(el("p", { class: "lead text-base" }, "A fork of the Synthux Academy ", el("a", { href: "https://synthux.academy/store/spotykach", target: "_blank", rel: "noreferrer" }, "Spotykach"), " firmware, restructured so the instrument is a fixed hardware and UI ", el("strong", {}, "platform"), " with a swappable DSP ", el("strong", {}, "engine"), ". Each firmware build replaces only the engine and its parameters."), el("p", { class: "max-w-measure" }, "The panel does not change when you flash a different engine. The same controls mean the same " + "things, so what you learn once keeps working - and an engine is free to be a looper, an " + "effect, a sampler or a whole scripting language behind it."), el("p", { class: "muted note max-w-measure" }, `${engines.length} engines in the tree, ${released} of them in the released set. ` + `${cardReaders} read the SD card; the rest need no card at all. ` + `${ctx.layout.banks.length} card layouts, names up to ${ctx.layout.scan.max_name} ` + `characters, files from ${ctx.layout.scan.min_bytes / 1024} KB.`), el("div", { class: "action-grid" }, ACTIONS.map((a) => el("button", {
     type: "button",
     class: "action-card",
     onclick: () => ctx.go(a.view)
-  }, el("span", { class: "action-label" }, a.label), el("span", { class: "action-note" }, a.note)))), el("h3", {}, "Browse the engines"), el("p", { class: "max-w-measure" }, "Every engine has a page: what it does, what it expects on the card, and how to get it onto " + "the device."), el("div", { class: "controls" }, el("button", { type: "button", class: "primary", onclick: () => ctx.go("engines") }, `All ${ctx.engines.entries.length} engines`)), el("details", { class: "aside" }, el("summary", {}, "Nothing here is uploaded"), el("p", {}, "Every tool on this page runs in this tab. Cards are read and written through the browser's " + "own file APIs, and the device is reached over WebSerial and WebUSB - there is no server, " + "no account and no install. The card rules are generated from the same source the " + "command-line tools use, so the two cannot disagree about them.")));
+  }, el("span", { class: "action-label" }, a.label), el("span", { class: "action-note" }, a.note)))), el("h3", {}, "Browse the engines"), el("p", { class: "max-w-measure" }, "Every engine has a page: what it does, what it expects on the card, and how to get it onto " + "the device."), el("div", { class: "controls" }, el("button", { type: "button", class: "primary", onclick: () => ctx.go("engines") }, `All ${engines.length} engines`)), el("details", { class: "aside" }, el("summary", {}, "What stays the same across every engine"), el("ul", { class: "ml-4 list-disc pl-4" }, PLATFORM.map((p) => el("li", {}, p))), el("p", {}, "The platform is decoupled from any engine by construction - the hardware, UI, memory and " + "transport code carries no engine-specific dependency, and a build-time check fails the " + "build if one is introduced.")), el("details", { class: "aside" }, el("summary", {}, "Engines are written three ways"), el("p", {}, "In C++ against the engine interface; in Faust, from a .dsp source and a small manifest with " + "no hand-written C++ at all; or in Max/MSP gen~, translated to C++. The generated paths are " + "not toys - the reverb and several others ship from them.")), el("details", { class: "aside" }, el("summary", {}, "Nothing here is uploaded"), el("p", {}, "Every tool on this page runs in this tab. Cards are read and written through the browser's " + "own file APIs, and the device is reached over WebSerial and WebUSB - there is no server, " + "no account and no install. The card rules are generated from the same source the " + "command-line tools use, so the two cannot disagree about them.")));
 }
 
 // src/ui/engines_view.ts
@@ -3188,7 +3196,7 @@ function describe(entry, max = MAX_CHARS) {
   return `${window2.slice(0, cut > 0 ? cut : max).replace(/[,;:\s]+$/, "")}...`;
 }
 function mountEngines(root, ctx) {
-  const entries = ctx.engines.entries;
+  const entries = ctx.engines.entries.filter((e) => e.doc.page);
   clear(root).append(el("p", { class: "lead text-base" }, "One firmware image each: flash the one you want, and the device becomes that instrument. " + "Pick one to see what it does and what it expects on the card."), el("div", { class: "engine-grid" }, entries.map((e) => {
     const name = e.doc.name;
     return el("a", {
@@ -3254,7 +3262,7 @@ function applyTheme(id) {
 
 // src/ui/main.ts
 var VIEWS = {
-  home: { mount: mountHome, label: "Home", title: "Overview" },
+  home: { mount: mountHome, label: "Overview" },
   engines: { mount: mountEngines, label: "Engines" },
   build: { mount: mountBuild, label: "Build a card", menu: "card" },
   convert: { mount: mountConvert, label: "Convert audio", menu: "card" },
@@ -3307,7 +3315,7 @@ This page is generated: run \`make web-data\` and serve web/ over http ` + "(fil
   function show(name) {
     if (!VIEWS[name])
       name = DEFAULT_VIEW;
-    setTitle(VIEWS[name].title ?? VIEWS[name].label);
+    setTitle(VIEWS[name].label);
     for (const panel of $$("#panels > section"))
       panel.hidden = panel.id !== `panel-${name}`;
     if (!mounted.has(name)) {
@@ -3348,6 +3356,10 @@ This page is generated: run \`make web-data\` and serve web/ over http ` + "(fil
   $("#home-link")?.addEventListener("click", () => {
     document.activeElement?.blur?.();
     show(DEFAULT_VIEW);
+  });
+  $("#engines-link")?.addEventListener("click", () => {
+    document.activeElement?.blur?.();
+    show("engines");
   });
   buildEngineMenu(ctx, showEngine);
   buildActionMenu("#card-menu", "card", show);
@@ -3426,5 +3438,5 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 }
 main();
 
-//# debugId=D7FF0A3FE4A8AE5F64756E2164756E21
+//# debugId=33F1B7A25219198264756E2164756E21
 //# sourceMappingURL=app.js.map

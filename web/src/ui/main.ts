@@ -33,14 +33,14 @@ import type { EngineFocus, MountFn, ViewContext } from './context.ts';
 
 interface ViewDef {
   mount: MountFn;
-  /** The menu label. Fuller than the old tab labels, which had a row of siblings for context. */
-  label: string;
   /**
-   * The page heading, shown in the window header. Usually the same as `label`, and separate where a
-   * menu entry and a page title genuinely differ: "Home" is the right word for a menu item and the
-   * wrong one for a heading, which should say what the page IS.
+   * The menu label, and the page heading in the window header - deliberately one field, not two.
+   *
+   * There was a separate `title` when the front page's menu entry said "Home" and its heading said
+   * "Overview". Naming the same destination two things is a small lie about the page, and the second
+   * field existed only to carry it; renaming the menu entry to Overview retired both.
    */
-  title?: string;
+  label: string;
   /** Which menu it belongs to. Absent = reachable by route only, never listed. */
   menu?: 'card' | 'device';
 }
@@ -49,7 +49,7 @@ interface ViewDef {
 // Reference is a lookup rather than a step, so it follows the three card tasks. Terminal is last
 // because it needs a firmware build almost nobody has.
 const VIEWS: Record<string, ViewDef> = {
-  home: { mount: mountHome, label: 'Home', title: 'Overview' },
+  home: { mount: mountHome, label: 'Overview' },
   engines: { mount: mountEngines, label: 'Engines' },
   build: { mount: mountBuild, label: 'Build a card', menu: 'card' },
   convert: { mount: mountConvert, label: 'Convert audio', menu: 'card' },
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
 
   function show(name: string): void {
     if (!VIEWS[name]) name = DEFAULT_VIEW;
-    setTitle(VIEWS[name].title ?? VIEWS[name].label);
+    setTitle(VIEWS[name].label);
     for (const panel of $$<HTMLElement>('#panels > section')) panel.hidden = panel.id !== `panel-${name}`;
     if (!mounted.has(name)) {
       mounted.add(name);
@@ -163,6 +163,14 @@ async function main(): Promise<void> {
   $('#home-link')?.addEventListener('click', () => {
     (document.activeElement as HTMLElement | null)?.blur?.();
     show(DEFAULT_VIEW);
+  });
+  // The Engines label is a destination as well as a menu: clicking it opens the catalogue. Without
+  // this the only way to reach the grid was a button on the front page, so anyone already deeper in
+  // the app had to go home first to browse.
+  $('#engines-link')?.addEventListener('click', () => {
+    // The menu is held open by focus; blur so it closes behind the page it just opened.
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    show('engines');
   });
 
   buildEngineMenu(ctx, showEngine);

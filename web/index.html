@@ -39,10 +39,16 @@
   <!-- Not a menu: a button that looks like one. Every other item here opens something, but "go back
        to the start" has exactly one meaning, and a menu holding a single entry is a click of
        ceremony for nothing. -->
-  <li role="menu-item" id="home-item"><button id="home-link" type="button">Home</button></li>
-  <!-- Populated by main.ts from engines.json: an engine that gains a doc appears here on the next
-       `make web-data`, and one that loses its doc stops being a menu item that opens nothing. -->
-  <li role="menu-item" tabindex="0" aria-haspopup="true" id="engines-menu">Engines</li>
+  <li role="menu-item" id="home-item"><button id="home-link" type="button">Overview</button></li>
+  <!-- Both a destination and a menu. The label is a real button that opens the catalogue, and the
+       dropdown beneath it - populated by main.ts from engines.json - jumps straight to one engine.
+       That covers both ways people arrive: knowing the name, or wanting to look.
+       The button carries the tab stop, so the <li> deliberately has no tabindex of its own; two
+       focusable things here would mean pressing Tab twice to get past one menu. The dropdown still
+       opens on :focus-within, so focusing the button reveals it without a click. -->
+  <li role="menu-item" id="engines-menu">
+    <button id="engines-link" type="button" aria-haspopup="true">Engines</button>
+  </li>
   <!-- The GLOBAL actions, split by what they operate on: a card, or a device. Nothing here is scoped
        to one engine - the per-engine actions live on that engine's own page, where the engine is
        already known and the page can offer only what that engine actually supports.

@@ -194,10 +194,13 @@
   .menubar [role="menu"] a:hover { @apply bg-surface-alt; }
 
   /* A top-level bar item that IS the control rather than opening one. */
-  /* No padding of its own - the item supplies it - so a button entry and a bare-text entry come out
-     exactly the same size instead of the button sitting a few pixels proud of its neighbours. */
+  /* Negative margins that exactly cancel the item's padding, so the button COVERS the whole item
+     rather than just its text. Without this the padding around the label looks clickable - the item
+     has the pointer cursor and the hover fill - and does nothing, which is the most irritating kind
+     of near-miss. Sizes here must stay in step with `.menubar > li` above. */
   .menubar > li > button {
-    @apply rounded-none border-0 bg-transparent p-0 text-sm font-normal leading-[inherit];
+    @apply -mx-2.5 -my-1 rounded border-0 bg-transparent px-2.5 py-1 text-sm font-normal
+           leading-[inherit];
   }
   .menubar > li > button:hover { @apply bg-transparent; }
 

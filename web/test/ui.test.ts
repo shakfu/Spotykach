@@ -130,6 +130,20 @@ test('the menus name only views that exist, and every view is reachable', () => 
   ok(js.includes("DEFAULT_VIEW = 'home'"), 'a fresh visit lands on the front page');
 });
 
+test('the Engines label is a destination, not only a menu', () => {
+  // A top-level item that only opens a dropdown means the catalogue is reachable from the front page
+  // and nowhere else - so anyone already deeper in the app has to go home to browse. The label is a
+  // real button, and it carries the tab stop rather than the <li>, or the item costs two Tab presses.
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const item = html.match(/<li[^>]*id="engines-menu"[^>]*>[\s\S]*?<\/li>/)![0];
+  ok(/<button[^>]*id="engines-link"/.test(item), 'the label must be a button');
+  ok(!/<li[^>]*id="engines-menu"[^>]*tabindex/.test(item),
+    'the button carries the tab stop, so the item must not also be focusable');
+  const js = readFileSync(new URL('../src/ui/main.ts', import.meta.url), 'utf8');
+  ok(js.includes("#engines-link") && js.includes("show('engines')"),
+    'and main.ts must route it to the catalogue');
+});
+
 
 
 
@@ -639,7 +653,9 @@ test('the source stylesheet holds no colour outside the palette', () => {
 test('the front page says what this is and offers the global actions', async () => {
   const { root } = await mount('home_view');
   const text = textOf(root);
-  ok(text.includes('Daisy'), 'it says what this is, not just that it exists');
+  ok(text.includes('Spotykach'), 'it names the instrument this is firmware for');
+  ok(text.includes('platform') && text.includes('engine'),
+    'and states the platform/engine split, which is what the fork is FOR');
   // And does NOT repeat the project name. The menu bar names it and the window header says which
   // page you are on; a third "sk-engines" inside the panel told the reader nothing twice.
   ok(!text.includes('sk-engines'), 'the panel must not restate the project name');
@@ -652,8 +668,11 @@ test('the front page says what this is and offers the global actions', async () 
 test('the front page counts engines rather than stating a number', () => {
   // The figure that goes stale the first time an engine is added and nobody greps for "22".
   const src = code('home_view');
-  ok(/entries\.length/.test(src), 'the counts must be derived from the catalogue');
-  ok(!/\b(22|10|12)\b/.test(src), 'no engine count may be written into the view');
+  ok(/ctx\.engines\.entries/.test(src), 'the counts must be derived from the catalogue');
+  ok(/\.length/.test(src), 'and counted, not quoted');
+  // Any plausible engine or bank count, written down. The page claimed "23 engines" for exactly this
+  // reason once - not a stale literal, but a count taken over the wrong set.
+  ok(!/\b(1[0-9]|2[0-9])\b/.test(src), 'no engine or bank count may be written into the view');
 });
 
 test('a front-page action asks the router to go where it says', async () => {
@@ -665,9 +684,13 @@ test('a front-page action asks the router to go where it says', async () => {
 
 test('the catalogue shows every engine, with a shareable link each', async () => {
   const { root } = await mount('engines_view');
+  // Engines, not catalogue entries: the synthetic bank entries (the shared `SK/` folder) have no
+  // page and are not instruments. Counting them is how the front page came to claim 23 engines.
+  const real = engines.entries.filter((e) => e.doc.page);
+  ok(real.length < engines.entries.length, 'the fixture has at least one non-engine entry to exclude');
   const cards = tags(root, 'a').filter((a) => a.className?.includes('engine-card'));
-  eq(cards.length, engines.entries.length, 'one card per engine');
-  for (const e of engines.entries) {
+  eq(cards.length, real.length, 'one card per engine');
+  for (const e of real) {
     ok(cards.some((c) => c.href === `#engine/${e.doc.name}`),
       `${e.doc.name}: no card links to it`);
   }
@@ -678,7 +701,7 @@ test('every catalogue card carries a description', async () => {
   // with an empty subtitle is the visible symptom of that fallback breaking.
   const { root } = await mount('engines_view');
   const descs = tags(root, 'span').filter((s) => s.className?.includes('engine-card-desc'));
-  eq(descs.length, engines.entries.length);
+  eq(descs.length, engines.entries.filter((e) => e.doc.page).length);
   for (const d of descs) ok((d.textContent ?? '').trim().length > 10, 'a card with no description');
 });
 
