@@ -12,7 +12,12 @@ export interface Route {
 }
 
 /**
- * `#build` -> the Build tab. `#engine/bard` -> the Reference tab, focused on bard.
+ * `#build` -> the Build view. `#engines` -> the engine catalogue. `#engine/bard` -> bard's own page.
+ *
+ * Note `#engines` (the grid) and `#engine/<name>` (one engine) differ by a single letter. That is the
+ * URL a person would guess for each, so it is worth the near-collision - but it means the `engine`
+ * prefix has to be matched EXACTLY rather than by `startsWith`, or the grid would route to a
+ * nonexistent engine named "s".
  *
  * An unrecognised fragment returns an empty view and lets the caller fall back, rather than guessing.
  */
@@ -22,7 +27,8 @@ export function parseHash(hash: string): Route {
   const [head, ...rest] = raw.split('/');
   if (head === 'engine') {
     const engine = rest.join('/').trim();
-    return engine ? { view: 'reference', engine } : { view: 'reference', engine: null };
+    // A bare `#engine/` names nobody; send it to the catalogue rather than to a blank engine page.
+    return engine ? { view: 'engine', engine } : { view: 'engines', engine: null };
   }
   return { view: head, engine: null };
 }

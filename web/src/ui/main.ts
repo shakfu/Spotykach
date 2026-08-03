@@ -1,7 +1,17 @@
-// main.ts - bootstrap and tab switching.
+// main.ts - bootstrap and navigation.
 //
-// Views are mounted lazily, once, on first visit to their tab: the terminal opens a serial port and
-// the convert view builds an AudioContext, and neither should happen because the page loaded.
+// Views are mounted lazily, once, on first visit: the terminal opens a serial port and the convert
+// view builds an AudioContext, and neither should happen because the page loaded.
+//
+// Navigation is a MENU BAR, not a tab row. The tabs were right when the page was one tool with six
+// screens; they cannot express the split this page now has - global actions that operate on a card or
+// a device, and per-engine actions that only make sense once an engine is known. So the global ones
+// are grouped in menus by what they act on, the per-engine ones live on the engine's own page, and
+// the front page repeats the common global ones as buttons so nothing important is a click away.
+//
+// VIEWS below is the single source for both the routes and the menus: a menu is generated from the
+// same table that resolves the route, so a menu item cannot name a view that does not exist and a
+// view cannot quietly become unreachable.
 
 import { makeLayout } from '../core/layout.ts';
 import { makeCatalogue } from '../core/engines.ts';
@@ -15,27 +25,43 @@ import { mountReference } from './reference_view.ts';
 import { mountTerminal } from './terminal_view.ts';
 import { mountFlash } from './flash_view.ts';
 import { mountEngine } from './engine_view.ts';
-import { nextTabIndex } from './tabs.ts';
+import { mountHome } from './home_view.ts';
+import { mountEngines } from './engines_view.ts';
 import { parseHash } from './route.ts';
 import { THEMES, applyTheme, currentTheme } from './theme.ts';
 import type { EngineFocus, MountFn, ViewContext } from './context.ts';
 
-// Declaration order is tab order; the first entry is what a fresh visit lands on. Build comes first
-// because the entry state for someone who just bought a device is "I have no card yet", and Verify has
-// nothing useful to say to that. Reference is a lookup rather than a step, so it follows the three task
-// tabs; Terminal is last because it needs a firmware build almost nobody has.
-const VIEWS: Record<string, MountFn> = {
-  build: mountBuild,
-  convert: mountConvert,
-  verify: mountVerify,
-  reference: mountReference,
-  terminal: mountTerminal,
-  flash: mountFlash,
+interface ViewDef {
+  mount: MountFn;
+  /** The menu label. Fuller than the old tab labels, which had a row of siblings for context. */
+  label: string;
+  /**
+   * The page heading, shown in the window header. Usually the same as `label`, and separate where a
+   * menu entry and a page title genuinely differ: "Home" is the right word for a menu item and the
+   * wrong one for a heading, which should say what the page IS.
+   */
+  title?: string;
+  /** Which menu it belongs to. Absent = reachable by route only, never listed. */
+  menu?: 'card' | 'device';
+}
+
+// Declaration order is menu order within each group: get a card, put audio on it, then check it.
+// Reference is a lookup rather than a step, so it follows the three card tasks. Terminal is last
+// because it needs a firmware build almost nobody has.
+const VIEWS: Record<string, ViewDef> = {
+  home: { mount: mountHome, label: 'Home', title: 'Overview' },
+  engines: { mount: mountEngines, label: 'Engines' },
+  build: { mount: mountBuild, label: 'Build a card', menu: 'card' },
+  convert: { mount: mountConvert, label: 'Convert audio', menu: 'card' },
+  verify: { mount: mountVerify, label: 'Verify a card', menu: 'card' },
+  reference: { mount: mountReference, label: 'Card reference', menu: 'card' },
+  flash: { mount: mountFlash, label: 'Flash firmware', menu: 'device' },
+  terminal: { mount: mountTerminal, label: 'Terminal', menu: 'device' },
+  // A route, never a menu item: it needs an engine name, which a menu entry has no way to carry.
+  engine: { mount: mountEngine, label: 'Engine' },
 };
 
-const DEFAULT_VIEW = Object.keys(VIEWS)[0];
-
-/** The engine page's panel id suffix. Not in VIEWS: it is a route, not one of the tabs. */
+const DEFAULT_VIEW = 'home';
 const ENGINE_PANEL = 'engine';
 
 async function main(): Promise<void> {
@@ -58,6 +84,11 @@ async function main(): Promise<void> {
       engines: makeCatalogue(engineData, layout),
       patches,
       engineFocus: new Store<EngineFocus>({ engine: null }),
+      // Replaced with the real router below, once `show` exists. They are not optional in the type
+      // because a view may call either at any time after mount, and "sometimes navigation works" is a
+      // worse contract than a no-op during the few statements it takes to wire them up.
+      go: () => {},
+      goEngine: () => {},
     };
   } catch (e) {
     showError($('#panels')!, new Error(
@@ -68,59 +99,53 @@ async function main(): Promise<void> {
 
   const mounted = new Set<string>();
 
+  const pageTitle = $('#page-title');
+  const setTitle = (text: string): void => {
+    if (pageTitle) pageTitle.textContent = text;
+    // The document title moves too, so a browser tab, a bookmark and the history list all say which
+    // page they are - the same information, in the three places the browser shows it.
+    document.title = `${text} - sk-engines`;
+  };
+
   function show(name: string): void {
-    if (!VIEWS[name] && name !== ENGINE_PANEL) name = DEFAULT_VIEW;
-    for (const tab of $$<HTMLButtonElement>('#tabs button')) {
-      const selected = tab.dataset.view === name;
-      tab.classList.toggle('active', selected);
-      tab.setAttribute('aria-selected', String(selected));
-      // Roving tabindex: the selected tab is the group's only stop in the page tab order, so Tab
-      // moves past the whole row and the arrows move within it.
-      tab.tabIndex = selected ? 0 : -1;
-    }
-    // On the engine page nothing is selected, so the row would have no tab stop at all. Park it on
-    // Reference, which is where "all engines" goes.
-    if (name === ENGINE_PANEL) {
-      const ref = $<HTMLButtonElement>('#tab-reference');
-      if (ref) ref.tabIndex = 0;
-    }
+    if (!VIEWS[name]) name = DEFAULT_VIEW;
+    setTitle(VIEWS[name].title ?? VIEWS[name].label);
     for (const panel of $$<HTMLElement>('#panels > section')) panel.hidden = panel.id !== `panel-${name}`;
     if (!mounted.has(name)) {
       mounted.add(name);
       const root = $<HTMLElement>(`#panel-${name}`)!;
       try {
-        (name === ENGINE_PANEL ? mountEngine : VIEWS[name])(root, ctx);
+        VIEWS[name].mount(root, ctx);
       } catch (e) {
         showError(root, e);
       }
     }
-    if (parseHash(location.hash).view !== name) history.replaceState(null, '', `#${name}`);
+    // The front page is the bare URL, not `#home`: it is where an unadorned link should land, and a
+    // fragment naming the default would make every shared link carry noise.
+    if (name === DEFAULT_VIEW) {
+      if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+    } else if (parseHash(location.hash).view !== name) {
+      history.replaceState(null, '', `#${name}`);
+    }
+    // A view switch is a page change to a reader who cannot see the layout shift, so move focus to
+    // the panel rather than leaving it on a menu item that is now closed.
+    $<HTMLElement>(`#panel-${name}`)?.focus?.();
   }
 
   /** Show one engine's own page, and record it in the URL so the link is shareable. */
   function showEngine(name: string): void {
     show(ENGINE_PANEL);
+    // The engine IS the page title here, so it overrides the generic one show() just set. Done even
+    // for a name that turns out not to exist: the heading then says what was asked for, and the body
+    // says it was not found, which together are more use than a bare "Engine".
+    setTitle(name);
     // Set after showing, so the view is mounted and subscribed before the name arrives.
     ctx.engineFocus.set({ engine: name });
     if (location.hash !== `#engine/${name}`) history.replaceState(null, '', `#engine/${name}`);
   }
 
-  const tabs = $$<HTMLButtonElement>('#tabs button');
-  for (const tab of tabs) {
-    tab.addEventListener('click', () => show(tab.dataset.view ?? DEFAULT_VIEW));
-  }
-
-  // Selection follows focus, which the authoring practices allow where showing a panel is cheap - and
-  // here it is, since a view mounts once and is only shown thereafter.
-  $('#tabs')!.addEventListener('keydown', (e) => {
-    const ev = e as KeyboardEvent;
-    const next = nextTabIndex(ev.key, tabs.indexOf(document.activeElement as HTMLButtonElement),
-      tabs.length);
-    if (next == null) return;
-    ev.preventDefault();
-    tabs[next].focus();
-    show(tabs[next].dataset.view ?? DEFAULT_VIEW);
-  });
+  ctx.go = show;
+  ctx.goEngine = showEngine;
 
   window.addEventListener('hashchange', () => {
     const route = parseHash(location.hash);
@@ -132,17 +157,17 @@ async function main(): Promise<void> {
   // sits beside; say which, rather than leaving the user to guess whether the page is current.
   const provenance = `${ctx.layout.banks.length} banks, `
     + `scan floor ${ctx.layout.scan.min_bytes / 1024} KB, name limit ${ctx.layout.scan.max_name}`;
-  $('#banner')!.append(el('span', { class: 'muted' }, provenance));
 
   wireAboutMenu(provenance);
-  // Home: back to the landing tab, and drop the fragment so the URL is the bare page again.
+  // Home: back to the front page, and drop the fragment so the URL is the bare page again.
   $('#home-link')?.addEventListener('click', () => {
     (document.activeElement as HTMLElement | null)?.blur?.();
-    history.replaceState(null, '', location.pathname + location.search);
     show(DEFAULT_VIEW);
   });
 
   buildEngineMenu(ctx, showEngine);
+  buildActionMenu('#card-menu', 'card', show);
+  buildActionMenu('#device-menu', 'device', show);
   buildThemeMenu();
 
   const route = parseHash(location.hash);
@@ -194,6 +219,29 @@ function buildEngineMenu(ctx: ViewContext, onPick: (engine: string) => void): vo
           onPick(e.doc.name);
         },
       }, e.doc.name, e.bank ? '' : el('span', { class: 'muted' }, '  (no card)'))))));
+}
+
+/**
+ * One of the global-action menus, generated from the VIEWS table.
+ *
+ * Generated rather than written into the markup for the reason nothing else here is typed twice: a
+ * hand-written menu can name a view that was renamed, or silently omit one that was added, and both
+ * failures are invisible until somebody looks for the missing item.
+ */
+function buildActionMenu(sel: string, group: 'card' | 'device', go: (view: string) => void): void {
+  const host = $(sel);
+  if (!host) return;
+  const items = Object.entries(VIEWS).filter(([, v]) => v.menu === group);
+  host.append(el('ul', { role: 'menu' }, items.map(([id, v]) =>
+    el('li', { role: 'menu-item' },
+      el('button', {
+        type: 'button',
+        onclick: () => {
+          // The menu is held open by focus; blur so it closes behind the view it just opened.
+          (document.activeElement as HTMLElement | null)?.blur?.();
+          go(id);
+        },
+      }, v.label)))));
 }
 
 /**

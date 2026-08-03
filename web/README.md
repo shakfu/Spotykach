@@ -1,48 +1,70 @@
-# web/ - browser SD card tools
+# web/ - the sk-engines browser front end
 
-A static page that builds, fills and checks an SD card for the spotykach engines, plus a WebSerial
-terminal for `TERMINAL=1` builds. TypeScript, bundled by [bun](https://bun.sh) into one committed file;
-no server, no JavaScript dependencies. Design rationale and the constraints that shaped it are in
-[`../docs/dev/web-frontend.md`](../docs/dev/web-frontend.md).
+A static page: what sk-engines is, a browsable catalogue of its engines, SD card tools, and a WebSerial
+terminal for `TERMINAL=1` builds. TypeScript bundled by [bun](https://bun.sh) and CSS built by
+[Tailwind](https://tailwindcss.com); both are build-time only, and both artifacts are committed, so
+there is no server and nothing to install to *serve* the page. Design rationale and the constraints
+that shaped it are in [`../docs/dev/web-frontend.md`](../docs/dev/web-frontend.md).
 
-It ships **three themes**, switched from the View menu and remembered in `localStorage`:
-**System 6** (the default, via [system.css](https://github.com/sakofchit/system.css)), **Plain**
-(via [water.css](https://watercss.kognise.dev/), ordinary system type on white - the one for reading
-the engine manuals) and **Dark** (the same theme on water.css's dark build). Both frameworks are MIT
-and vendored in `vendor/`.
+It ships **two themes**, switched from the View menu and remembered in `localStorage`: **Light**
+(the default) and **Dark**. A theme is one attribute - `data-theme` on `<html>` - against one built
+stylesheet whose colours are custom properties, so the dark theme is nine values in
+`src/app.css` and not a second copy of the app.
 
-Dark is a **choice, not a preference**: the vendored water.css files are its separate `light` and
-`dark` builds rather than the `auto` one, which follows `prefers-color-scheme`. With auto, Plain
-changed appearance on its own - the plain, white, for-reading theme came up on a dark slate ground
-for anyone whose system was in dark mode, which is the opposite of what it is for. Now the reader
-picks, in the View menu, and it is remembered. `themes/dark.css` is Plain's skin plus a palette: it
-`@import`s `plain.css` and overrides the four things that are actually colour, because a theme is two
-`<link>`s and there is no third slot for a shared layer.
+Dark is a **choice, not a preference**: `prefers-color-scheme` is deliberately not consulted. When it
+was, the light theme - the one meant for reading the engine manuals - came up on a dark ground for
+anyone whose system was in dark mode, which is the opposite of what it is for. The reader picks, and
+it is remembered. The choice is applied by three inline lines in the `<head>`, because it has to be
+settled before the first paint or a reader who chose Dark gets a white flash on every load; a test
+asserts that copy agrees with `src/ui/theme.ts`.
 
-A theme is two files: the vendored framework and a skin in `themes/`. Everything structural lives in
-`app.css` and is written against tokens, so a theme is a palette plus the places a framework's
-defaults have to be overridden - not a second copy of the app. The choice is applied by five inline
-lines in the `<head>`, because it has to be settled before the first paint or every load flashes the
-wrong theme; a test asserts that copy agrees with `src/ui/theme.ts`.
+**Severity is never carried by colour alone.** This began as a constraint - the original theme was
+[system.css](https://github.com/sakofchit/system.css), genuinely 1-bit, with no red to reach for - and
+it is kept now that colour is available, because it was the better design regardless. Every finding
+states its level as a word (ERROR / WARNING / OK) in the markup, and the rule down its side varies in
+weight and style: heavy solid for an error, dotted for a warning, hairline for ok. Colour is a fourth
+channel on top of those three, not a replacement for them. Drop the word or the weight and the page
+stops working for a colour-blind reader, which is exactly the state it was rebuilt out of.
 
-The System 6 theme is the reason severity is not carried by colour. That is a deliberate choice of character for a hobbyist tool, and it costs one
-thing worth knowing about: system.css is genuinely 1-bit, so there is no dark mode and **severity is
-not carried by colour**. Every finding states its level as a word (ERROR / WARNING / OK) in the markup,
-errors invert to white-on-black, and the rule down the side varies in weight. That is more robust than
-the red/amber/green it replaced, which said nothing to a colour-blind reader that the group heading
-had not already said.
+**Utilities in static markup, component classes in generated markup.** `index.html` carries Tailwind
+utilities directly. Anything emitted from `src/ui/*.ts` - a finding, a console line, a table row,
+written in a loop inside a template literal - keeps a semantic class name defined in
+`src/app.css` with `@apply`. Inlining utilities there would bury the styling inside string
+concatenation where it cannot be read, diffed or reused, and would repeat it per iteration.
 
-The tabs run **Build, Convert, Verify** — the order a person needs them, not the order of their value.
-Verify is the most valuable screen and the wrong first one: the entry state for someone who just bought
-a device is "I have no card yet", and all Verify can say to that is "this is not a card". Build hands
-back a complete, valid, minimal card in one click.
+## Navigation
 
-**Reference**, **Terminal** and **Flash** sit apart, to the right, because none is a step in that job:
-Reference is a lookup (`sk_card.py layout` as a screen, and the only tab needing nothing from the
-browser), Terminal needs a firmware build almost nobody has, and Flash is about the device rather than
-the card.
+There was a tab row, and it was the right shape while this page was one tool with six screens. It
+cannot express the split the page has now — **global** actions that operate on a card or a device, and
+**per-engine** actions that only mean anything once an engine is known. A tablist has one dimension.
 
-Each tab opens with its controls. The reasoning behind a rule lives in a folded aside beneath them,
+So: the **menu bar** carries the global actions, grouped by what they act on — **SD Card** (build,
+convert, verify, reference) and **Device** (flash, terminal). The **engine page** carries the
+per-engine ones. And the **front page** repeats the common global actions as buttons, because a menu
+is where an action lives once you know the tool and a front page is where it is discoverable before
+you do. Both routes call the same navigation function, so there is one implementation and no second
+path to drift.
+
+`src/ui/main.ts`'s `VIEWS` table is the single source for the routes *and* the menus: a menu is
+generated from the same table that resolves the route, so a menu item cannot name a view that does not
+exist and a view cannot quietly become unreachable. A test asserts the table and the panels agree.
+
+**The front page** answers, in order: what is this, what is in it, what can I do. Its figures are
+derived from the catalogue, never typed — an engine count in prose is exactly the thing that goes
+stale the first time an engine is added.
+
+**The engines page** is a card per engine: name, whether it needs an SD card at all, and a line of
+description. That last one is not free — only a minority of engines have a `summary` in `engines.json`,
+because it comes from an em-dash heading most docs do not write. The rest fall back to the opening of
+their manual, trimmed to a sentence in `engines_view.ts` rather than at the generator, so
+`web_export.py` stays a faithful extractor and the decision about how much fits on a card stays with
+the thing drawing the card.
+
+**Engine pages** offer Flash for every engine, plus Convert and its card layout for the ones that read
+the card. The rest get Flash and nothing else — they synthesise rather than play back, and a disabled
+"Convert audio" would be a dead affordance, which is what the menu bar was pruned of once already.
+
+Each screen opens with its controls. The reasoning behind a rule lives in a folded aside beneath them,
 because every rule here has a reason worth keeping and none of them is worth reading before you can
 press a button.
 
@@ -50,14 +72,18 @@ press a button.
 
 ```
 make web-serve          # builds, then http://localhost:8000
-make web-build          # rebuild dist/app.js after editing src/
+make web-build          # rebuild dist/app.js and dist/app.css after editing src/
 make test-web           # typecheck (src strict, tests relaxed) + the suite
 make web-data           # regenerate card_layout.json, patches.json and the test fixtures
 ```
 
-`dist/app.js` is **generated and committed**: GitHub Pages serves `web/` as-is, so a fresh checkout can
-open the page with no toolchain. The cost is that it can be committed stale, so a test fails when it is
-older than `src/`. Edit `src/`, never `dist/`.
+`dist/app.js` and `dist/app.css` are **generated and committed**: GitHub Pages serves `web/` as-is, so
+a fresh checkout can open the page with no toolchain. The cost is that either can be committed stale,
+so a test fails when one is older than `src/`. Edit `src/`, never `dist/`.
+
+The CSS build is the newer half of that bargain and worth stating plainly: it was added when the two
+vendored CSS frameworks were dropped for Tailwind. Before, the stylesheets were served as-is and only
+the JavaScript had a build step. Serving and deploying still need no toolchain; only *editing* does.
 
 Opening `index.html` from the filesystem does **not** work: ES modules will not load over `file://`,
 and the browser APIs the page uses are only offered over HTTPS or `localhost`.
@@ -86,17 +112,14 @@ from `scripts/`; `make test-web` fails if this side disagrees with the Python.
 ## Layout
 
 ```
-index.html  app.css  sw.js         the page, its shared styles, and offline caching
-themes/system6.css  plain.css      one skin per theme: palette, chrome, severity reinforcement
-       dark.css                    ... and dark.css is plain.css @imported, plus a palette
-vendor/system.css/                 VENDORED - system.css + the fonts and button frames it references
-vendor/water.css/                  VENDORED - the light and dark builds; see the README.txt beside them
+index.html  sw.js                  the page and its offline caching
 card_layout.json  patches.json     GENERATED - do not edit, run `make web-data`
 engines.json                       GENERATED from docs/engines/*.md - the Engines menu + Reference
 engines/<name>.html                GENERATED - each engine's manual, rendered from its markdown
 engines/media/                     GENERATED - copies of the control diagrams those manuals show
-dist/app.js                        GENERATED - do not edit, run `make web-build`
+dist/app.js  dist/app.css          GENERATED - do not edit, run `make web-build`
 src/
+  app.css         the Tailwind source: @theme palette, then the component layer
   core/       the rules, and nothing else. No DOM, no browser API, no state.
     types.ts       what card_layout.json declares, given names
     ports.ts       what the core needs from outside, as interfaces
@@ -117,8 +140,9 @@ src/
     download.ts    saving a file, and CompressionStream
     clock.ts       setInterval
     usb.ts         WebUSB, for DFU
-  app/        one view-model per tab: all the state, none of the DOM
-  ui/         one file per tab: render and bind, nothing else
+  app/        one view-model per view: all the state, none of the DOM
+  ui/         one file per view: render and bind, nothing else
+              main.ts holds VIEWS - the one table the routes and the menus share
 test/                                bun runs the .ts directly; fixtures GENERATED
 ```
 
@@ -130,15 +154,15 @@ convenient `document.` in a view-model and the models need a browser again.
 
 ## Browser support
 
-The card tabs work everywhere. Where the File System Access API is missing (Firefox, Safari) the app
+The card screens work everywhere. Where the File System Access API is missing (Firefox, Safari) the app
 falls back to drag-and-drop in and a `.zip` out - the same bytes, one extra step. Only in-place card
-editing, the Terminal tab and the Flash tab are Chromium-only (the last needs WebUSB), and both of
-those tabs say so rather than offering a button that fails.
+editing, the Terminal and Flash screens are Chromium-only (the last needs WebUSB), and both of
+those say so rather than offering a button that fails.
 
 ## Terminal caveat
 
 `scripts/build_release.py` never passes `TERMINAL=1`, so **no released binary has the command
-channel**. The Terminal tab works against a build you make yourself (`make ENGINE=<engine>
+channel**. The Terminal screen works against a build you make yourself (`make ENGINE=<engine>
 TERMINAL=1`); on the QSPI engines (chuck, csound, mosc) that costs USB MIDI, which claims the same OTG
 core. Shipping terminal-enabled releases is an open firmware decision - see `TODO.md` P6.
 

@@ -11,34 +11,20 @@
 // One bundle rather than the twenty modules this used to list: the sources are TypeScript now, so the
 // browser is served `dist/app.js` and the hand-maintained module list - the thing that could silently
 // go stale and break offline - is gone with it. The remaining entries are the page and its data.
-const CACHE = 'sk-card-v8';
+const CACHE = 'sk-card-v9';
 
+// One stylesheet now, and no fonts. This list used to run to fourteen entries because a theme was two
+// vendored files plus a skin, and system.css pulled four woff2 faces and two border-image SVGs that
+// every button depended on. Themes are an attribute on <html> against one built stylesheet, so
+// switching theme offline cannot produce an unstyled page - there is nothing left to fail to fetch.
 const ASSETS = [
   './',
   './index.html',
-  './app.css',
-  // All three themes, not just the active one: switching theme while offline must not produce an
-  // unstyled page, and a skin is 6 KB. dark.css @imports plain.css, so both are needed for it to
-  // render at all - caching only the one that is linked would give an offline reader a bare page.
-  './themes/system6.css',
-  './themes/plain.css',
-  './themes/dark.css',
-  './vendor/water.css/water.css',
-  './vendor/water.css/dark.css',
   './card_layout.json',
   './patches.json',
   './engines.json',
   './dist/app.js',
-  // system.css and the assets it url()-references. Only the woff2 faces: each @font-face declares two
-  // separate `src` lines and the second one wins outright, so the .woff copies beside them are never
-  // fetched. The two SVGs are the button border-images - without them every button loses its frame.
-  './vendor/system.css/system.css',
-  './vendor/system.css/button.svg',
-  './vendor/system.css/button-default.svg',
-  './vendor/system.css/ChicagoFLF.woff2',
-  './vendor/system.css/ChiKareGo2.woff2',
-  './vendor/system.css/FindersKeepers.woff2',
-  './vendor/system.css/monaco.woff2',
+  './dist/app.css',
 ];
 
 self.addEventListener('install', (e) => {

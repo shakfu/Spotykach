@@ -1,67 +1,59 @@
-// theme.ts - which stylesheets the page is wearing.
+// theme.ts - which palette the page is wearing.
 //
-// A theme is two files: the vendored framework, and the app's layer over it. Everything else -
-// structure, spacing, the components - is in app.css and written against tokens, so switching is
-// swapping two hrefs rather than reloading a different application.
+// A theme is now ONE attribute on <html>, not two stylesheet links. The whole app is built from one
+// Tailwind stylesheet whose colours are custom properties, so `[data-theme="dark"]` swapping nine
+// values is the entire theme - there is no second copy of the app to keep in step, and no second file
+// that can fail to load and leave the page bare.
 //
-// The same list appears as a lookup table in index.html's <head>, because the choice has to be
-// applied before the first paint or the reader sees a flash of the wrong theme on every load. A test
-// asserts the two copies agree, since a silent disagreement is a page that flickers.
+// Dark is a CHOICE, not a preference. `prefers-color-scheme` is deliberately NOT consulted: when it
+// was, the plain light theme - the one meant for reading the engine manuals - came up on a dark
+// ground for anyone whose system was in dark mode, which is the opposite of what it is for. The
+// reader picks in the View menu and it is remembered.
+//
+// The same list appears as a lookup in index.html's <head>, because the choice has to be applied
+// before the first paint or a reader who chose Dark gets a white flash on every load. A test asserts
+// the two copies agree, since a silent disagreement is a page that flickers.
 
 export interface Theme {
   id: string;
   label: string;
-  framework: string;
-  skin: string;
   /** One line for the menu: what this theme is FOR, not what it looks like. */
   note: string;
 }
 
 export const THEMES: Theme[] = [
   {
-    id: 'system6',
-    label: 'System 6',
-    framework: './vendor/system.css/system.css',
-    skin: './themes/system6.css',
-    note: 'Mac System 6. One bit, Chicago, window chrome.',
-  },
-  {
-    id: 'plain',
-    label: 'Plain',
-    framework: './vendor/water.css/water.css',
-    skin: './themes/plain.css',
+    id: 'light',
+    label: 'Light',
     note: 'White paper, system font. The one for reading the manuals.',
   },
   {
     id: 'dark',
     label: 'Dark',
-    framework: './vendor/water.css/dark.css',
-    skin: './themes/dark.css',
-    note: 'Plain, on a dark ground. For a dim room.',
+    note: 'The same page on a dark ground. For a dim room.',
   },
 ];
 
 export const DEFAULT_THEME = THEMES[0].id;
-const KEY = 'sk-card-theme';
+export const STORAGE_KEY = 'sk-card-theme';
+/** The attribute the stylesheet keys off. Exported so the head-script test can name it once. */
+export const THEME_ATTR = 'data-theme';
 
 export function currentTheme(): string {
   try {
-    const saved = localStorage.getItem(KEY);
+    const saved = localStorage.getItem(STORAGE_KEY);
     return THEMES.some((t) => t.id === saved) ? saved! : DEFAULT_THEME;
   } catch {
     return DEFAULT_THEME; // private mode - the default is a fine answer
   }
 }
 
-/** Swap the two stylesheet links, and remember the choice. No reload: CSS is all that changes. */
+/** Set the attribute, and remember the choice. No reload and no fetch: only custom properties change. */
 export function applyTheme(id: string): void {
   const theme = THEMES.find((t) => t.id === id) ?? THEMES[0];
-  const framework = document.getElementById('theme-framework') as HTMLLinkElement | null;
-  const skin = document.getElementById('theme-skin') as HTMLLinkElement | null;
-  if (framework) framework.href = theme.framework;
-  if (skin) skin.href = theme.skin;
+  document.documentElement.setAttribute(THEME_ATTR, theme.id);
   try {
-    localStorage.setItem(KEY, theme.id);
+    localStorage.setItem(STORAGE_KEY, theme.id);
   } catch {
     /* the theme still applies for this visit */
   }

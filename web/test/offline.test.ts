@@ -18,12 +18,12 @@ suite('offline');
 const WEB = new URL('..', import.meta.url).pathname;
 const read = (rel: string): string => readFileSync(join(WEB, rel), 'utf8');
 
-/** Every .ts file under a directory, as repo-relative paths. */
-function sources(dir: string, out: string[] = []): string[] {
+/** Every file with one of `exts` under a directory, as repo-relative paths. */
+function sources(dir: string, exts: string[] = ['.ts'], out: string[] = []): string[] {
   for (const name of readdirSync(join(WEB, dir))) {
     const rel = `${dir}/${name}`;
-    if (statSync(join(WEB, rel)).isDirectory()) sources(rel, out);
-    else if (name.endsWith('.ts')) out.push(rel);
+    if (statSync(join(WEB, rel)).isDirectory()) sources(rel, exts, out);
+    else if (exts.some((e) => name.endsWith(e))) out.push(rel);
   }
   return out;
 }
@@ -36,6 +36,7 @@ test('the service worker caches the bundle and the data, and nothing that has mo
   const sw = read('sw.js');
   const listed = [...sw.matchAll(/'(\.[^']+)'/g)].map((m) => m[1]);
   ok(listed.includes('./dist/app.js'), 'the bundle the page actually loads');
+  ok(listed.includes('./dist/app.css'), 'and the stylesheet, or an offline visit renders unstyled');
   ok(listed.includes('./card_layout.json'), 'and the data it is generated from');
   ok(listed.includes('./'), 'a visit to the directory URL must hit the cache too');
   ok(listed.includes('./index.html'), 'and the offline fallback target must be there to fall back to');
@@ -52,14 +53,32 @@ test('the service worker caches the bundle and the data, and nothing that has mo
   eq(missing, [], 'these are cached but absent, and one 404 fails the whole install');
 });
 
-test('dist/app.js is not older than the sources it was built from', () => {
-  // The bundle is committed so GitHub Pages can serve web/ with no CI step, which means it can also be
-  // committed stale. Every test here imports src/ directly, so a forgotten `make web-build` is
-  // invisible everywhere except in the browser.
-  const built = statSync(join(WEB, 'dist/app.js')).mtimeMs;
-  const stale = sources('src')
-    .filter((f) => statSync(join(WEB, f)).mtimeMs > built + 1000);
-  eq(stale, [], 'these changed after the last build - run `make web-build`');
+// Both artifacts are committed so GitHub Pages can serve web/ with no CI step, which means either can
+// be committed stale. Every test here reads src/ directly, so a forgotten `make web-build` is
+// invisible everywhere except in the browser.
+//
+// They are checked SEPARATELY, against their own inputs. Lumping them together would blame the JS
+// bundle for a CSS edit and - worse - would let dist/app.css go unguarded entirely, which is how the
+// stylesheet ends up shipping a state nobody has seen.
+for (const [artifact, exts] of [
+  ['dist/app.js', ['.ts']],
+  ['dist/app.css', ['.css']],
+] as const) {
+  test(`${artifact} is not older than the sources it was built from`, () => {
+    const built = statSync(join(WEB, artifact)).mtimeMs;
+    const stale = sources('src', [...exts])
+      .filter((f) => statSync(join(WEB, f)).mtimeMs > built + 1000);
+    eq(stale, [], 'these changed after the last build - run `make web-build`');
+  });
+}
+
+test('the built stylesheet contains the app rather than a stub', () => {
+  // The CSS equivalent of the bundle check below: Tailwind emits a valid, tiny file if its @source
+  // globs match nothing, so "it compiled" is not evidence that any component survived.
+  const css = read('dist/app.css');
+  ok(css.length > 10_000, `dist/app.css is only ${css.length} bytes`);
+  ok(css.includes('.finding'), 'the findings styling is in there');
+  ok(css.includes('data-theme'), 'and the dark palette');
 });
 
 test('the bundle contains the app rather than a stub', () => {

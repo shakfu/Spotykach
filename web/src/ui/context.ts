@@ -23,6 +23,15 @@ export interface ViewContext {
   patches: Record<string, string>;
   /** Set by the Engines menu and by `#engine/<name>`; read by the Reference tab. */
   engineFocus: Store<EngineFocus>;
+  /**
+   * Navigate to another view, or to one engine's page.
+   *
+   * Injected rather than imported so a view never reaches into the router: the front page's action
+   * buttons and the engine catalogue's cards both need to send the reader somewhere, and a direct
+   * import would make every one of them untestable without the whole application booted.
+   */
+  go: (view: string) => void;
+  goEngine: (engine: string) => void;
 }
 
 export type MountFn = (root: HTMLElement, ctx: ViewContext) => void;

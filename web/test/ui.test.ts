@@ -6,16 +6,16 @@
 // an el() property, a missing import or an exception mid-construction produces a blank tab, and a
 // blank tab is exactly the failure a user cannot report usefully.
 
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { suite, test, ok, eq, readWeb, layoutData, engineData } from './harness.ts';
 import { installDom, tags, textOf, type ShimNode } from './dom_shim.ts';
 import { makeLayout } from '../src/core/layout.ts';
 import { makeCatalogue } from '../src/core/engines.ts';
 import { Store } from '../src/app/store.ts';
-import { nextTabIndex } from '../src/ui/tabs.ts';
 import { parseHash } from '../src/ui/route.ts';
-import { THEMES, DEFAULT_THEME, currentTheme } from '../src/ui/theme.ts';
+import { THEMES, DEFAULT_THEME, THEME_ATTR, STORAGE_KEY, currentTheme } from '../src/ui/theme.ts';
 
 suite('ui');
 
@@ -39,6 +39,8 @@ const code = (view: string): string =>
 interface Mounted {
   root: ShimNode;
   dom: ReturnType<typeof installDom>;
+  /** Navigation the view REQUESTED, as [kind, target] pairs. See the note in mount(). */
+  navigated: Array<[string, string]>;
 }
 
 /**
@@ -61,8 +63,19 @@ async function mount(
         ((root: unknown, ctx: unknown) => void) | undefined;
     ok(fn, `${name}.ts exports no mount function`);
     const root = dom.document.createElement('section') as ShimNode;
-    fn(root, { layout, engines, patches, engineFocus: new Store({ engine: null }) });
-    const mounted = { root, dom };
+    // Navigation is recorded rather than performed: a view's job is to ASK to go somewhere, and the
+    // router's job is to do it. Capturing the request is what lets a test assert a card leads to the
+    // right engine without booting the whole application.
+    const navigated: Array<[string, string]> = [];
+    fn(root, {
+      layout,
+      engines,
+      patches,
+      engineFocus: new Store({ engine: null }),
+      go: (v: string) => navigated.push(['view', v]),
+      goEngine: (e: string) => navigated.push(['engine', e]),
+    });
+    const mounted = { root, dom, navigated };
     // Interactions that CREATE elements have to run while the shim is still installed. Inspecting the
     // tree afterwards is fine, which is why most tests below do not need this.
     if (during) await during(mounted);
@@ -72,89 +85,53 @@ async function mount(
   }
 }
 
-// --- tab order ------------------------------------------------------------------------------------
+// --- navigation ----------------------------------------------------------------------------------
 //
-// Pinned because it is a considered decision that reads like an arbitrary one, and so is exactly the
-// kind of thing a later edit undoes by accident. Verify is the most VALUABLE screen but the wrong
-// FIRST screen: the entry state for someone who just bought a device is "I have no card yet", and all
-// Verify can say to that is "this is not a card". Reference follows the three task tabs rather than
-// joining them - it is the lookup you consult while doing the job, not a step in it - and Terminal
-// stays last because it needs a firmware build almost nobody has.
+// The tab row is gone; the menu bar carries the global actions and the front page repeats the common
+// ones. What is pinned here is the property that replaced "the tabs are in the right order": every
+// view is reachable, and the menus cannot name a view that does not exist.
 
-const TAB_ORDER = ['build', 'convert', 'verify', 'reference', 'terminal', 'flash'];
+/** Views that must exist as panels. Order is menu order, which is still a considered decision. */
+const VIEW_ORDER = ['home', 'engines', 'build', 'convert', 'verify', 'reference', 'flash', 'terminal',
+  'engine'];
 
-test('the landing tab is Build, and the tabs run in the order a person needs them', () => {
+test('every view has a panel, and only the front page starts visible', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const tabs = [...html.matchAll(/data-view="(\w+)"/g)].map((m) => m[1]);
-  eq(tabs, TAB_ORDER);
-  // Only the TAB panels: `panel-engine` is a route, not a tab, and deliberately has no role.
-  const panels = [...html.matchAll(/id="panel-(\w+)" role="tabpanel"/g)].map((m) => m[1]);
-  eq(panels, TAB_ORDER, 'panels must follow the tabs, or the wrong one is visible on load');
-  ok(/id="panel-engine"(?![^>]*role="tabpanel")/.test(html),
-    'the engine page is not a tabpanel - it would put a sixth tab in the tablist');
-  ok(/data-view="build"[^>]*aria-selected="true"/.test(html), 'Build is selected on load');
-  // By meaning rather than by literal markup: the build panel is the one WITHOUT `hidden`, and every
-  // other panel has it. Matching the exact tag made this fail the moment the panel gained an
-  // aria-labelledby, which is a test breaking on something it was not there to check.
+  const panels = [...html.matchAll(/id="panel-([\w-]+)"/g)].map((m) => m[1]);
+  eq(panels.slice().sort(), VIEW_ORDER.slice().sort(),
+    'a view without a panel is a menu item that opens nothing');
+
+  // By meaning rather than by literal markup: the home panel is the one WITHOUT `hidden`.
   const panelTag = (view: string) =>
     html.match(new RegExp(`<section id="panel-${view}"[^>]*>`))![0];
-  ok(!panelTag('build').includes('hidden'), 'the build panel is visible on load');
-  for (const view of TAB_ORDER.slice(1)) {
+  ok(!panelTag('home').includes('hidden'), 'the front page is what a fresh visit shows');
+  for (const view of VIEW_ORDER.filter((v) => v !== 'home')) {
     ok(panelTag(view).includes('hidden'), `${view}: every other panel starts hidden`);
   }
+  ok(!html.includes('role="tablist"'), 'the tab row is gone, not merely hidden');
 });
 
-test('main.ts defaults to the same tab the markup pre-selects', () => {
-  // Two sources of truth for "which tab is first" - the markup and the VIEWS map - so assert they
-  // agree rather than trusting that whoever reorders one remembers the other.
+test('the menus name only views that exist, and every view is reachable', () => {
+  // The menus are GENERATED from the VIEWS table, so this guards the table rather than the markup:
+  // an entry with no menu and no route would be dead code nobody notices.
   const js = readFileSync(new URL('../src/ui/main.ts', import.meta.url), 'utf8');
-  const order = [...js.matchAll(/^ {2}(\w+): mount/gm)].map((m) => m[1]);
-  eq(order, TAB_ORDER);
-  ok(js.includes('Object.keys(VIEWS)[0]'), 'the default is derived from the map, not restated');
-});
+  const table = js.slice(js.indexOf('const VIEWS'), js.indexOf('const DEFAULT_VIEW'));
+  const declared = [...table.matchAll(/^ {2}(\w+): \{/gm)].map((m) => m[1]);
+  eq(declared.slice().sort(), VIEW_ORDER.slice().sort(), 'VIEWS and the panels must agree');
 
-test('the tablist honours the contract its roles promise', () => {
-  // Declaring role=tablist/role=tab tells assistive tech two things: the group is ONE stop in the tab
-  // order, and the arrows move within it. Declaring them without implementing them is worse than
-  // using plain buttons - the widget is then broken rather than merely plain.
+  // Exactly the two groups the menu bar declares, and nothing routed into a third by a typo.
+  const groups = new Set([...table.matchAll(/menu: '(\w+)'/g)].map((m) => m[1]));
+  eq([...groups].sort(), ['card', 'device']);
+
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const tabs = [...html.matchAll(/<button id="tab-(\w+)"[^>]*>/g)];
-  eq(tabs.map((m) => m[1]), TAB_ORDER, 'every tab carries an id, which the panel refers back to');
-
-  for (const [tag, view] of tabs) {
-    ok(tag.includes(`aria-controls="panel-${view}"`), `${view}: tab must name its panel`);
-    // Exactly one tab is reachable by Tab; the rest are reached with the arrows.
-    const wants = view === TAB_ORDER[0] ? '0' : '-1';
-    ok(tag.includes(`tabindex="${wants}"`), `${view}: roving tabindex should start at ${wants}`);
+  for (const id of ['card-menu', 'device-menu', 'engines-menu', 'theme-menu']) {
+    ok(html.includes(`id="${id}"`), `${id}: the menu bar must host it`);
   }
-  for (const view of TAB_ORDER) {
-    ok(html.includes(`id="panel-${view}" role="tabpanel" aria-labelledby="tab-${view}"`),
-      `${view}: panel must point back at its tab`);
-  }
-  ok(/id="tabs"[^>]*aria-label=/.test(html), 'the tablist is named');
-
-  const js = readFileSync(new URL('../src/ui/main.ts', import.meta.url), 'utf8');
-  ok(js.includes('tab.tabIndex = selected ? 0 : -1'), 'and tabindex is kept in step with selection');
+  ok(js.includes("DEFAULT_VIEW = 'home'"), 'a fresh visit lands on the front page');
 });
 
-test('arrow keys move around the tab row, and wrap', () => {
-  const n = TAB_ORDER.length;
-  eq(nextTabIndex('ArrowRight', 0, n), 1);
-  eq(nextTabIndex('ArrowLeft', 1, n), 0);
-  eq(nextTabIndex('ArrowRight', n - 1, n), 0, 'the last tab wraps forward to the first');
-  eq(nextTabIndex('ArrowLeft', 0, n), n - 1, 'and the first wraps back to the last');
-  eq(nextTabIndex('Home', 3, n), 0);
-  eq(nextTabIndex('End', 0, n), n - 1);
-});
 
-test('the tab row ignores keys that are not its own', () => {
-  // Returning null rather than a number is what lets main.ts leave preventDefault alone - otherwise
-  // Tab, Enter and every character key would be swallowed by the tablist.
-  for (const key of ['Tab', 'Enter', ' ', 'a', 'ArrowUp', 'Escape']) {
-    eq(nextTabIndex(key, 0, 5), null, key);
-  }
-  eq(nextTabIndex('ArrowRight', -1, 5), null, 'and it does nothing when focus is outside the row');
-});
+
 
 test('nothing in the chrome is a dead affordance', () => {
   // The close and resize widgets were dropped for this reason and then a four-item menu bar was added
@@ -186,27 +163,45 @@ test('the page loads the built bundle, not the sources', () => {
   ok(!html.includes('src="./src/'), 'and must not try to load a .ts entry point');
 });
 
-for (const sheet of ['app.css', 'themes/system6.css', 'themes/plain.css', 'themes/dark.css']) {
-  test(`${sheet} defines no class the app never uses`, () => {
+test('src/app.css defines no component class the app never uses', () => {
   // The visual vocabulary is the thing that made this page feel complicated - six boxed styles
   // competing at the same weight. Rules outliving their markup is how that grows back: `.steps`
   // survived the tab it was written for and nothing said so.
   //
+  // Only @layer components is checked, and only the SOURCE stylesheet. Utilities are generated by
+  // Tailwind from the markup, so they cannot go stale by construction - it is the hand-written
+  // component rules that can. Scanning the built dist/app.css instead would be meaningless: every
+  // class in it is there because something already used it.
+  //
   // Deliberately loose in the safe direction: "used" means the name appears anywhere in the views'
   // source, because classes are assembled from template literals (`finding ${cls}`) and variables, so
   // anything stricter would report false alarms on real code.
-  const css = readFileSync(new URL(`../${sheet}`, import.meta.url), 'utf8');
-  const selectors = css.replace(/\{[^}]*\}/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
+  const css = readFileSync(new URL('../src/app.css', import.meta.url), 'utf8');
+  const start = css.indexOf('@layer components');
+  ok(start > 0, 'there is a components layer to check');
+  const layer = css.slice(start);
+  const selectors = layer.replace(/@apply[^;]*;/g, ' ').replace(/\{[^}]*\}/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ');
   const defined = new Set([...selectors.matchAll(/\.([a-z][\w-]*)/g)].map((m) => m[1]));
 
-  const sources = ['index.html', ...['main', 'dom', 'build_view', 'convert_view', 'verify_view',
-    'reference_view', 'terminal_view', 'cpu_plot', 'engine_view', 'lightbox'].map((f) => `src/ui/${f}.ts`)]
-    .map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')).join('\n');
+  // The whole directory, not a hand-listed subset. The list used to be written out here, which made
+  // this test fail closed in the wrong direction: a NEW view's classes looked unused because nobody
+  // remembered to add its filename, and the fix was to edit the test rather than the code. Reading
+  // the directory means a view is covered the moment it exists.
+  const uiDir = new URL('../src/ui/', import.meta.url).pathname;
+  const sources = [
+    readFileSync(new URL('../index.html', import.meta.url), 'utf8'),
+    ...readdirSync(uiDir).filter((f) => f.endsWith('.ts'))
+      .map((f) => readFileSync(join(uiDir, f), 'utf8')),
+  ].join('\n');
 
-    const unused = [...defined].filter((c) => !sources.includes(c));
-    eq(unused, [], 'these are styled but nothing wears them');
-  });
-}
+  // Classes worn only by GENERATED markup (scripts/web_export.py writes the engine pages), so they
+  // never appear in src/ and are not dead despite that.
+  const generated = ['pdf-link'];
+
+  const unused = [...defined].filter((c) => !sources.includes(c) && !generated.includes(c));
+  eq(unused, [], 'these are styled but nothing wears them');
+});
 
 // --- verify -------------------------------------------------------------------------------------
 
@@ -493,19 +488,20 @@ test('an empty port chooser reveals the unfiltered retry', async () => {
 test('an engine link is shareable', () => {
   // `#engine/bard` has to survive being pasted into a message. Somebody answering "what format does
   // bard want?" should be able to send a URL that lands on the answer rather than on the Build tab.
-  eq(parseHash('#engine/bard'), { view: 'reference', engine: 'bard' });
+  eq(parseHash('#engine/bard'), { view: 'engine', engine: 'bard' });
   eq(parseHash('#verify'), { view: 'verify', engine: null });
   eq(parseHash('#'), { view: '', engine: null });
   eq(parseHash(''), { view: '', engine: null });
 });
 
-test('a malformed engine link lands on the Reference tab rather than nowhere', () => {
+test('a malformed engine link lands on the catalogue rather than nowhere', () => {
   // The name is not validated here - the model rejects one it does not know - but the VIEW is still
-  // the right one, so a mistyped link shows the engine list instead of falling back to Build.
-  // Both forms land on the engine list rather than falling back to Build, which is what a bare
-  // `#engine` should do anyway - it is a request for engines, just an underspecified one.
-  eq(parseHash('#engine/'), { view: 'reference', engine: null });
-  eq(parseHash('#engine'), { view: 'reference', engine: null });
+  // the right one, so a mistyped link shows the engine catalogue instead of the front page. A bare
+  // `#engine` is a request for engines, just an underspecified one.
+  eq(parseHash('#engine/'), { view: 'engines', engine: null });
+  eq(parseHash('#engine'), { view: 'engines', engine: null });
+  // `#engines` and `#engine/<name>` differ by one letter, so the prefix must match EXACTLY.
+  eq(parseHash('#engines'), { view: 'engines', engine: null });
 });
 
 test('selecting an unknown engine changes nothing', async () => {
@@ -533,32 +529,39 @@ test('the head script and theme.ts offer the same themes', () => {
   // that flashes the wrong theme on every load, so it is asserted rather than trusted.
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const head = html.slice(0, html.indexOf('</head>'));
-  // The SCRIPT, not the whole head: `plain` appears in `./themes/plain.css` either way, so scanning
-  // the head let a broken comparison (`t === 'plane'`) pass. It is the literal being compared that
-  // has to match the id.
+  // The SCRIPT, not the whole head: an id can appear in a comment either way, and it is the literal
+  // being COMPARED that has to match, so a typo (`t === 'drak'`) cannot pass.
   const script = head.slice(head.indexOf('<script>'), head.indexOf('</script>'));
   ok(script.length > 50, 'there is a pre-paint theme script at all');
   for (const theme of THEMES) {
     if (theme.id === DEFAULT_THEME) {
-      // The default is what the markup ships with; the script only has to handle the others.
-      ok(head.includes(`href="${theme.framework}"`), `${theme.id}: not the default framework in markup`);
-      ok(head.includes(`href="${theme.skin}"`), `${theme.id}: not the default skin in markup`);
+      // The default ships on the <html> tag, so the script never has to apply it - but the attribute
+      // must be PRESENT, or the CSS selector and the menu disagree about what is current.
+      ok(
+        new RegExp(`<html[^>]*\\b${THEME_ATTR}="${theme.id}"`).test(html),
+        `${theme.id}: the default theme is not on the <html> tag`,
+      );
       continue;
     }
     ok(script.includes(`'${theme.id}'`), `${theme.id}: the head script compares against no such id`);
-    ok(script.includes(theme.framework), `${theme.id}: its framework is never applied pre-paint`);
-    ok(script.includes(theme.skin), `${theme.id}: its skin is never applied pre-paint`);
+    ok(script.includes(THEME_ATTR), `${theme.id}: the head script sets no ${THEME_ATTR}`);
   }
-  ok(script.includes('sk-card-theme'), 'the head script reads the same storage key');
+  ok(script.includes(STORAGE_KEY), 'the head script reads the same storage key');
 });
 
-test('every theme names two stylesheets that exist', () => {
+test('every theme is styled by the built stylesheet', () => {
+  // Themes are custom-property blocks now, not files, so the check that a theme "exists" is that the
+  // stylesheet actually carries a rule for it. A theme added to THEMES with no matching block would
+  // otherwise be a menu entry that silently does nothing.
+  const css = readFileSync(new URL('../dist/app.css', import.meta.url), 'utf8');
   for (const theme of THEMES) {
-    for (const href of [theme.framework, theme.skin]) {
-      const path = href.replace(/^\.\//, '');
-      ok(statSync(new URL(`../${path}`, import.meta.url).pathname).size > 0, `${theme.id}: ${href}`);
-    }
     ok(theme.note && theme.label, `${theme.id}: a theme needs a label and a reason`);
+    if (theme.id === DEFAULT_THEME) continue; // the default is the :root palette
+    // Minified CSS drops the quotes, so match both spellings rather than the source form.
+    ok(
+      css.includes(`[${THEME_ATTR}="${theme.id}"]`) || css.includes(`[${THEME_ATTR}=${theme.id}]`),
+      `${theme.id}: the built stylesheet has no palette for it`,
+    );
   }
 });
 
@@ -600,41 +603,90 @@ test('there is a way home from anywhere', () => {
     'dropping the fragment, so the URL is the bare page again rather than #engine/<name>');
 });
 
-test('a theme cannot collapse a field the app sized', () => {
-  // The bug this pins, which shipped: both themes reset `input[type=text] { width: auto }` to undo
-  // system.css forcing inputs to 100%. That reset and `input.cmdline` have the SAME specificity, and
-  // themes load last - so the command line, the reference filter and the slot box all collapsed to
-  // their default width. An id in the app's selector puts it out of reach of any element-level rule.
-  const app = readFileSync(new URL('../app.css', import.meta.url), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '');
-  const themeResets = ['themes/system6.css', 'themes/plain.css', 'themes/dark.css']
-    .map((f) => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8'))
-    .some((css) => /input\[type=text\][\s\S]{0,120}width:/.test(css));
-  ok(themeResets, 'a theme still resets input widths - this test is guarding a live hazard');
+// The test that used to sit here - "a theme cannot collapse a field the app sized" - is deliberately
+// gone rather than ported. It guarded a cascade race that no longer has the parts to happen: the app
+// loaded THREE stylesheets, and a theme's `input[type=text] { width: auto }` tied `input.cmdline` on
+// specificity and won on load order, collapsing the command line and the filter box. There is one
+// stylesheet now and nothing loads after it, so the hazard is structural rather than watched-for. The
+// test asserted the hazard was still live (`ok(themeResets, ...)`) precisely so it would not outlive
+// its reason; keeping it would have meant staging a fake hazard for it to find.
 
-  for (const m of app.matchAll(/^([^{}\n]*input\.[\w-]+[^{}\n]*)\{([^}]*)\}/gm)) {
-    if (!/\bwidth\s*:/.test(m[2])) continue;
-    ok(m[1].includes('#'),
-      `"${m[1].trim()}" sets a width but a theme's element rule will outrank it on load order`);
-  }
-});
-
-test('the shared stylesheet holds no colour a theme should own', () => {
-  // The rule that keeps two themes from being two applications: app.css describes structure through
-  // tokens, and a literal colour in it is a bug waiting for the OTHER theme. This was not theoretical
-  // - `a { color: #000 }` made every link black in the Plain theme, and `.verdict.bad strong` rendered
-  // a failing verdict inverted there, because both sat in the shared layer and Plain lost the
-  // specificity race to override them.
+test('the source stylesheet holds no colour outside the palette', () => {
+  // The rule that keeps two themes from being two applications: the app describes structure through
+  // tokens, and a literal colour outside the palette blocks is a bug waiting for the OTHER theme.
+  // This was not theoretical - `a { color: #000 }` once made every link black in the light theme, and
+  // a failing verdict rendered inverted there, because both sat in the shared layer.
   //
-  // Two literals are allowed, each because it is genuinely the same in both themes.
+  // The palette blocks themselves are where literals BELONG, so they are cut before scanning: @theme
+  // is the light palette and [data-theme="dark"] is the dark one. What is checked is everything else.
+  let css = readFileSync(new URL('../src/app.css', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  css = css.replace(/@theme\s*\{[\s\S]*?\n\}/g, ' ')
+           .replace(/\[data-theme="dark"\]\s*\{[\s\S]*?\n\}/g, ' ');
+
+  // Two literals are still allowed, each because it is genuinely the same in both themes.
   const ALLOWED = new Map([
     ['#fff', 'the control diagrams are black line art on transparency and need a backing in dark mode'],
     ['rgb(', 'the modal scrim is a translucent black in a light theme and a dark one alike'],
   ]);
-
-  const css = readFileSync(new URL('../app.css', import.meta.url), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '');
   const found = [...css.matchAll(/#[0-9a-f]{3,8}\b|\b(?:rgb|hsl)a?\(/gi)].map((m) => m[0].toLowerCase());
   const offending = [...new Set(found)].filter((c) => !ALLOWED.has(c));
-  eq(offending, [], 'these belong in a theme, not in the shared layer');
+  eq(offending, [], 'these belong in the palette, not in the component layer');
+});
+
+// --- the front page and the catalogue ---------------------------------------------------------------
+
+test('the front page says what this is and offers the global actions', async () => {
+  const { root } = await mount('home_view');
+  const text = textOf(root);
+  ok(text.includes('Daisy'), 'it says what this is, not just that it exists');
+  // And does NOT repeat the project name. The menu bar names it and the window header says which
+  // page you are on; a third "sk-engines" inside the panel told the reader nothing twice.
+  ok(!text.includes('sk-engines'), 'the panel must not restate the project name');
+  const labels = tags(root, 'button').map((b) => b.textContent);
+  for (const want of ['Build a card', 'Convert audio', 'Verify a card', 'Flash firmware']) {
+    ok(labels.some((l) => l?.includes(want)), `${want}: missing from the front page`);
+  }
+});
+
+test('the front page counts engines rather than stating a number', () => {
+  // The figure that goes stale the first time an engine is added and nobody greps for "22".
+  const src = code('home_view');
+  ok(/entries\.length/.test(src), 'the counts must be derived from the catalogue');
+  ok(!/\b(22|10|12)\b/.test(src), 'no engine count may be written into the view');
+});
+
+test('a front-page action asks the router to go where it says', async () => {
+  const { navigated } = await mount('home_view', {}, async ({ root }) => {
+    await tags(root, 'button').find((b) => b.textContent?.includes('Verify a card'))!.fire('click');
+  });
+  eq(navigated, [['view', 'verify']]);
+});
+
+test('the catalogue shows every engine, with a shareable link each', async () => {
+  const { root } = await mount('engines_view');
+  const cards = tags(root, 'a').filter((a) => a.className?.includes('engine-card'));
+  eq(cards.length, engines.entries.length, 'one card per engine');
+  for (const e of engines.entries) {
+    ok(cards.some((c) => c.href === `#engine/${e.doc.name}`),
+      `${e.doc.name}: no card links to it`);
+  }
+});
+
+test('every catalogue card carries a description', async () => {
+  // Only 6 of 22 engines have a `summary`; the rest fall back to the opening of their manual. A card
+  // with an empty subtitle is the visible symptom of that fallback breaking.
+  const { root } = await mount('engines_view');
+  const descs = tags(root, 'span').filter((s) => s.className?.includes('engine-card-desc'));
+  eq(descs.length, engines.entries.length);
+  for (const d of descs) ok((d.textContent ?? '').trim().length > 10, 'a card with no description');
+});
+
+test('a catalogue card routes to that engine', async () => {
+  const { navigated } = await mount('engines_view', {}, async ({ root }) => {
+    // `href` is a property on the shim, as it is on a real anchor - not an attribute.
+    const card = tags(root, 'a').find((a) => a.href === '#engine/bard')!;
+    await card.fire('click');
+  });
+  eq(navigated, [['engine', 'bard']]);
 });

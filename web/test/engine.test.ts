@@ -216,9 +216,20 @@ test('a diagram is openable at its own size', () => {
 test('the reading measure is on the prose, not on the column', () => {
   // Capping .engine-doc capped the diagrams and the wide control tables with it. A paragraph wants
   // 88 characters; a diagram wants every pixel there is.
-  const css = readFileSync(new URL('../app.css', import.meta.url), 'utf8');
-  ok(/\.engine-doc \{[^}]*max-width:\s*none/.test(css), 'the doc column must not be capped');
-  ok(/\.engine-doc > p,[\s\S]{0,200}max-width:\s*88ch/.test(css), 'but its paragraphs must be');
+  //
+  // Asserted against the BUILT stylesheet, and that is the point of this version. Written against the
+  // source it passed while emitting the wrong number: `max-w-prose` reads like the right utility but
+  // Tailwind ships it hardcoded to 65ch, and a same-named `--container-prose` token does not override
+  // it - it is shadowed, silently. Only the compiled value catches that.
+  const css = readFileSync(new URL('../dist/app.css', import.meta.url), 'utf8');
+  ok(/\.engine-doc\{[^}]*max-width:\s*none/.test(css), 'the doc column must not be capped');
+  const prose = css.match(/\.engine-doc>p[^{]*\{([^}]*)\}/);
+  ok(prose, 'the prose elements have a rule at all');
+  const width = prose![1].match(/max-width:\s*([^;}]+)/)?.[1] ?? '';
+  const resolved = width.startsWith('var(')
+    ? css.match(new RegExp(`${width.slice(4, -1)}:\\s*([^;}]+)`))?.[1] ?? ''
+    : width;
+  eq(resolved.trim(), '88ch', 'the doc measure must be 88ch, not Tailwind\'s 65ch prose default');
 });
 
 test('a diagram opens in the viewer, and still works without it', () => {

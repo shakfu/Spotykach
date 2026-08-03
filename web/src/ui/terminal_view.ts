@@ -171,7 +171,7 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
 
     const decks = ['A', 'B'];
     if (descriptor.params.size) {
-      const grid = el('div', { class: 'grid' });
+      const grid = el('div', { class: 'grid gap-1' });
       for (const p of descriptor.params.values()) {
         for (const deck of p.scope === 'deck' ? decks : ['A']) grid.append(paramRow(p, deck));
       }
@@ -179,7 +179,7 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
     }
 
     if (descriptor.configs.size) {
-      const grid = el('div', { class: 'grid' });
+      const grid = el('div', { class: 'grid gap-1' });
       for (const c of descriptor.configs.values()) {
         const sel = el('select', { onchange: () => model.send(`config ${c.name} A ${sel.value}`) },
           [...c.values.entries()].map(([v, lbl]) => el('option', { value: String(v) }, `${v} - ${lbl}`)));
@@ -209,7 +209,7 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
     surface.append(el('h4', {}, 'Actions'), actions);
 
     if (descriptor.queries.size) {
-      const list = el('div', { class: 'grid' });
+      const list = el('div', { class: 'grid gap-1' });
       for (const q of descriptor.queries.values()) {
         const value = el('span', { class: 'mono value' }, '-');
         list.append(el('div', { class: 'row' },

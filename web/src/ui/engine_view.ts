@@ -27,18 +27,44 @@ export function mountEngine(root: HTMLElement, ctx: ViewContext): void {
   const model = new EngineModel(ctx.engines, httpDocs);
   const lightbox = createLightbox();
 
-  const heading = el('h2', { class: 'engine-title' });
+  // No heading element: the window header carries the engine's name, set by the router from the route
+  // itself. Keeping one here put the name on screen twice, a few lines apart.
   const meta = el('p', { class: 'muted note engine-meta' });
   const summary = el('div', { class: 'callout engine-format' });
   const doc = el('div', { class: 'engine-doc' });
 
-  const nav = el('div', { class: 'controls' },
-    el('button', { onclick: () => { location.hash = '#reference'; } }, 'All engines'),
-    el('button', { onclick: () => { location.hash = '#convert'; } }, 'Put audio on a card'));
+  // The ENGINE-SPECIFIC actions. What separates these from the menu bar's is that every one of them
+  // needs an engine to be meaningful - and two of the three only apply to the engines that read the
+  // card, so they are built per engine rather than declared once.
+  //
+  // The card-less engines get Flash and nothing else. They are not lesser - they synthesise rather
+  // than play back - but offering them a disabled "Convert audio" would be a dead affordance, which
+  // is the exact thing the menu bar was pruned of.
+  const actions = el('div', { class: 'controls' });
+
+  const renderActions = (entry: EngineEntry | null): void => {
+    clear(actions);
+    if (!entry) return;
+    const name = entry.doc.name;
+    actions.append(
+      el('button', { type: 'button', class: 'primary', onclick: () => ctx.go('flash') },
+        `Flash ${name}`),
+    );
+    if (entry.bank) {
+      actions.append(
+        el('button', { type: 'button', onclick: () => ctx.go('convert') }, 'Convert audio for it'),
+        el('button', { type: 'button', onclick: () => ctx.go('reference') }, 'Its card layout'),
+      );
+    }
+    actions.append(
+      el('button', { type: 'button', onclick: () => ctx.go('engines') }, 'All engines'),
+    );
+  };
 
   model.store.subscribe((s) => {
     if (s.error) {
-      heading.textContent = 'Not found';
+      // The header still shows the name that was asked for; this says it did not resolve.
+      renderActions(null);
       clear(meta);
       clear(summary).append(s.error);
       clear(doc);
@@ -47,7 +73,7 @@ export function mountEngine(root: HTMLElement, ctx: ViewContext): void {
     if (!s.entry) return;
     const { doc: info, bank } = s.entry;
 
-    heading.textContent = info.name;
+    renderActions(s.entry);
     // NOT info.source: that is the doc's own `ENGINE=...` citation line in raw markdown, and the
     // rendered fragment below already contains it, properly formatted. Printing it here showed the
     // same line twice, the first time with its backticks visible.
@@ -101,5 +127,5 @@ export function mountEngine(root: HTMLElement, ctx: ViewContext): void {
     if (engine) void model.show(engine);
   });
 
-  root.append(heading, meta, summary, nav, doc);
+  root.append(meta, summary, actions, doc);
 }

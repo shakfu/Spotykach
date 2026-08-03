@@ -2323,7 +2323,7 @@ function mountTerminal(root, _ctx) {
     }
     const decks = ["A", "B"];
     if (descriptor.params.size) {
-      const grid = el("div", { class: "grid" });
+      const grid = el("div", { class: "grid gap-1" });
       for (const p of descriptor.params.values()) {
         for (const deck of p.scope === "deck" ? decks : ["A"])
           grid.append(paramRow(p, deck));
@@ -2331,7 +2331,7 @@ function mountTerminal(root, _ctx) {
       surface.append(el("h4", {}, "Parameters"), grid);
     }
     if (descriptor.configs.size) {
-      const grid = el("div", { class: "grid" });
+      const grid = el("div", { class: "grid gap-1" });
       for (const c of descriptor.configs.values()) {
         const sel = el("select", { onchange: () => model.send(`config ${c.name} A ${sel.value}`) }, [...c.values.entries()].map(([v, lbl]) => el("option", { value: String(v) }, `${v} - ${lbl}`)));
         grid.append(el("div", { class: "row" }, el("label", {}, c.name), sel));
@@ -2355,7 +2355,7 @@ function mountTerminal(root, _ctx) {
     }
     surface.append(el("h4", {}, "Actions"), actions);
     if (descriptor.queries.size) {
-      const list = el("div", { class: "grid" });
+      const list = el("div", { class: "grid gap-1" });
       for (const q of descriptor.queries.values()) {
         const value = el("span", { class: "mono value" }, "-");
         list.append(el("div", { class: "row" }, el("label", {}, q.name), el("button", {
@@ -3088,18 +3088,24 @@ function formatLine(entry) {
 function mountEngine(root, ctx) {
   const model = new EngineModel(ctx.engines, httpDocs);
   const lightbox = createLightbox();
-  const heading = el("h2", { class: "engine-title" });
   const meta = el("p", { class: "muted note engine-meta" });
   const summary = el("div", { class: "callout engine-format" });
   const doc = el("div", { class: "engine-doc" });
-  const nav = el("div", { class: "controls" }, el("button", { onclick: () => {
-    location.hash = "#reference";
-  } }, "All engines"), el("button", { onclick: () => {
-    location.hash = "#convert";
-  } }, "Put audio on a card"));
+  const actions = el("div", { class: "controls" });
+  const renderActions = (entry) => {
+    clear(actions);
+    if (!entry)
+      return;
+    const name = entry.doc.name;
+    actions.append(el("button", { type: "button", class: "primary", onclick: () => ctx.go("flash") }, `Flash ${name}`));
+    if (entry.bank) {
+      actions.append(el("button", { type: "button", onclick: () => ctx.go("convert") }, "Convert audio for it"), el("button", { type: "button", onclick: () => ctx.go("reference") }, "Its card layout"));
+    }
+    actions.append(el("button", { type: "button", onclick: () => ctx.go("engines") }, "All engines"));
+  };
   model.store.subscribe((s) => {
     if (s.error) {
-      heading.textContent = "Not found";
+      renderActions(null);
       clear(meta);
       clear(summary).append(s.error);
       clear(doc);
@@ -3108,7 +3114,7 @@ function mountEngine(root, ctx) {
     if (!s.entry)
       return;
     const { doc: info, bank } = s.entry;
-    heading.textContent = info.name;
+    renderActions(s.entry);
     append(clear(meta), [!info.released && "Not in the released set."]);
     append(clear(summary), [
       el("strong", {}, bank ? "On the card: " : "No card needed: "),
@@ -3141,25 +3147,64 @@ function mountEngine(root, ctx) {
     if (engine)
       model.show(engine);
   });
-  root.append(heading, meta, summary, nav, doc);
+  root.append(meta, summary, actions, doc);
 }
 
-// src/ui/tabs.ts
-function nextTabIndex(key, current, count) {
-  if (count <= 0 || current < 0)
-    return null;
-  switch (key) {
-    case "ArrowRight":
-      return (current + 1) % count;
-    case "ArrowLeft":
-      return (current - 1 + count) % count;
-    case "Home":
-      return 0;
-    case "End":
-      return count - 1;
-    default:
-      return null;
-  }
+// src/ui/home_view.ts
+var ACTIONS = [
+  { view: "build", label: "Build a card", note: "A complete, valid, minimal card in one click." },
+  { view: "convert", label: "Convert audio", note: "Re-encode anything to what an engine reads." },
+  { view: "verify", label: "Verify a card", note: "Check a card and get told exactly what is wrong." },
+  { view: "flash", label: "Flash firmware", note: "Write an engine to the device over USB." }
+];
+function mountHome(root, ctx) {
+  const cardReaders = ctx.engines.entries.filter((e) => e.bank).length;
+  clear(root).append(el("p", { class: "lead text-base" }, "A family of audio engines for the Electrosmith Daisy - each one a separate firmware image you " + "flash to the device, sharing one platform, one control surface and one SD card layout."), el("p", { class: "muted note max-w-measure" }, `${ctx.engines.entries.length} engines, ${cardReaders} of which read the SD card. ` + `${ctx.layout.banks.length} card layouts, ` + `names up to ${ctx.layout.scan.max_name} characters, ` + `files from ${ctx.layout.scan.min_bytes / 1024} KB.`), el("div", { class: "action-grid" }, ACTIONS.map((a) => el("button", {
+    type: "button",
+    class: "action-card",
+    onclick: () => ctx.go(a.view)
+  }, el("span", { class: "action-label" }, a.label), el("span", { class: "action-note" }, a.note)))), el("h3", {}, "Browse the engines"), el("p", { class: "max-w-measure" }, "Every engine has a page: what it does, what it expects on the card, and how to get it onto " + "the device."), el("div", { class: "controls" }, el("button", { type: "button", class: "primary", onclick: () => ctx.go("engines") }, `All ${ctx.engines.entries.length} engines`)), el("details", { class: "aside" }, el("summary", {}, "Nothing here is uploaded"), el("p", {}, "Every tool on this page runs in this tab. Cards are read and written through the browser's " + "own file APIs, and the device is reached over WebSerial and WebUSB - there is no server, " + "no account and no install. The card rules are generated from the same source the " + "command-line tools use, so the two cannot disagree about them.")));
+}
+
+// src/ui/engines_view.ts
+var MAX_CHARS = 190;
+function plainText(md) {
+  return md.replace(/!\[[^\]]*\]\([^)]*\)/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/`([^`]*)`/g, "$1").replace(/\*\*([^*]*)\*\*/g, "$1").replace(/(?<![*\w])\*([^*]+)\*(?!\w)/g, "$1").replace(/(?<![_\w])_([^_]+)_(?!\w)/g, "$1").replace(/\s+/g, " ").trim();
+}
+function describe(entry, max = MAX_CHARS) {
+  const summary = entry.doc.summary?.trim();
+  if (summary)
+    return plainText(summary);
+  const body = plainText(entry.doc.body ?? "");
+  if (!body)
+    return "";
+  if (body.length <= max)
+    return body;
+  const window2 = body.slice(0, max + 1);
+  const sentence = [...window2.matchAll(/\.\s+(?=[A-Z])/g)].pop();
+  if (sentence && sentence.index > max * 0.4)
+    return window2.slice(0, sentence.index + 1);
+  const cut = window2.lastIndexOf(" ");
+  return `${window2.slice(0, cut > 0 ? cut : max).replace(/[,;:\s]+$/, "")}...`;
+}
+function mountEngines(root, ctx) {
+  const entries = ctx.engines.entries;
+  clear(root).append(el("p", { class: "lead text-base" }, "One firmware image each: flash the one you want, and the device becomes that instrument. " + "Pick one to see what it does and what it expects on the card."), el("div", { class: "engine-grid" }, entries.map((e) => {
+    const name = e.doc.name;
+    return el("a", {
+      class: "engine-card",
+      href: `#engine/${name}`,
+      onclick: (ev) => {
+        const m = ev;
+        if (m.metaKey || m.ctrlKey || m.shiftKey)
+          return;
+        if (m.button != null && m.button !== 0)
+          return;
+        ev.preventDefault();
+        ctx.goEngine(name);
+      }
+    }, el("span", { class: "engine-card-title" }, e.doc.title || name), e.bank ? el("span", { class: "engine-card-tag" }, "reads the card") : el("span", { class: "engine-card-tag muted" }, "no card needed"), el("span", { class: "engine-card-desc" }, describe(e)));
+  })));
 }
 
 // src/ui/route.ts
@@ -3170,7 +3215,7 @@ function parseHash(hash) {
   const [head, ...rest] = raw.split("/");
   if (head === "engine") {
     const engine = rest.join("/").trim();
-    return engine ? { view: "reference", engine } : { view: "reference", engine: null };
+    return engine ? { view: "engine", engine } : { view: "engines", engine: null };
   }
   return { view: head, engine: null };
 }
@@ -3178,32 +3223,22 @@ function parseHash(hash) {
 // src/ui/theme.ts
 var THEMES = [
   {
-    id: "system6",
-    label: "System 6",
-    framework: "./vendor/system.css/system.css",
-    skin: "./themes/system6.css",
-    note: "Mac System 6. One bit, Chicago, window chrome."
-  },
-  {
-    id: "plain",
-    label: "Plain",
-    framework: "./vendor/water.css/water.css",
-    skin: "./themes/plain.css",
+    id: "light",
+    label: "Light",
     note: "White paper, system font. The one for reading the manuals."
   },
   {
     id: "dark",
     label: "Dark",
-    framework: "./vendor/water.css/dark.css",
-    skin: "./themes/dark.css",
-    note: "Plain, on a dark ground. For a dim room."
+    note: "The same page on a dark ground. For a dim room."
   }
 ];
 var DEFAULT_THEME = THEMES[0].id;
-var KEY = "sk-card-theme";
+var STORAGE_KEY = "sk-card-theme";
+var THEME_ATTR = "data-theme";
 function currentTheme() {
   try {
-    const saved = localStorage.getItem(KEY);
+    const saved = localStorage.getItem(STORAGE_KEY);
     return THEMES.some((t) => t.id === saved) ? saved : DEFAULT_THEME;
   } catch {
     return DEFAULT_THEME;
@@ -3211,27 +3246,25 @@ function currentTheme() {
 }
 function applyTheme(id) {
   const theme = THEMES.find((t) => t.id === id) ?? THEMES[0];
-  const framework = document.getElementById("theme-framework");
-  const skin = document.getElementById("theme-skin");
-  if (framework)
-    framework.href = theme.framework;
-  if (skin)
-    skin.href = theme.skin;
+  document.documentElement.setAttribute(THEME_ATTR, theme.id);
   try {
-    localStorage.setItem(KEY, theme.id);
+    localStorage.setItem(STORAGE_KEY, theme.id);
   } catch {}
 }
 
 // src/ui/main.ts
 var VIEWS = {
-  build: mountBuild,
-  convert: mountConvert,
-  verify: mountVerify,
-  reference: mountReference,
-  terminal: mountTerminal,
-  flash: mountFlash
+  home: { mount: mountHome, label: "Home", title: "Overview" },
+  engines: { mount: mountEngines, label: "Engines" },
+  build: { mount: mountBuild, label: "Build a card", menu: "card" },
+  convert: { mount: mountConvert, label: "Convert audio", menu: "card" },
+  verify: { mount: mountVerify, label: "Verify a card", menu: "card" },
+  reference: { mount: mountReference, label: "Card reference", menu: "card" },
+  flash: { mount: mountFlash, label: "Flash firmware", menu: "device" },
+  terminal: { mount: mountTerminal, label: "Terminal", menu: "device" },
+  engine: { mount: mountEngine, label: "Engine" }
 };
-var DEFAULT_VIEW = Object.keys(VIEWS)[0];
+var DEFAULT_VIEW = "home";
 var ENGINE_PANEL = "engine";
 async function main() {
   let ctx;
@@ -3254,7 +3287,9 @@ async function main() {
       layout,
       engines: makeCatalogue(engineData, layout),
       patches,
-      engineFocus: new Store({ engine: null })
+      engineFocus: new Store({ engine: null }),
+      go: () => {},
+      goEngine: () => {}
     };
   } catch (e) {
     showError($("#panels"), new Error(`${e.message}
@@ -3263,53 +3298,44 @@ This page is generated: run \`make web-data\` and serve web/ over http ` + "(fil
     return;
   }
   const mounted = new Set;
+  const pageTitle = $("#page-title");
+  const setTitle = (text) => {
+    if (pageTitle)
+      pageTitle.textContent = text;
+    document.title = `${text} - sk-engines`;
+  };
   function show(name) {
-    if (!VIEWS[name] && name !== ENGINE_PANEL)
+    if (!VIEWS[name])
       name = DEFAULT_VIEW;
-    for (const tab of $$("#tabs button")) {
-      const selected = tab.dataset.view === name;
-      tab.classList.toggle("active", selected);
-      tab.setAttribute("aria-selected", String(selected));
-      tab.tabIndex = selected ? 0 : -1;
-    }
-    if (name === ENGINE_PANEL) {
-      const ref = $("#tab-reference");
-      if (ref)
-        ref.tabIndex = 0;
-    }
+    setTitle(VIEWS[name].title ?? VIEWS[name].label);
     for (const panel of $$("#panels > section"))
       panel.hidden = panel.id !== `panel-${name}`;
     if (!mounted.has(name)) {
       mounted.add(name);
       const root = $(`#panel-${name}`);
       try {
-        (name === ENGINE_PANEL ? mountEngine : VIEWS[name])(root, ctx);
+        VIEWS[name].mount(root, ctx);
       } catch (e) {
         showError(root, e);
       }
     }
-    if (parseHash(location.hash).view !== name)
+    if (name === DEFAULT_VIEW) {
+      if (location.hash)
+        history.replaceState(null, "", location.pathname + location.search);
+    } else if (parseHash(location.hash).view !== name) {
       history.replaceState(null, "", `#${name}`);
+    }
+    $(`#panel-${name}`)?.focus?.();
   }
   function showEngine(name) {
     show(ENGINE_PANEL);
+    setTitle(name);
     ctx.engineFocus.set({ engine: name });
     if (location.hash !== `#engine/${name}`)
       history.replaceState(null, "", `#engine/${name}`);
   }
-  const tabs = $$("#tabs button");
-  for (const tab of tabs) {
-    tab.addEventListener("click", () => show(tab.dataset.view ?? DEFAULT_VIEW));
-  }
-  $("#tabs").addEventListener("keydown", (e) => {
-    const ev = e;
-    const next = nextTabIndex(ev.key, tabs.indexOf(document.activeElement), tabs.length);
-    if (next == null)
-      return;
-    ev.preventDefault();
-    tabs[next].focus();
-    show(tabs[next].dataset.view ?? DEFAULT_VIEW);
-  });
+  ctx.go = show;
+  ctx.goEngine = showEngine;
   window.addEventListener("hashchange", () => {
     const route2 = parseHash(location.hash);
     if (route2.engine)
@@ -3318,14 +3344,14 @@ This page is generated: run \`make web-data\` and serve web/ over http ` + "(fil
       show(route2.view);
   });
   const provenance = `${ctx.layout.banks.length} banks, ` + `scan floor ${ctx.layout.scan.min_bytes / 1024} KB, name limit ${ctx.layout.scan.max_name}`;
-  $("#banner").append(el("span", { class: "muted" }, provenance));
   wireAboutMenu(provenance);
   $("#home-link")?.addEventListener("click", () => {
     document.activeElement?.blur?.();
-    history.replaceState(null, "", location.pathname + location.search);
     show(DEFAULT_VIEW);
   });
   buildEngineMenu(ctx, showEngine);
+  buildActionMenu("#card-menu", "card", show);
+  buildActionMenu("#device-menu", "device", show);
   buildThemeMenu();
   const route = parseHash(location.hash);
   if (route.engine)
@@ -3363,6 +3389,19 @@ function buildEngineMenu(ctx, onPick) {
     }
   }, e.doc.name, e.bank ? "" : el("span", { class: "muted" }, "  (no card)"))))));
 }
+function buildActionMenu(sel, group, go) {
+  const host = $(sel);
+  if (!host)
+    return;
+  const items = Object.entries(VIEWS).filter(([, v]) => v.menu === group);
+  host.append(el("ul", { role: "menu" }, items.map(([id, v]) => el("li", { role: "menu-item" }, el("button", {
+    type: "button",
+    onclick: () => {
+      document.activeElement?.blur?.();
+      go(id);
+    }
+  }, v.label)))));
+}
 function buildThemeMenu() {
   const host = $("#theme-menu");
   if (!host)
@@ -3387,5 +3426,5 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 }
 main();
 
-//# debugId=05FAD151E1CD812964756E2164756E21
+//# debugId=D7FF0A3FE4A8AE5F64756E2164756E21
 //# sourceMappingURL=app.js.map
