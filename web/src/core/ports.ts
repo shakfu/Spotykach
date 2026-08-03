@@ -74,6 +74,45 @@ export interface SerialPorts {
   request(opts?: { filtered?: boolean }): Promise<Transport>;
 }
 
+/** What GETSTATUS answers with: where the device is, and how long to leave it alone. */
+export interface DfuStatus {
+  /** bStatus - 0 is OK, everything else is a fault the host should report and stop on. */
+  status: number;
+  /** bState - dfuIDLE, dfuDNBUSY and friends. */
+  state: number;
+  /** bwPollTimeout, in ms. The device is entitled to be left alone this long. */
+  pollTimeout: number;
+}
+
+/**
+ * One DFU interface on one device, as four control transfers.
+ *
+ * Narrow on purpose. `core/dfu.ts` is the piece of this app whose failure mode is a device that needs
+ * recovering rather than a page that needs reloading, so the protocol had to be testable against a
+ * scripted fake - including the paths that only happen when a device misbehaves, which no amount of
+ * clicking at real hardware reaches reliably.
+ */
+export interface DfuDevice {
+  /** DFU_DNLOAD. Block 0 is the DFuSe command channel; data blocks start at 2. */
+  download(block: number, data: Uint8Array): Promise<void>;
+  /** DFU_UPLOAD - optional in the spec, so this may reject on a device that will not read back. */
+  upload(block: number, length: number): Promise<Uint8Array>;
+  getStatus(): Promise<DfuStatus>;
+  clearStatus(): Promise<void>;
+  abort(): Promise<void>;
+  close(): Promise<void>;
+  /** Bytes per transfer, from the interface's wTransferSize. */
+  transferSize(): number;
+  /** Human-readable identification, e.g. `DFU in FS Mode 0483:df11`. */
+  info(): string;
+}
+
+export interface UsbDfu {
+  supported(): boolean;
+  /** Prompt for a DFU device and claim its interface. Must be called from a user gesture. */
+  request(): Promise<DfuDevice>;
+}
+
 /** setInterval/clearInterval, injected so the CPU poll can be driven synchronously in tests. */
 export interface Clock {
   every(ms: number, fn: () => void): () => void;

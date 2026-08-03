@@ -197,9 +197,59 @@ local HTTPS with a self-signed certificate.
 Then:
 
 1. Load the page, confirm the worker is active in DevTools → Application → Service Workers.
-2. Go offline. Reload. The page and all five tabs must still work.
+2. Go offline. Reload. The page and every tab must still work.
 3. Confirm `card_layout.json` came from the cache and not a stale copy of an older release: the header
    line must still read the current bank count.
+
+### C10 — flashing real firmware (Chrome only)
+
+The one check on this list whose failure mode is a device that needs recovering rather than a page that
+needs reloading, so it is written to be run in an order where nothing is risked until the safe parts
+have already passed. `web/test/flash.test.ts` covers the protocol against a scripted device — every
+state transition, the poll-timeout wait, the verify mismatch, the cancel path. **None of it proves a
+real STM32H750 in the spotykach bootloader accepts the sequence.** That is what this check is for.
+
+Have ready: a released `sk-<engine>-<version>.bin`, `bootloader-spotykach-v2.bin` (as a *negative*
+test — it must be refused, not flashed), and `dfu-util` installed as the recovery path.
+
+**C10a — refusals, with no device attached.** Nothing here touches hardware, so do it first.
+
+1. Open the Flash tab with no device connected. The Flash button is disabled and the status line says
+   what is missing.
+2. Choose `bootloader-spotykach-v2.bin`. It must be **refused** with an ERROR finding naming it as a
+   bootloader image. The Flash button stays disabled.
+3. Choose any non-firmware file (a `.wav` from the card, say). Refused, reset vector named.
+4. Choose a released engine `.bin`. It must be **accepted**, and the finding must name the right engine
+   and version — check them against the filename.
+
+**C10b — the real write.** Put the device in bootloader mode: hold Reset ~3s until the pad LEDs breathe
+white.
+
+5. Connect device. The picker lists one entry (`0483:df11`); anything else means the filter is wrong.
+6. Flash a *small* SRAM engine first (`delay`, ~150 KB) rather than csound at 2.2 MB — a shorter write
+   is a shorter window for a first-run bug.
+7. Watch the phases: Erasing → Writing → Finishing. **Reading back is expected to be absent** on the
+   spotykach bootloader - it does not report memory through `UPLOAD`, so the capability probe after the
+   erase disables verification and the result says *unverified*, naming the reason. That is the correct
+   outcome, not a fault. If **Reading back** *does* appear and passes, this bootloader is better than
+   believed and that is worth recording here.
+8. Power-cycle. The engine must boot and its banner must match what the page said it wrote — confirm
+   over the Terminal tab, or by ear.
+
+**C10c — the interruption, which is the whole safety argument.** Do this deliberately, and do it on an
+engine you are willing to re-flash.
+
+9. Start a flash of a QSPI engine (`chuck` or `csound` — big enough to leave a window) and hit
+   **Cancel** partway through.
+10. The page must say the app region is partly written *and* that the bootloader is untouched.
+11. Hold Reset ~3s. The device must re-enter DFU. **This is the claim the whole tab rests on** — if the
+    device does not come back here, stop, recover with `dfu-util`, and treat the tab as unsafe to ship.
+12. Flash again from the page. It must succeed — this also exercises the `dfuERROR` clear path, since
+    the previous attempt left the device mid-transfer.
+
+**C10d — the platform notes.** On Linux, confirm the udev rule is needed and that a browser without it
+gets a comprehensible failure rather than an empty picker. In Firefox and Safari, the tab must say
+WebUSB is unavailable and show the `dfu-util` command, with no enabled buttons.
 
 ## Results
 
@@ -214,6 +264,10 @@ Then:
 | C7 reference | | | |
 | C8 terminal | | n/a | |
 | C9 offline | | | |
+| C10a refusals | | | must refuse the bootloader image |
+| C10b real write | | n/a | note whether read-back verify ran |
+| C10c cancel + recover | | n/a | **the safety claim** |
+| C10d platform notes | | | |
 
 Record failures as issues against `web/`, and add a regression test to `web/test/` for anything the
 node suite could have caught but did not — that is the more valuable half of the outcome.

@@ -81,7 +81,7 @@ async function mount(
 // joining them - it is the lookup you consult while doing the job, not a step in it - and Terminal
 // stays last because it needs a firmware build almost nobody has.
 
-const TAB_ORDER = ['build', 'convert', 'verify', 'reference', 'terminal'];
+const TAB_ORDER = ['build', 'convert', 'verify', 'reference', 'terminal', 'flash'];
 
 test('the landing tab is Build, and the tabs run in the order a person needs them', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');

@@ -105,6 +105,7 @@
       <button id="tab-verify" data-view="verify" role="tab" aria-selected="false" aria-controls="panel-verify" tabindex="-1">Verify</button>
       <button id="tab-reference" data-view="reference" role="tab" aria-selected="false" aria-controls="panel-reference" tabindex="-1" class="secondary">Reference</button>
       <button id="tab-terminal" data-view="terminal" role="tab" aria-selected="false" aria-controls="panel-terminal" tabindex="-1" class="secondary">Terminal</button>
+      <button id="tab-flash" data-view="flash" role="tab" aria-selected="false" aria-controls="panel-flash" tabindex="-1" class="secondary">Flash</button>
     </nav>
 
     <main id="panels">
@@ -113,17 +114,19 @@
       <section id="panel-verify" role="tabpanel" aria-labelledby="tab-verify" hidden></section>
       <section id="panel-reference" role="tabpanel" aria-labelledby="tab-reference" hidden></section>
       <section id="panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden></section>
+      <section id="panel-flash" role="tabpanel" aria-labelledby="tab-flash" hidden></section>
       <!-- Not a tab. One page per engine, reached from the Engines menu or an #engine/<name> link,
-           so the tab row keeps meaning "the five things this tool does". -->
+           so the tab row keeps meaning "the things this tool does". -->
       <section id="panel-engine" aria-label="Engine documentation" hidden></section>
     </main>
 
     <footer>
       <p>
-        Flashing firmware is not done here. Use the
+        The <strong>Flash</strong> tab writes the application region only, so an interrupted write
+        costs a re-flash rather than a device. Installing a <em>bootloader</em> is not done here: that
+        is the write that can genuinely brick a unit, and the
         <a href="https://electro-smith.github.io/Programmer/" target="_blank" rel="noreferrer">Daisy Web
-        Programmer</a>, which already flashes this hardware &mdash; a half-written image is the worst
-        failure in the system and is not worth a second implementation.
+        Programmer</a> and <code>dfu-util</code> both do it.
       </p>
       <p>
         The rules on this page are generated from <code>scripts/card_layout.py</code>, so they match the

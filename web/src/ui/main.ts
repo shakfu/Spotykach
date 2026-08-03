@@ -13,6 +13,7 @@ import { mountConvert } from './convert_view.ts';
 import { mountVerify } from './verify_view.ts';
 import { mountReference } from './reference_view.ts';
 import { mountTerminal } from './terminal_view.ts';
+import { mountFlash } from './flash_view.ts';
 import { mountEngine } from './engine_view.ts';
 import { nextTabIndex } from './tabs.ts';
 import { parseHash } from './route.ts';
@@ -29,11 +30,12 @@ const VIEWS: Record<string, MountFn> = {
   verify: mountVerify,
   reference: mountReference,
   terminal: mountTerminal,
+  flash: mountFlash,
 };
 
 const DEFAULT_VIEW = Object.keys(VIEWS)[0];
 
-/** The engine page's panel id suffix. Not in VIEWS: it is a route, not one of the five tabs. */
+/** The engine page's panel id suffix. Not in VIEWS: it is a route, not one of the tabs. */
 const ENGINE_PANEL = 'engine';
 
 async function main(): Promise<void> {

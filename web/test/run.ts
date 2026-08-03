@@ -9,6 +9,7 @@ import './wav.test.ts';
 import './verify.test.ts';
 import './build.test.ts';
 import './terminal.test.ts';
+import './flash.test.ts';
 import './misc.test.ts';
 import './cardsource.test.ts';
 import './model.test.ts';

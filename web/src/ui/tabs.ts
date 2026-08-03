@@ -7,7 +7,7 @@
 //
 // Two halves. This file is the half with no DOM in it - given a key and where focus is, which tab
 // should take it - so it can be tested directly. main.ts owns the other half: moving focus, and the
-// roving `tabindex` that makes five tabs a single stop in the page's tab order.
+// roving `tabindex` that makes the tab row a single stop in the page's tab order.
 
 /**
  * Where a keypress should move tab focus, or null if the key is not ours.

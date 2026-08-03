@@ -2408,6 +2408,585 @@ function mountTerminal(root, _ctx) {
   ]);
 }
 
+// src/core/dfu.ts
+var DFU_DNLOAD = 1;
+var DFU_UPLOAD = 2;
+var DFU_GETSTATUS = 3;
+var DFU_CLRSTATUS = 4;
+var DFU_ABORT = 6;
+var STATE_DFU_IDLE = 2;
+var STATE_DFU_DNBUSY = 4;
+var STATE_DFU_MANIFEST = 7;
+var STATE_DFU_ERROR = 10;
+var CMD_SET_ADDRESS = 33;
+var CMD_ERASE = 65;
+var STATUS_TEXT = {
+  0: "OK",
+  1: "file rejected by the device",
+  2: "file failed its target verification",
+  3: "write failed - the address may be out of range",
+  4: "erase failed",
+  5: "erase check failed",
+  6: "programming failed",
+  7: "the device is write-protected",
+  8: "address out of range",
+  9: "the download ended early",
+  10: "the firmware is corrupt",
+  11: "vendor-specific error",
+  12: "unexpected USB reset",
+  13: "power-on reset detected",
+  14: "unknown error",
+  15: "the device stalled an unexpected request"
+};
+function statusText(status) {
+  return STATUS_TEXT[status] ?? `device error 0x${status.toString(16).padStart(2, "0")}`;
+}
+
+class DfuError extends Error {
+  status;
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+    this.name = "DfuError";
+  }
+}
+async function settle(dev, sleep, cap = 5000) {
+  for (let i = 0;i < 1000; i++) {
+    const st = await dev.getStatus();
+    if (st.state === STATE_DFU_ERROR) {
+      throw new DfuError(statusText(st.status), st);
+    }
+    if (st.state !== STATE_DFU_DNBUSY && st.state !== STATE_DFU_MANIFEST)
+      return st;
+    await sleep(Math.min(st.pollTimeout, cap));
+  }
+  throw new DfuError("the device never finished the last operation");
+}
+async function reset(dev, sleep) {
+  const st = await dev.getStatus();
+  if (st.state === STATE_DFU_ERROR) {
+    await dev.clearStatus();
+  } else if (st.state !== STATE_DFU_IDLE) {
+    await dev.abort();
+  }
+  const after = await settle(dev, sleep);
+  if (after.state !== STATE_DFU_IDLE) {
+    throw new DfuError(`the device will not return to idle (state ${after.state})`);
+  }
+}
+function le32(cmd, addr) {
+  const b = new Uint8Array(5);
+  b[0] = cmd;
+  b[1] = addr & 255;
+  b[2] = addr >>> 8 & 255;
+  b[3] = addr >>> 16 & 255;
+  b[4] = addr >>> 24 & 255;
+  return b;
+}
+async function setAddress(dev, sleep, addr, abortAfter = false) {
+  await dev.download(0, le32(CMD_SET_ADDRESS, addr));
+  await settle(dev, sleep);
+  if (abortAfter) {
+    await dev.abort();
+    await settle(dev, sleep);
+  }
+}
+async function erasePage(dev, sleep, addr) {
+  await dev.download(0, le32(CMD_ERASE, addr));
+  await settle(dev, sleep);
+}
+function aborted(opts) {
+  return opts.signal?.aborted === true;
+}
+function firstDifference(want, got) {
+  for (let i = 0;i < want.length; i++)
+    if (got[i] !== want[i])
+      return i;
+  return -1;
+}
+function hex(b, at) {
+  return [...b.subarray(at, at + 8)].map((n) => n.toString(16).padStart(2, "0")).join(" ");
+}
+function blankNote(got) {
+  if (got.length === 0)
+    return " (the device returned no data at all)";
+  if (got.every((b) => b === 255)) {
+    return " - the whole block read as 0xFF (erased), so either nothing was written or this " + "bootloader does not read QSPI back";
+  }
+  if (got.every((b) => b === 0)) {
+    return " - the whole block read as zero, which usually means UPLOAD is not implemented rather " + "than that the write failed";
+  }
+  return "";
+}
+async function uploadIsTrustworthy(dev, sleep, address, transferSize) {
+  try {
+    await reset(dev, sleep);
+    await setAddress(dev, sleep, address, true);
+    const probe = await dev.upload(2, transferSize);
+    return probe.length > 0 && probe.every((b) => b === 255);
+  } catch {
+    return false;
+  } finally {
+    await reset(dev, sleep).catch(() => {});
+  }
+}
+async function flash(dev, image, opts, sleep) {
+  const { address, transferSize, eraseSize } = opts;
+  const report = opts.onProgress ?? (() => {});
+  await reset(dev, sleep);
+  const firstSector = Math.floor(address / eraseSize) * eraseSize;
+  const lastByte = address + image.length - 1;
+  const sectors = [];
+  for (let a = firstSector;a <= lastByte; a += eraseSize)
+    sectors.push(a);
+  for (let i = 0;i < sectors.length; i++) {
+    if (aborted(opts))
+      throw new DfuError("cancelled");
+    await erasePage(dev, sleep, sectors[i]);
+    report({ phase: "erase", done: i + 1, total: sectors.length });
+  }
+  let canVerify = false;
+  let note;
+  if (opts.verify) {
+    canVerify = await uploadIsTrustworthy(dev, sleep, address, transferSize);
+    if (!canVerify) {
+      note = "this bootloader does not report memory through DFU UPLOAD, so the image could not be " + "read back. Confirm the device boots.";
+    }
+  }
+  const blocks = Math.ceil(image.length / transferSize);
+  for (let i = 0;i < blocks; i++) {
+    if (aborted(opts))
+      throw new DfuError("cancelled");
+    const chunk = image.subarray(i * transferSize, Math.min((i + 1) * transferSize, image.length));
+    await setAddress(dev, sleep, address + i * transferSize);
+    await dev.download(2, chunk);
+    await settle(dev, sleep);
+    report({ phase: "write", done: i + 1, total: blocks });
+  }
+  if (opts.verify && canVerify) {
+    await reset(dev, sleep);
+    await setAddress(dev, sleep, address, true);
+    for (let i = 0;i < blocks; i++) {
+      if (aborted(opts))
+        throw new DfuError("cancelled");
+      const want = image.subarray(i * transferSize, Math.min((i + 1) * transferSize, image.length));
+      const got = await dev.upload(i + 2, transferSize);
+      if (got.length < want.length) {
+        throw new DfuError(`read back ${got.length} bytes where ${want.length} were written`);
+      }
+      const at = firstDifference(want, got);
+      if (at >= 0) {
+        throw new DfuError(`read-back mismatch at 0x${(address + i * transferSize + at).toString(16)}: ` + `expected ${hex(want, at)}, device returned ${hex(got, at)}${blankNote(got)}`);
+      }
+      report({ phase: "verify", done: i + 1, total: blocks });
+    }
+  }
+  report({ phase: "manifest", done: 0, total: 1 });
+  try {
+    await dev.download(0, new Uint8Array(0));
+    await settle(dev, sleep);
+  } catch {}
+  report({ phase: "manifest", done: 1, total: 1 });
+  return { verified: opts.verify === true && canVerify, note };
+}
+
+// src/core/image.ts
+var APP_ADDRESS = 2416181248;
+var QSPI_END = 2424307712;
+var MAX_APP_BYTES = QSPI_END - APP_ADDRESS;
+var MIN_BYTES = 512;
+function readBanner(bytes) {
+  let text = "";
+  for (let i = 0;i < bytes.length; i += 32768) {
+    text += String.fromCharCode(...bytes.subarray(i, Math.min(i + 32768, bytes.length)));
+  }
+  const m = /spotykach (\S+) engine=([a-z0-9_]+)/.exec(text);
+  return m ? { version: m[1], engine: m[2] } : null;
+}
+function classify(resetVector) {
+  const region = resetVector >>> 24;
+  if (region === 36)
+    return "sram-app";
+  if (region === 144)
+    return "qspi-app";
+  if (region === 8)
+    return "bootloader";
+  return "unknown";
+}
+function inspectImage(buf) {
+  const bytes = new Uint8Array(buf);
+  const problems = [];
+  const warnings = [];
+  if (bytes.length < MIN_BYTES) {
+    return {
+      kind: "unknown",
+      bytes: bytes.length,
+      stackPointer: 0,
+      resetVector: 0,
+      version: null,
+      engine: null,
+      flashable: false,
+      problems: [`only ${bytes.length} bytes - too small to be a firmware image`],
+      warnings: []
+    };
+  }
+  const view = new DataView(buf);
+  const stackPointer = view.getUint32(0, true);
+  const resetVector = view.getUint32(4, true);
+  const kind = classify(resetVector);
+  const banner = readBanner(bytes);
+  if (kind === "bootloader") {
+    problems.push("this is a bootloader image (its reset vector is in internal flash at " + `0x${resetVector.toString(16)}), not an engine. Installing a bootloader is a separate, ` + "device-level procedure and is deliberately not done from this page.");
+  }
+  if (kind === "unknown") {
+    problems.push(`the reset vector (0x${resetVector.toString(16)}) points nowhere this hardware runs code from. ` + "This is probably not a Daisy firmware image at all.");
+  }
+  if (bytes.length > MAX_APP_BYTES) {
+    problems.push(`${(bytes.length / 1024).toFixed(0)} KB does not fit the ` + `${(MAX_APP_BYTES / 1024 / 1024).toFixed(0)} MB QSPI app region`);
+  }
+  const spRegion = stackPointer >>> 24;
+  if (spRegion !== 32 && spRegion !== 36) {
+    warnings.push(`the initial stack pointer (0x${stackPointer.toString(16)}) is not in DTCM or AXI SRAM, ` + "which is unusual for a Daisy image");
+  }
+  if (!banner) {
+    warnings.push("no spotykach version banner in this image, so its engine and version cannot be confirmed. " + "A released binary always carries one.");
+  }
+  return {
+    kind,
+    bytes: bytes.length,
+    stackPointer,
+    resetVector,
+    version: banner?.version ?? null,
+    engine: banner?.engine ?? null,
+    flashable: problems.length === 0,
+    problems,
+    warnings
+  };
+}
+function describeImage(info) {
+  const size = info.bytes < 1024 * 1024 ? `${(info.bytes / 1024).toFixed(0)} KB` : `${(info.bytes / 1024 / 1024).toFixed(2)} MB`;
+  if (info.engine && info.version) {
+    const where = info.kind === "qspi-app" ? "runs from QSPI" : "runs from SRAM";
+    return `${info.engine} ${info.version} - ${size}, ${where}`;
+  }
+  return `unidentified image - ${size}`;
+}
+
+// src/app/flash_model.ts
+var ERASE_SIZE = 64 * 1024;
+var EMPTY = {
+  supported: false,
+  device: null,
+  image: null,
+  filename: null,
+  busy: false,
+  phase: null,
+  progress: 0,
+  result: null,
+  error: null
+};
+function assertTarget(address) {
+  if (address !== APP_ADDRESS) {
+    throw new DfuError(`refusing to write 0x${address.toString(16)}: this page only ever writes the application ` + `region at 0x${APP_ADDRESS.toString(16)}. Installing a bootloader is a separate procedure.`);
+  }
+}
+
+class FlashModel {
+  deps;
+  store = new Store(EMPTY);
+  dev = null;
+  bytes = null;
+  cancel = { aborted: false };
+  constructor(deps) {
+    this.deps = deps;
+    this.store.set({ supported: deps.usb.supported() });
+  }
+  get sleep() {
+    return this.deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  }
+  select(filename, buf) {
+    const image = inspectImage(buf);
+    this.bytes = new Uint8Array(buf);
+    this.store.set({ filename, image, result: null, error: null });
+  }
+  clearSelection() {
+    this.bytes = null;
+    this.store.set({ filename: null, image: null, result: null, error: null });
+  }
+  async connect() {
+    if (!this.deps.usb.supported()) {
+      this.store.set({ error: "this browser has no WebUSB" });
+      return;
+    }
+    try {
+      this.dev = await this.deps.usb.request();
+      this.store.set({ device: this.dev.info(), error: null });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const cancelled = /No device selected|NotFoundError/i.test(msg);
+      this.store.set({ device: null, error: cancelled ? null : msg });
+    }
+  }
+  async disconnect() {
+    await this.dev?.close();
+    this.dev = null;
+    this.store.set({ device: null, phase: null, progress: 0 });
+  }
+  abort() {
+    this.cancel.aborted = true;
+  }
+  async write() {
+    const s = this.store.get();
+    if (!this.dev || !this.bytes || !s.image)
+      return;
+    if (!s.image.flashable) {
+      this.store.set({ error: s.image.problems[0] });
+      return;
+    }
+    this.cancel = { aborted: false };
+    const what = describeImage(s.image);
+    const ask = this.deps.confirm;
+    if (ask && !await ask(`Overwrite the firmware on ${s.device} with ${what}?`))
+      return;
+    this.store.set({ busy: true, error: null, result: null, phase: "erase", progress: 0 });
+    try {
+      assertTarget(APP_ADDRESS);
+      const outcome = await flash(this.dev, this.bytes, {
+        address: APP_ADDRESS,
+        transferSize: this.dev.transferSize(),
+        eraseSize: ERASE_SIZE,
+        verify: true,
+        signal: this.cancel,
+        onProgress: (p) => {
+          this.store.set({ phase: p.phase, progress: p.total > 0 ? p.done / p.total : 0 });
+        }
+      }, this.sleep);
+      this.store.set({
+        busy: false,
+        phase: null,
+        progress: 1,
+        result: {
+          ok: true,
+          verified: outcome.verified,
+          message: outcome.verified ? `${what} written and read back byte for byte. Power-cycle the device to run it.` : `${what} written. ${outcome.note ?? "It could not be read back."} ` + "Power-cycle the device to run it."
+        }
+      });
+      this.dev = null;
+      this.store.set({ device: null });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.store.set({
+        busy: false,
+        phase: null,
+        error: /cancelled/.test(msg) ? "Cancelled. The app region is now partly written - flash again before using the device; " + "the bootloader is untouched, so hold Reset for 3 seconds to get back here." : msg
+      });
+    }
+  }
+}
+
+// src/platform/usb.ts
+var DFU_VID = 1155;
+var DFU_PID = 57105;
+var DFU_CLASS = 254;
+var DFU_SUBCLASS = 1;
+var supported2 = () => typeof navigator !== "undefined" && navigator.usb != null;
+function findDfuInterface(dev) {
+  const config = dev.configuration;
+  if (!config)
+    throw new Error("the device offered no USB configuration");
+  for (const iface of config.interfaces) {
+    for (const alt of iface.alternates) {
+      if (alt.interfaceClass === DFU_CLASS && alt.interfaceSubclass === DFU_SUBCLASS) {
+        if (alt.alternateSetting === 0) {
+          return { iface: iface.interfaceNumber, alt: alt.alternateSetting };
+        }
+      }
+    }
+  }
+  throw new Error("no DFU interface on that device - is it in bootloader mode?");
+}
+
+class WebUsbDfuDevice {
+  dev;
+  iface;
+  xfer;
+  constructor(dev, iface, xfer) {
+    this.dev = dev;
+    this.iface = iface;
+    this.xfer = xfer;
+  }
+  setup(request, value) {
+    return { requestType: "class", recipient: "interface", request, value, index: this.iface };
+  }
+  async download(block, data) {
+    const res = await this.dev.controlTransferOut(this.setup(DFU_DNLOAD, block), data);
+    if (res.status && res.status !== "ok")
+      throw new Error(`download stalled (${res.status})`);
+  }
+  async upload(block, length) {
+    const res = await this.dev.controlTransferIn(this.setup(DFU_UPLOAD, block), length);
+    if (res.status && res.status !== "ok")
+      throw new Error(`upload stalled (${res.status})`);
+    if (!res.data)
+      return new Uint8Array(0);
+    return new Uint8Array(res.data.buffer, res.data.byteOffset, res.data.byteLength);
+  }
+  async getStatus() {
+    const res = await this.dev.controlTransferIn(this.setup(DFU_GETSTATUS, 0), 6);
+    if (!res.data || res.data.byteLength < 6)
+      throw new Error("short GETSTATUS response");
+    const d = res.data;
+    const pollTimeout = d.getUint8(1) | d.getUint8(2) << 8 | d.getUint8(3) << 16;
+    return { status: d.getUint8(0), state: d.getUint8(4), pollTimeout };
+  }
+  async clearStatus() {
+    await this.dev.controlTransferOut(this.setup(DFU_CLRSTATUS, 0));
+  }
+  async abort() {
+    await this.dev.controlTransferOut(this.setup(DFU_ABORT, 0));
+  }
+  async close() {
+    try {
+      await this.dev.releaseInterface(this.iface);
+    } catch {}
+    try {
+      await this.dev.close();
+    } catch {}
+  }
+  transferSize() {
+    return this.xfer;
+  }
+  info() {
+    const name = this.dev.productName || "DFU device";
+    const id = `${this.dev.vendorId.toString(16).padStart(4, "0")}:` + `${this.dev.productId.toString(16).padStart(4, "0")}`;
+    return `${name} ${id}`;
+  }
+}
+async function request() {
+  const usb = navigator.usb;
+  if (!usb)
+    throw new Error("this browser has no WebUSB");
+  const dev = await usb.requestDevice({ filters: [{ vendorId: DFU_VID, productId: DFU_PID }] });
+  await dev.open();
+  if (!dev.configuration)
+    await dev.selectConfiguration(1);
+  const { iface, alt } = findDfuInterface(dev);
+  await dev.claimInterface(iface);
+  await dev.selectAlternateInterface(iface, alt);
+  return new WebUsbDfuDevice(dev, iface, 1024);
+}
+var webUsbDfu = { supported: supported2, request };
+
+// src/ui/flash_view.ts
+var PHASE_LABEL = {
+  erase: "Erasing",
+  write: "Writing",
+  verify: "Reading back",
+  manifest: "Finishing"
+};
+function imageReport(info, filename) {
+  const rows = [];
+  const headline = info.engine && info.version ? `${info.engine} ${info.version}` : "unidentified image";
+  rows.push(finding(info.flashable ? "ok" : "error", filename, `${headline} - ${humanBytes(info.bytes)}, reset vector 0x${info.resetVector.toString(16)}`));
+  for (const p of info.problems)
+    rows.push(finding("error", "", p));
+  for (const w of info.warnings)
+    rows.push(finding("warn", "", w));
+  return el("div", {}, rows);
+}
+function mountFlash(root, _ctx) {
+  const model = new FlashModel({ usb: webUsbDfu, confirm: (q) => confirmDestructive(q) });
+  const status = el("div", { class: "status" });
+  const report = el("div");
+  const bar = el("div", { class: "console" });
+  const result = el("div");
+  const file = el("input", {
+    type: "file",
+    accept: ".bin",
+    onchange: async (e) => {
+      const f = e.target.files?.[0];
+      if (f)
+        model.select(f.name, await f.arrayBuffer());
+    }
+  });
+  const connectBtn = el("button", {
+    class: "primary",
+    onclick: () => model.store.get().device ? model.disconnect() : model.connect()
+  }, "Connect device");
+  const flashBtn = el("button", { class: "danger", onclick: () => model.write() }, "Flash");
+  const cancelBtn = el("button", { onclick: () => model.abort() }, "Cancel");
+  const drop = el("div", { class: "dropzone" }, [
+    el("p", {}, "Drop an engine .bin here, or choose one:"),
+    file
+  ]);
+  dropTarget(drop, async (dt) => {
+    const f = dt.files?.[0];
+    if (f)
+      model.select(f.name, await f.arrayBuffer());
+  });
+  append(root, [
+    el("div", { class: "controls" }, [connectBtn, flashBtn, cancelBtn]),
+    status,
+    drop,
+    report,
+    bar,
+    result,
+    aside("Why this is safe to interrupt, and what it will not do", el("p", {}, "This page writes one address and one only: the application region at " + `0x${APP_ADDRESS.toString(16)}, in QSPI. The bootloader lives somewhere else entirely - ` + "internal flash at 0x08000000 - and nothing here can address it."), el("p", {}, "So the worst case is a device with a half-written app and a working bootloader. " + "Hold Reset for about 3 seconds until the pad LEDs breathe white, and flash it again. " + "That is a retry, not a brick."), el("p", {}, "Installing a bootloader is the operation that genuinely can brick a device, it is " + "done once per unit, and it is not offered here. Use dfu-util for it."), el("p", {}, "Where the device allows it, the image is read back and compared byte for byte " + "after writing, so a successful flash is measured rather than assumed.")),
+    aside("If the device does not appear", el("p", {}, "The device must be in bootloader mode first: hold Reset for about 3 seconds until " + "the pad LEDs breathe white. It then enumerates as 0483:df11."), el("p", {}, "WebUSB is Chromium-only - Chrome or Edge. Firefox and Safari do not implement it " + "and will not; the command-line path works everywhere:"), el("pre", {}, `dfu-util -a 0 -s 0x${APP_ADDRESS.toString(16)}:leave -D sk-<engine>-<version>.bin -d ,0483:df11`), el("p", {}, "On Linux, a udev rule is needed for a non-root browser to claim the interface - " + "the same rule dfu-util needs."))
+  ]);
+  model.store.subscribe((s) => {
+    if (!s.supported) {
+      clear(status);
+      append(status, [el("span", {}, "This browser has no WebUSB, so flashing is not possible here. " + "Use Chrome or Edge, or dfu-util (below).")]);
+      connectBtn.disabled = true;
+      flashBtn.disabled = true;
+      cancelBtn.hidden = true;
+      return;
+    }
+    connectBtn.textContent = s.device ? "Disconnect" : "Connect device";
+    connectBtn.disabled = s.busy;
+    file.disabled = s.busy;
+    cancelBtn.hidden = !s.busy;
+    const ready = !!s.device && !!s.image?.flashable && !s.busy;
+    flashBtn.disabled = !ready;
+    clear(status);
+    const bits = [];
+    bits.push(s.device ? `Device: ${s.device}` : "No device connected.");
+    if (!s.image)
+      bits.push("No image chosen.");
+    else if (!s.image.flashable)
+      bits.push("This image cannot be flashed - see below.");
+    if (s.device && s.image?.flashable && !s.busy) {
+      bits.push(`Ready to write 0x${APP_ADDRESS.toString(16)}.`);
+    }
+    append(status, [el("span", {}, bits.join(" "))]);
+    clear(report);
+    if (s.image && s.filename)
+      append(report, [imageReport(s.image, s.filename)]);
+    clear(bar);
+    bar.hidden = !s.busy;
+    if (s.busy && s.phase) {
+      const pct = Math.round(s.progress * 100);
+      append(bar, [
+        el("div", { class: "line" }, `${PHASE_LABEL[s.phase] ?? s.phase}... ${pct}%`),
+        el("div", { class: "line muted" }, "Do not unplug the device. If you do, hold Reset for 3 " + "seconds and flash again - the bootloader is not being written.")
+      ]);
+    }
+    clear(result);
+    if (s.error) {
+      append(result, [el("div", { class: "verdict bad" }, [
+        el("strong", {}, "Failed"),
+        el("p", {}, s.error)
+      ])]);
+    } else if (s.result) {
+      append(result, [el("div", { class: s.result.verified ? "verdict good" : "verdict mixed" }, [
+        el("strong", {}, s.result.verified ? "Flashed and verified" : "Flashed, unverified"),
+        el("p", {}, s.result.message)
+      ])]);
+    }
+  });
+}
+
 // src/app/engine_model.ts
 class EngineModel {
   catalogue;
@@ -2649,7 +3228,8 @@ var VIEWS = {
   convert: mountConvert,
   verify: mountVerify,
   reference: mountReference,
-  terminal: mountTerminal
+  terminal: mountTerminal,
+  flash: mountFlash
 };
 var DEFAULT_VIEW = Object.keys(VIEWS)[0];
 var ENGINE_PANEL = "engine";
@@ -2807,5 +3387,5 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 }
 main();
 
-//# debugId=7D6D0F95632CCDF664756E2164756E21
+//# debugId=05FAD151E1CD812964756E2164756E21
 //# sourceMappingURL=app.js.map
