@@ -223,7 +223,7 @@ Everything under `#if SPK_TERMINAL`, following the `SPK_USE_STREAM` / `METER` pa
 | `USB_MIDI=1` | **incompatible** - `MidiUsbHandler` claims the same OTG_HS core; a compile error, not a silent conflict |
 | `SPK_TERMINAL_MEASURE` | *(phase 2, unbuilt)* L2 audio-property analyzer + `measure` verb |
 | `SPK_TERMINAL_STIM` | *(phase 3, unbuilt)* built-in test-signal source for through-processing engines |
-| `SPK_TERMINAL_OSC` | *(later, unbuilt)* OSC + SLIP codec behind the same dispatcher |
+| `SPK_TERMINAL_OSC` | *(later, unbuilt)* OSC + SLIP codec behind the same dispatcher - address space specified in [`terminal-osc.md`](terminal-osc.md) |
 
 `SPK_TERMINAL_REFLECT` no longer exists: the descriptor tables proved cheap enough to keep unconditional, so `describe` is always present. Footprint and which engines can host the channel are in [`terminal-impl.md`](terminal-impl.md).
 
@@ -235,7 +235,7 @@ Everything under `#if SPK_TERMINAL`, following the `SPK_USE_STREAM` / `METER` pa
 
 - **Phase 3 (`SPK_TERMINAL_STIM`).** Test-signal injection, extending L2 to through-processing engines.
 
-- **Later.** `SPK_TERMINAL_OSC` (music-rig codec).
+- **Later.** `SPK_TERMINAL_OSC` (music-rig codec) - see [`terminal-osc.md`](terminal-osc.md).
 
 ## Open decisions - all resolved
 
