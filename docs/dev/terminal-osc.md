@@ -17,6 +17,12 @@ tokenizer. OSC buys one thing - **the device becomes a node in a Max/Pd/TouchOSC
 bound to an address once and then just sends floats. Every decision below is made for that client, not
 for the pytest harness, which is already well served by lines.
 
+The design is **two tiers, and only one of them is firmware**. The device speaks a generic, layer-2,
+engine-independent address space (`/sk/a/param/speed`). A host-side translator generated from `describe`
+offers an engine-specific, human-readable namespace on top of it (`/radio/a/station`). Sections up to
+**The semantic tier** specify the firmware half; that section specifies the host half and why the split
+falls there.
+
 ## The three layers, and why the address sits on the middle one
 
 The panel is fixed hardware and every engine reinterprets it. That produces three distinct namings, and
@@ -376,9 +382,116 @@ Only live slots need one, so it is ~6-12 short strings per engine (`radio`: `spe
 `aux`→"bank"; `tape`: `size`→"character", `altpos`→"pan"). A few hundred bytes of flash per build. The
 real cost is that engines currently carry zero naming burden and this adds a table that can rot - which
 is why it defaults rather than being required, and why nothing in the protocol depends on it. **The label
-is cosmetic: no address, reply, or error ever derives from it.**
+is cosmetic *to the device*: no address, reply, or error ever derives from it.** One tier up it is
+load-bearing - it is what the host-side semantic namespace is generated from - and that asymmetry is
+deliberate. A label that rots misnames a control on a surface; it can never make the device
+unreachable, because the generic address it annotates is unaffected.
 
-## What has no address
+## The semantic tier - host-side, generated
+
+Everything above is the **generic tier**: one protocol, layer-2 vocabulary, identical in shape on every
+build. It is complete and sufficient on its own - a host never needs anything else to drive the device.
+
+It is also not what a musician wants to type. `/sk/a/param/fluxfb` and `/sk/a/param/polyslice` are
+granular's internals leaking into a protocol every engine has to speak, and on a radio build
+`/sk/a/param/speed` is the station dial. So there is a second, **semantic tier** - engine-specific,
+human-readable, and **entirely host-side**:
+
+```
+  patch / surface     /radio/a/station          ,f 0.5      semantic tier   (host)
+                              |  translate (generated from describe)
+  ---------------------------- USB-C CDC / SLIP ----------------------------
+  device              /sk/a/param/speed         ,f 0.5      generic tier    (firmware)
+```
+
+The device speaks only the generic tier and does not know the semantic tier exists.
+
+### Why host-side, not firmware
+
+Putting the semantic namespace on the device would double the address space in flash, put a
+hand-maintained per-engine table into the *wire format* where drift becomes a protocol bug rather than a
+display bug, and force an engine-name segment into the generic tier to declare which vocabulary a path
+speaks - the segment **Rejected alternatives** removes.
+
+Host-side, it costs the firmware nothing and can be richer than anything that would fit on-device: units,
+display curves, control groupings, per-surface layouts. And it is *generated*, not written, so it cannot
+drift from a firmware it re-reads at every connect.
+
+### The engine segment lives here
+
+`/radio/a/station` - the semantic namespace **is** engine-specific by definition, so this is where an
+engine name is load-bearing rather than decorative. A patch built against radio names radio's controls
+and is meaningless against tape; the segment says so. That is the same fact that made it *wrong* in the
+generic tier, where the whole point is that one layout binds to every build.
+
+### What the translator consumes
+
+Exactly the `describe` bundle, which already carries everything needed:
+
+| Field | From | Used for |
+|-------|------|----------|
+| engine name | `descr` row | the semantic root segment |
+| generic address | `describe/param` etc. | the translation target |
+| label | `param_label()`, defaulting to the slot name | the semantic leaf |
+| range | platform scope table | surface widget bounds |
+| scope (`deck`/`global`) | platform scope table | whether a deck segment appears |
+| kind | row tag (`param`/`cfg`/`state`) | which semantic subtree |
+
+No firmware change is needed beyond `param_label()`. If a future need appears (units, a curve hint), it
+is an added column on the descriptor row, not a protocol change - the address spaces stay as they are.
+
+### Translation rules
+
+1. **Slugify the label**: lowercase, trim, spaces and `/` to `-`, drop anything outside `[a-z0-9-]`.
+   `"station select"` → `station-select`. Addresses stay lowercase, as in the generic tier.
+
+2. **Compose**: `/<engine>/<deck>/<slug>` for deck-scoped, `/<engine>/<slug>` for global, mirroring the
+   generic tier's deck elision. `cfg`/`state` keep their kind segment (`/radio/a/cfg/mode`,
+   `/radio/a/state/empty`) - the `mix`/`route` collisions are properties of the *names*, and a label can
+   collide the same way.
+
+3. **Disambiguate within an engine.** Two slots may carry the same label (two "level" controls is the
+   obvious case). On collision, suffix with the slot name: `level-mix`, `level-gritmix`. Deterministic,
+   so a saved patch stays valid across reconnects.
+
+4. **Fall back silently.** A slot with no `param_label()` gets its layer-2 name as the slug, which is
+   what `describe` already sends. An engine that implements no labels therefore produces a semantic tier
+   identical to the generic one minus the `param/` segment - degraded, never broken.
+
+5. **Translate replies back.** `/sk/reply/a/param/speed ,f 0.5` → `/radio/a/station ,f 0.5` on the
+   semantic side, so a patch sees only its own namespace. Errors carry the *semantic* address the patch
+   sent, not the generic one it was translated into, or the reason is unactionable.
+
+6. **Pass through unknown addresses untranslated.** A patch may legitimately want to reach a generic
+   address the semantic tier has no name for; a `/sk/...` address arriving at the translator goes out
+   verbatim.
+
+### Where it lives
+
+`tools/` alongside the existing host client, as a component of `skdev` rather than a separate program:
+`OscDevice` already reads `describe` to build its param map, so the translator is that map plus the
+slugify/compose rules and a reverse index. A Max abstraction and a TouchOSC layout generator are then
+thin consumers of the same JSON the translator builds - and the layout generator is where the semantic
+tier pays off most, because it can print `station` on a fader while binding it to `/sk/a/param/speed` and
+skip the translator at runtime entirely.
+
+### What it must never do
+
+- **Never be required.** Every device function is reachable generically. The translator is a convenience
+  layer, and a bug in it must never be able to make the device unreachable.
+- **Never be in the test path.** `test_generic.py`'s cross-codec parity sweep uses generic addresses
+  only. Testing through the translator would make a translation bug look like a firmware bug, which is
+  the exact confusion the two-tier split exists to prevent.
+- **Never round-trip through labels.** The translator maps semantic → generic on the way in and generic →
+  semantic on the way out, but the *authority* is always the generic address. A saved patch stores the
+  semantic address it was built with; if a firmware update changes a label, the translator's rebuilt map
+  no longer resolves it and the patch fails loudly at connect rather than silently retargeting.
+
+### Testing
+
+One property, host-only, no device: for every row in a captured `describe` bundle, semantic → generic →
+semantic is the identity, and every generated semantic address resolves to exactly one generic address.
+Run against the descriptor fixtures the web front-end already keeps, so it costs no bench time.
 
 - **`query fit <deck> <fraction>`** - takes an argument, and an argument on a `state/` address is how the
   codec spells "write", which `fit` is not. Line-only, matching its exclusion from `describe`.
@@ -545,7 +658,19 @@ Recorded so they are not relitigated.
   not a coincidental index; over CDC each device is its own serial port, so addresses cannot collide and
   an engine name would not disambiguate two tape units anyway; and the multi-engine binary is an
   explicitly declined option in `engine-layout.md` R4. With layer-2 addressing the segment also costs the
-  universal layout, which is the main thing OSC is here to provide.
+  universal layout, which is the main thing OSC is here to provide. It is not discarded, though - it is
+  load-bearing one tier up, as the root of the host-side semantic namespace (`/radio/a/station`), which
+  is the one place an engine name genuinely identifies something.
+
+- **Layer-1 (silkscreen) addressing on the device** (`/sk/a/pitch`). The panel is the true cross-engine
+  invariant, so this is the most tempting alternative - and it is a UI gesture, not a protocol surface.
+  `core.ui.cpp:466-524` routes a knob to a `ParamId` through a `DeckLayout` branch *and* `MValue`
+  soft-takeover pickup: a write that does not match the stored knob position is deliberately swallowed
+  until it catches up, which is correct for a pot and catastrophic for a control message. `alt+size` is
+  also `Win` in chord layout and `PolySlice` in slice layout, so one address would resolve to different
+  params by mode. Reaching it would mean either duplicating that branch in the terminal - crossing the
+  boundary `engine-layout.md` R4 enforces with `check-boundary` - or pushing messages through the
+  pot-apply pass that `mode test` exists to disable (`app.cpp:296`).
 
 - **Numeric slots** (`/sk/a/param/7`). Breaks every saved layout on an enum reorder, silently. Retained
   only as the existing `param_from_token` fallback, never as what a host stores.
