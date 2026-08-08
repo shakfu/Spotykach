@@ -1,0 +1,55 @@
+<p><code>ENGINE=radio</code> · <code>src/engine/radio/radio_engine.{h,cpp}</code> · class <code>RadioEngine</code></p>
+<p>A <strong>dual virtual <a href="https://github.com/TomWhitwell/RadioMusic">RadioMusic</a></strong>. Each deck (A/B) is an <strong>independent virtual radio</strong> browsing one shared SD library of banks; the two radios are blended by the platform crossfader and placed by the routing switch, so it plays like a pair of radios you tune and mix.</p>
+<p>Its signature is the <strong>free-running virtual playhead</strong>: every station sounds as though it kept broadcasting while you were tuned elsewhere. A per-deck clock runs continuously; tuning to a station lands at the position it "would" be playing now, and leaving and returning finds it advanced - exactly like a radio.</p>
+<blockquote><p>Implementation, architecture, the file map, and the bug writeups live in &gt; <a href="https://github.com/shakfu/sk-engines/blob/main/docs/dev/radio-impl.md"><code>docs/dev/radio-impl.md</code></a>.</p></blockquote>
+<hr>
+<h3>Controls (per deck)</h3>
+<figure><a href="engines/media/radio-controls.svg" target="_blank" rel="noreferrer"><img src="engines/media/radio-controls.svg" alt="Radio control surface" loading="lazy" width="2213" height="1724"></a><figcaption>Radio control surface - open full size <a href="engines/media/radio-controls.pdf" download class="pdf-link">download PDF</a></figcaption></figure>
+<p>_Generated from <a href="https://github.com/shakfu/sk-engines/blob/main/docs/diagrams/controls/radio.json"><code>docs/diagrams/controls/radio.json</code></a> via <code>make diagrams</code>._</p>
+<table><thead><tr><th>Control</th><th><code>ParamId</code> / config</th><th>Effect</th></tr></thead><tbody><tr><td><strong>PITCH</strong> (<code>Speed</code>)</td><td>+ V/oct CV jack</td><td><strong>STATION</strong> select - the tuning dial. Knob + CV summed, quantized to the nearest station in the bank.</td></tr><tr><td><strong>POS</strong> (<code>Pos</code>)</td><td>+ size/pos CV jack</td><td><strong>START</strong> offset into the station (applied on the next switch / RESET).</td></tr><tr><td><strong>SIZE</strong> (<code>Size</code>)</td><td></td><td><strong>varispeed</strong> 0.5x..2x (center = unity). RadioMusic is fixed-rate; this is a platform bonus.</td></tr><tr><td><strong>ENV</strong> (<code>Env</code>)</td><td></td><td>inter-station <strong>STATIC</strong> amount (tuning hiss crossfaded in on a station change).</td></tr><tr><td><strong>MIX</strong> (<code>Mix</code>)</td><td></td><td>deck <strong>volume</strong>.</td></tr><tr><td><strong>Alt+PITCH</strong> (<code>Aux</code>)</td><td></td><td><strong>BANK</strong> select (held selector, ring dots) - "hold RESET for bank" on the original.</td></tr><tr><td><strong>Mix fader</strong> (<code>Crossfade</code>)</td><td></td><td>A/B blend of the two radios.</td></tr><tr><td><strong>Routing switch</strong> (<code>Route</code>)</td><td></td><td>stereo topology (below).</td></tr><tr><td><strong>Play pad</strong> / <strong>gate-in</strong></td><td></td><td><strong>RESET</strong> - re-start a stopped deck at the live position (a no-op while it is already streaming). The Rev pad is inert.</td></tr></tbody></table>
+<h4>Routing / stereo image</h4>
+<ul><li><strong>LEFT (DoubleMono):</strong> radio A hard-left, radio B hard-right (two radios across the stereo field).</li></ul>
+<ul><li><strong>CENTRE (Stereo):</strong> both radios centred.</li></ul>
+<ul><li><strong>RIGHT (GenerativeStereo):</strong> each radio at a random pan (re-rolled on entering the mode).</li></ul>
+<h4>Static (tuning hiss)</h4>
+<p>A filtered-noise "tuning hiss" crossfades in on each station change; <strong>ENV</strong> sets the level. With ENV high, sweeping PITCH switches stations immediately so you hear the dial-tuning churn + hiss; with ENV low, a sweep only opens the station you land on (no zipper). A non-playing deck (empty bank) outputs dead-air hiss at the ENV level.</p>
+<h4>Display</h4>
+<p>Per deck the ring shows the <strong>station position</strong> (a bright marker at <code>station/N</code>) over a faint base, green while playing, amber on a failed open / empty bank. Holding <strong>Alt</strong> shows the <strong>BANK</strong> selector (16 dots, the current bank bright). The routing switch lights the mode L/C/R indicator.</p>
+<hr>
+<h3>SD-card layout</h3>
+<p>You can download the original 8GB audio from the original radio music module from <a href="https://github.com/TomWhitwell/RadioMusic/wiki/Audio-for-the-SD-Card">here</a>. Place the files in the spotykach sd card as follows:</p>
+<p>A shared library both decks browse independently:</p>
+<pre><code class="lang-text">/radio/0/   01.raw 02.raw ...      (bank 0)
+/radio/1/   ...                    (bank 1)
+ ...
+/radio/15/  ...                    (bank 15, up to 48 stations each)</code></pre>
+<ul><li><strong>Banks</strong> = numbered folders <code>0</code>..<code>15</code> (mirrors RadioMusic's 16 folders).</li></ul>
+<ul><li><strong>Stations</strong> = <code>.raw</code>/<code>.wav</code> files in a bank. Use short <strong>8.3 names</strong> (e.g. <code>01.raw</code>); longer names are skipped.</li></ul>
+<ul><li><strong>macOS users:</strong> copying files to a FAT card in Finder leaves hidden <code>.DS_Store</code> and <code>._*</code> companion files; the engine filters them, but to clean a card you can run <code>dot_clean /Volumes/CARD</code> and delete any remaining <code>._*</code> / <code>.DS_Store</code>.</li></ul>
+<h4>Audio format</h4>
+<p>Stations are <strong>signed 16-bit mono PCM</strong>, in either format (mix freely in a bank):</p>
+<ul><li><strong><code>.raw</code></strong> - headerless (the original RadioMusic format). Carries no sample rate, so it assumes 48 kHz unless <code>rate.txt</code> overrides (below).</li></ul>
+<ul><li><strong><code>.wav</code></strong> - a 16-bit-mono PCM WAV. Self-describing: it carries <strong>its own sample rate</strong>, so a 44.1k WAV plays at correct pitch with <strong>no <code>rate.txt</code></strong>.</li></ul>
+<p>The firmware does no sample conversion, so a non-16-bit / stereo / float file is rejected (<code>.wav</code>) or plays as garbage (<code>.raw</code>). Stations can be arbitrarily long (the originals run ~25 min / 130 MB each) - streaming has no length cap.</p>
+<p>Convert sources with <a href="https://github.com/shakfu/sk-engines/blob/main/scripts/convert_radio_audio.py"><code>scripts/convert_radio_audio.py</code></a>. The original RadioMusic library is itself headerless 16-bit-mono <code>.raw</code> at <strong>44.1 kHz</strong>, so the converter resamples it to 48 kHz; <code>--format wav</code> writes self-describing WAV stations instead. The whole-card <code>mirror</code> command reproduces a stock card under <code>/radio</code>, preserving names:</p>
+<pre><code class="lang-text"># mirror a RadioMusic card's 0..15 folders into /radio/0..15 at 48 kHz, keeping names
+scripts/convert_radio_audio.py mirror --keep-names -o /Volumes/SD ~/Downloads/16gb-Disk
+
+# ...as self-describing WAV (no rate.txt needed)
+scripts/convert_radio_audio.py mirror --format wav --keep-names -o /Volumes/SD ~/Downloads/16gb-Disk
+
+# one bank from a folder of your own files
+scripts/convert_radio_audio.py from-dir --bank 0 -o /Volumes/SD ./samples
+
+# or a one-liner per file
+ffmpeg -i in.wav -ac 1 -ar 48000 -f s16le /Volumes/SD/radio/0/01.raw</code></pre>
+<h4>Source sample rate (<code>rate.txt</code>, <code>.raw</code> only)</h4>
+<p>A headerless <code>.raw</code> carries no sample rate, so the engine assumes <strong>48 kHz</strong>. To play an <strong>unconverted original card</strong> (44.1 kHz) at correct pitch without converting, drop a one-line text file <strong><code>/radio/rate.txt</code></strong> with the source rate:</p>
+<pre><code class="lang-text">44100</code></pre>
+<p>Any rate in 8000..192000 is accepted (RadioMusic's 11025/22050/44100/48000/96000 all work). It rebases playback so SIZE-at-noon gives correct pitch. <code>rate.txt</code> applies to <code>.raw</code> only - a <code>.wav</code> carries its own rate. Without conversion <em>or</em> <code>rate.txt</code>, an original 44.1 kHz card plays ~9% sharp (also pullable by ear with SIZE).</p>
+<p>So three ways to play an original 44.1 kHz library at correct pitch: <strong>convert to 48 kHz <code>.raw</code></strong> with <code>mirror</code>, <strong>convert to <code>.wav</code></strong> (<code>--format wav</code>, no <code>rate.txt</code>), or <strong>drop the <code>.raw</code> files in as-is and add <code>rate.txt</code></strong>.</p>
+<hr>
+<h3>Build / flash</h3>
+<pre><code class="lang-text">make -j8 ENGINE=radio        # build (~83% SRAM_EXEC)
+make engine-radio            # clean + build + DFU flash
+make -C host test            # host suites incl. test-radio</code></pre>

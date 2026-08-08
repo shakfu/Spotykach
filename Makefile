@@ -18,7 +18,7 @@ endif
 # clean`; pass TERMINAL=1 to them, e.g. `make engine-delay TERMINAL=1`).
 #
 # Footprint: enabling the channel costs ~28 KB of SRAM_EXEC (mostly the USB-device CDC stack, which a
-# normal build never links). Since SRAM_EXEC was rebalanced 186K -> 300K (see alt_sram.lds) EVERY engine
+# normal build never links). Since SRAM_EXEC was rebalanced 186K -> 300K (see linker/alt_sram.lds) EVERY engine
 # hosts it with margin - worst case granular at 69.9%. The old advice that granular/reso needed a
 # QSPI-execute build no longer applies. QSPI-execute engines (mosc/csound/chuck) additionally need
 # USB_MIDI=0, since MidiUsbHandler claims the same OTG_HS core.
@@ -120,8 +120,8 @@ else ifeq ($(ENGINE), pstretch)
 C_DEFS += -DSPK_ENGINE_PSTRETCH
 # pstretch needs ~291K of SRAM DATA for its FFT working set - nearly twice the next worst engine - so
 # it uses the data-favoured split (200K code / 312K data) rather than dragging the default down for
-# every other engine. Measured 2026-07-31; see alt_sram.lds.
-LDSCRIPT = alt_sram_data.lds
+# every other engine. Measured 2026-07-31; the LDSCRIPT selection lives with the other link settings
+# below - see linker/alt_sram_pstretch.lds for the measured band.
 # Real-time clean-room PaulStretch ambient time-smear. Self-contained DSP: a vendored radix-2 FFT
 # (engine/pstretch/fft.h), no CMSIS-DSP. Per-voice input rings + FFT scratch live in the SDRAM arena.
 # The Phase-2 SD-file source streams clips from the card via the shared streaming service (stream_deck.cpp
@@ -200,7 +200,7 @@ C_DEFS += -DPLAITS_USER_DATA_STUB
 OPT = -Os
 # The full 24-engine voice is ~292 KB of .text - it overflows the 186 KB SRAM_EXEC, so mosc is a
 # QSPI-EXECUTE target (like csound): build BOOT_QSPI with the QSPI linker script:
-#   make ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds   (or just: make engine-mosc)
+#   make ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds   (or just: make engine-mosc)
 # UNLIKE csound/chuck, mosc still synthesises from the platform engine arena (it placement-news its two
 # plaits::Voice + scratch into ctx.arena), so it does NOT set SPK_NO_ENGINE_ARENA - the 48 MB arena stays.
 # It reuses the csound engine's VTOR inject (engine-agnostic BOOT_QSPI vector-table fix).
@@ -221,18 +221,32 @@ ENGINE_SOURCES = src/engine/mosc/mosc_engine.cpp src/engine/csound/spotykach_qsp
 	$(MOSC_TP)/plaits/resources.cc \
 	$(STMLIB_TP)/dsp/units.cc $(STMLIB_TP)/utils/random.cc $(STMLIB_TP)/dsp/atan.cc
 else ifeq ($(ENGINE), graincloud)
-# graincloud is a self-contained variant of the granular engine (a copy under src/engine/graincloud/)
-# with its grain DSP replaced by a GrainflowLib cloud (gf_cloud.*). Its vendored GrainflowLib lives in
+# graincloud is THE GRANULAR ENGINE TREE compiled with -DSPK_GRAIN_GF, not a copy of it. Under that
+# flag Generator's per-sample Vox array is replaced by a per-block GrainflowLib cloud (gf_cloud.*) and
+# Deck gates it from the Play pad; every other file - Core, Buffer, Track, Vox, the FX, the modulators
+# - is the same source, compiled twice into two different images. Its vendored GrainflowLib lives in
 # src/engine/graincloud/thirdparty/grainflow/.
-C_DEFS += -DSPK_ENGINE_GRAINCLOUD
+#
+# It used to be a byte-for-byte fork: 35 of 42 files identical, ~3,400 duplicated lines that a fix to
+# granular/ silently did not reach (and graincloud is the PUBLISHED one of the pair). The three files
+# that genuinely differ now carry `#if SPK_GRAIN_GF` blocks in the granular tree - generator.h,
+# generator.cpp and two lines of deck.cpp - so granular/ stays exactly where upstream put it and stays
+# diffable against it, which a shared "graincore" directory would have cost.
+#
+# Include order matters: src/engine/graincloud comes FIRST so granular/generator.cpp's guarded
+# `#include "gf_cloud.h"` resolves (it is not in granular/, so the quoted lookup falls through to -I).
+C_DEFS += -DSPK_ENGINE_GRAINCLOUD -DSPK_GRAIN_GF=1
 # gfSyn pulls M_PI via <cmath>, which strict -std=c++17 does not expose on arm-none-eabi.
 C_DEFS += -DM_PI=3.14159265358979323846
-# Granular + the GrainflowLib templates overflow the 186 KB execution SRAM at -O2; build at -Os to fit
+# Granular + the GrainflowLib templates overflow the execution SRAM at -O2; build at -Os to fit
 # (as reso/reverb do). The M7 @ 480 MHz has ample compute headroom.
 OPT = -Os
 GRAINCLOUD_TP  = src/engine/graincloud/thirdparty
-GRAINCLOUD_INC = -I$(GRAINCLOUD_TP)
-ENGINE_SOURCES = $(wildcard src/engine/graincloud/*.cpp)
+GRAINCLOUD_INC = -Isrc/engine/graincloud -I$(GRAINCLOUD_TP) -Isrc/engine/granular
+# The granular tree MINUS its IEngine wrapper (graincloud_engine.cpp replaces granular_engine.cpp),
+# plus graincloud's own two files. generator.cpp is shared - the SPK_GRAIN_GF branches are inside it.
+ENGINE_SOURCES = $(filter-out src/engine/granular/granular_engine.cpp, $(wildcard src/engine/granular/*.cpp)) \
+                 $(wildcard src/engine/graincloud/*.cpp)
 # gen~ engines (ENGINE=gen_<name>) are appended below by scripts/gen_engine.py, one marker-delimited
 # `else ifeq` block per export. They use the genlib-isolation bridge from gen-dsp + the shared
 # src/engine/gen/ family (GenEngine<W> + the arena-bound genlib runtime). See `make gen-engines`.
@@ -273,7 +287,7 @@ ENGINE_SOURCES =
 else ifeq ($(ENGINE), csound)
 # Csound is a QSPI-ONLY target: it links libcsound.a (~2 MB code) which can't fit the 186 KB
 # SRAM_EXEC budget, so it must run from QSPI. Build it BOOT_QSPI with the QSPI linker script:
-#   make ENGINE=csound APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds   (or just: make engine-csound)
+#   make ENGINE=csound APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds   (or just: make engine-csound)
 # Prereq: libcsound.a (scripts/fetch_csound.sh). engine_select.h maps SPK_ENGINE_CSOUND ->
 # CsoundEngine; see docs/dev/csound-impl.md.
 C_DEFS += -DSPK_ENGINE_CSOUND
@@ -297,7 +311,7 @@ LDFLAGS += -Wl,--wrap=malloc,--wrap=free,--wrap=calloc,--wrap=realloc,--wrap=ali
 else ifeq ($(ENGINE), chuck)
 # ChucK is a QSPI-ONLY target (like Csound): it links libchuck.a (~1.1 MB code) which can't fit the
 # 186 KB SRAM_EXEC budget, so it must run from QSPI. Build it BOOT_QSPI with the QSPI linker script:
-#   make ENGINE=chuck APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi_chuck.lds   (or just: make engine-chuck)
+#   make ENGINE=chuck APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi_chuck.lds   (or just: make engine-chuck)
 # Prereq: libchuck.a + the shim sysroot (scripts/fetch_chuck.sh). engine_select.h maps SPK_ENGINE_CHUCK
 # -> ChuckEngine; see docs/dev/chuck-impl.md.
 C_DEFS += -DSPK_ENGINE_CHUCK
@@ -336,14 +350,23 @@ LDFLAGS += -u _printf_float
 # Route ChucK's C-malloc family to the SDRAM pool (chuck_alloc.cpp); the platform heap stays in SRAM.
 LDFLAGS += -Wl,--wrap=malloc,--wrap=free,--wrap=calloc,--wrap=realloc
 else
-$(error Unknown ENGINE '$(ENGINE)' - use 'granular', 'passthrough', 'delay', 'qdelay', 'edrums', 'reso', 'mosc', 'graincloud', 'tape', 'reverb', 'shuttle', 'radio', 'bard', 'chorus', 'filter', 'voice', 'csound', or 'chuck')
+$(error Unknown ENGINE '$(ENGINE)' - use 'granular', 'passthrough', 'delay', 'qdelay', 'edrums', 'reso', 'mosc', 'graincloud', 'tape', 'radio', 'bard', 'glitch', 'pstretch', 'reverb', 'shuttle', 'softcut', 'gigaverb', 'chorus', 'filter', 'voice', 'csound', or 'chuck')
 endif
+# The engine list in that error is HAND-MAINTAINED and had drifted (it was missing glitch, pstretch,
+# softcut and gigaverb). Add a new engine's name to it, and to the matching message in CMakeLists.txt.
+# Do not put anything between the `else` and the `$(error ...)` line: scripts/gen_engine.py and
+# gen_faust_engine.py locate this switch by the literal string "else\n$(error Unknown ENGINE" and insert
+# generated engine blocks immediately before it, so a line in that gap breaks both generators.
 
 # Opt-in (make ... METER=1): enable the on-device CPU load meter (app.cpp's CpuLoadMeter). It writes
 # Max/Avg/Min processing load % to the external USB CDC (LOGGER_EXTERNAL port) every ~250 ms using a
 # direct NON-BLOCKING transmit (drops if the host isn't draining) - so the meter can never hang the main
 # loop the way the daisy Logger does. No INFS_LOG/Logger dependency, so it adds almost no code. Read it
 # over USB serial (keep the port open). Compiled under METER, works at the shipping -O2.
+# NOTE: METER=1 and TERMINAL=1 are mutually exclusive - the meter's CDC device claims the same OTG core
+# the terminal channel needs. With TERMINAL=1 you do not want this flag anyway: a terminal build drives
+# the same CpuLoadMeter and reports it on request via `query cpu` / `cpumin` / `cpumax` (+ `reset cpu`),
+# with no second USB device. See docs/dev/terminal-dispatch.md "CPU load".
 ifeq ($(METER), 1)
 C_DEFS += -DMETER
 endif
@@ -351,7 +374,7 @@ endif
 # pstretch FFT/analysis window override. The default (8192 - a lusher wash) lives in pstretch_engine.h; opt in
 # to the lighter, meter-verified window with `make ENGINE=pstretch WINDOW=4096` (avg ~32% / max ~64% CPU on
 # hardware). 8192 ~doubles the FFT working set (ola/fifo move to the SDRAM arena there); it links + fits and
-# runs clean on hardware (flashed 2026-07-01) - re-measure CPU with METER=1 to get an exact number.
+# runs clean on hardware (flashed 2026-07-01) - re-measure CPU with TERMINAL=1 + `query cpu` (or METER=1) for an exact number.
 ifdef WINDOW
 C_DEFS += -DPSTRETCH_WINDOW=$(WINDOW)
 endif
@@ -396,9 +419,12 @@ CMSIS_DSP_SRC_DIR = ${LIBDAISY_DIR}/Drivers/CMSIS-DSP/Source
 
 # Daisy Bootloader - SRAM Linkage
 APP_TYPE = BOOT_SRAM
-# `?=` so an engine block above can select a different split (see pstretch). A command-line
-# LDSCRIPT= still wins over both, which is how the QSPI-execute engines work.
-LDSCRIPT ?= alt_sram.lds
+# Per-engine linker script. Everything uses linker/alt_sram.lds (300K/212K code/data) EXCEPT pstretch, which is
+# the one engine large in both halves at once and does not link at that split - see the header of
+# linker/alt_sram_pstretch.lds for the measured band. Selected on ENGINE rather than left to the engine-pstretch
+# target, so a plain `make ENGINE=pstretch` is correct too; an explicit LDSCRIPT= on the command line
+# still wins, which is what the QSPI targets (mosc/csound/chuck) rely on.
+LDSCRIPT = $(if $(filter pstretch,$(ENGINE)),linker/alt_sram_pstretch.lds,linker/alt_sram.lds)
 BOOT_BIN = bootloader-spotykach-v2.bin
 
 # USB MIDI (device MIDI on the rear USB-C) pulls libDaisy's USB-device + MIDI-class code (~3 KB) into
@@ -458,8 +484,31 @@ build/stream_deck.o build/fat_file.o build/buffer.sdram.o: build/.engine-stamp
 # NOTE: after `scripts/gen_engine.py --remove`, run `make clean` once - the removed engine's stale
 # build/_ext_daisy.d still names its now-deleted source, which make rejects before any recipe runs.
 build/_ext_daisy.o build/genlib_arena.o: build/.engine-stamp
+# Same class of collision between reso and mosc: BOTH vendor a file called `resources.cc` (Rings' and
+# Plaits' wavetables), which compile to the same build/resources.o. A `reso` -> `mosc` switch without
+# this reuses Rings' object and the link fails with `undefined reference to plaits::lut_sine` - which
+# reads like a missing source rather than a stale object, and is why `make engine-mosc` opens with a
+# full `make clean`. (The clean is still there and still correct; this makes a plain
+# `make ENGINE=mosc` after a reso build work too, as the README promises for every engine.)
+build/resources.o: build/.engine-stamp
+# Basename-colliding objects are DELETED on an engine switch, along with their .d files, rather than
+# merely declared out of date. Listing them as prerequisites (above) is not enough: the stale
+# build/<name>.d still names the OTHER engine's source as a prerequisite of build/<name>.o, and the
+# pattern rule compiles `$<` - the first prerequisite - so make dutifully rebuilds resources.o from
+# rings/resources.cc during a mosc build and the link still fails on `plaits::lut_sine`. Removing the
+# .d removes the stale prerequisite, after which vpath resolves against the current engine's sources.
+# This is also what the gen~ note above warns about for `--remove`; deleting the .d handles that too.
+#
+# The list: three of these are reso-vs-mosc, because Rings and Plaits are the same author's codebases
+# and reuse file names (rings/dsp/{resonator,string}.cc + rings/resources.cc vs the Plaits equivalents).
+# The other two are the gen~ wrapper objects, whose names gen-dsp fixes across exports. Regenerate with:
+#
+#   find src -name '*.cc' -o -name '*.cpp' | xargs -n1 basename | sort | uniq -d
+#
+ENGINE_COLLIDING_OBJS = resources resonator string _ext_daisy genlib_arena
 build/.engine-stamp: FORCE | $(BUILD_DIR)
-	@echo '$(ENGINE)' | cmp -s - $@ 2>/dev/null || echo '$(ENGINE)' > $@
+	@echo '$(ENGINE)' | cmp -s - $@ 2>/dev/null || { echo '$(ENGINE)' > $@; \
+	  rm -f $(addprefix $(BUILD_DIR)/,$(addsuffix .o,$(ENGINE_COLLIDING_OBJS)) $(addsuffix .d,$(ENGINE_COLLIDING_OBJS))); }
 
 # Same trick for the baked-in version string: -DSPK_VERSION_STR is invisible to make's dependency
 # graph, so without this a new commit (new `git describe`) would leave a stale version in the
@@ -485,9 +534,31 @@ build/.version-stamp: FORCE | $(BUILD_DIR)
 # whose stale subset depends on timing. That is exactly the layout-mismatch case above, and it bit us
 # on hardware (see docs/dev/terminal-impl.md). Deleting the objects is immune to timestamp resolution.
 #
-# The stamps are prerequisites of every object, so all three recipes run before any compilation starts;
+# The stamps are prerequisites of every object, so all the recipes run before any compilation starts;
 # the rm therefore cannot race a concurrent -j compile.
-$(OBJECTS): build/.terminal-stamp build/.usbdiag-stamp build/.termport-stamp
+#
+# -DSPK_GRAIN_GF is in the same class and is why granular <-> graincloud needs one. Those two engines
+# compile THE SAME granular tree to the same object basenames (build/generator.o, build/deck.o, ...),
+# and the flag adds members to Generator - so a `make ENGINE=granular` over a stale graincloud tree
+# would otherwise reuse objects whose Generator is two members longer, i.e. the layout mismatch above.
+# The .engine-stamp above cannot cover this: it only re-makes a named handful of objects, and here the
+# whole shared tree is affected. (Before the dedup the two engines had separate directories and this
+# could not arise; deleting ~3,400 duplicated lines is what makes the stamp necessary.)
+#
+# -DSPK_USB_MIDI needs one for a subtler reason than layout: it defaults ON for BOOT_QSPI and OFF
+# otherwise (see USB_MIDI below), so switching from any SRAM engine to a QSPI one reuses platform
+# objects compiled WITHOUT it. The result builds, links, boots, and silently ignores device MIDI -
+# byte-for-byte the failure the CMake gap produced (see CHANGELOG), reachable from the Makefile too:
+# a clean `mosc` image is ~304 KB, the same image built over a stale reso tree ~292 KB.
+$(OBJECTS): build/.terminal-stamp build/.usbdiag-stamp build/.termport-stamp build/.grainflavor-stamp \
+            build/.usbmidi-stamp
+
+build/.usbmidi-stamp: FORCE | $(BUILD_DIR)
+	@echo '$(USB_MIDI)' | cmp -s - $@ 2>/dev/null || { echo '$(USB_MIDI)' > $@; rm -f $(BUILD_DIR)/*.o; }
+
+build/.grainflavor-stamp: FORCE | $(BUILD_DIR)
+	@echo '$(ENGINE)' | grep -qx graincloud && echo 1 > $(BUILD_DIR)/.gf-want || echo 0 > $(BUILD_DIR)/.gf-want
+	@cmp -s $(BUILD_DIR)/.gf-want $@ 2>/dev/null || { cp $(BUILD_DIR)/.gf-want $@; rm -f $(BUILD_DIR)/*.o; }
 
 build/.terminal-stamp: FORCE | $(BUILD_DIR)
 	@echo '$(TERMINAL)' | cmp -s - $@ 2>/dev/null || { echo '$(TERMINAL)' > $@; rm -f $(BUILD_DIR)/*.o; }
@@ -566,10 +637,10 @@ engine-reso:
 	$(MAKE) -j8 ENGINE=reso
 	$(MAKE) ENGINE=reso program-dfu
 
-# mosc is QSPI-execute (BOOT_QSPI + alt_qspi.lds): the full 24-engine Plaits voice is ~292 KB of .text,
+# mosc is QSPI-execute (BOOT_QSPI + linker/alt_qspi.lds): the full 24-engine Plaits voice is ~292 KB of .text,
 # too big for the 186 KB SRAM_EXEC. Same recipe as csound but it KEEPS the engine arena (no own pool).
 # The leading `-` on program-dfu ignores the benign get_status error on the QSPI `:leave`.
-MOSC_FLAGS = ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds
+MOSC_FLAGS = ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds
 engine-mosc:
 	$(MAKE) clean
 	$(MAKE) -j8 $(MOSC_FLAGS)
@@ -622,7 +693,7 @@ engine-pstretch:
 # Csound is QSPI-only (BOOT_QSPI + the SDRAM-pool linker script, links libcsound.a). Put the board
 # in DFU before the build finishes - program-dfu flashes once (no retry loop). The leading `-`
 # ignores the benign get_status error on the QSPI `:leave` (the flash itself succeeds).
-CSOUND_FLAGS = ENGINE=csound APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds
+CSOUND_FLAGS = ENGINE=csound APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds
 engine-csound:
 	$(MAKE) clean
 	$(MAKE) -j8 $(CSOUND_FLAGS)
@@ -632,9 +703,9 @@ engine-csound:
 program-csound:
 	-$(MAKE) $(CSOUND_FLAGS) program-dfu
 
-# ChucK is QSPI-only, same recipe as csound but with its own linker script (alt_qspi_chuck.lds reclaims
-# the unused SRAM_EXEC region for .bss - csound keeps the stock alt_qspi.lds). Links libchuck.a.
-CHUCK_FLAGS = ENGINE=chuck APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi_chuck.lds
+# ChucK is QSPI-only, same recipe as csound but with its own linker script (linker/alt_qspi_chuck.lds reclaims
+# the unused SRAM_EXEC region for .bss - csound keeps the stock linker/alt_qspi.lds). Links libchuck.a.
+CHUCK_FLAGS = ENGINE=chuck APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi_chuck.lds
 engine-chuck:
 	$(MAKE) clean
 	$(MAKE) -j8 $(CHUCK_FLAGS)
@@ -765,9 +836,13 @@ CONTROL_D2    := $(patsubst docs/diagrams/controls/%.json,docs/diagrams/%-contro
 # hand-written d2 sources, excluding the generated *-controls.d2 so each SVG is listed once
 STATIC_D2     := $(filter-out docs/diagrams/%-controls.d2,$(wildcard docs/diagrams/*.d2))
 DIAGRAM_SVG   := $(sort $(patsubst docs/diagrams/%.d2,docs/media/%.svg,$(STATIC_D2) $(CONTROL_D2)))
+# PDFs for the CONTROL diagrams only. They are the ones the web front-end shows and the ones worth
+# printing and pinning next to the hardware; the architecture diagrams are read on screen. d2 renders
+# PDF natively, so this is the same source and the same tool, not a second pipeline.
+CONTROL_PDF   := $(patsubst docs/diagrams/%.d2,docs/media/%.pdf,$(CONTROL_D2))
 
 .PHONY: diagrams controls-diagrams
-diagrams: $(DIAGRAM_SVG)
+diagrams: $(DIAGRAM_SVG) $(CONTROL_PDF)
 	@echo "diagrams up to date in docs/media/"
 
 controls-diagrams: $(CONTROL_D2)
@@ -775,6 +850,19 @@ controls-diagrams: $(CONTROL_D2)
 # JSON control-spec + template -> generated <engine>-controls.d2
 docs/diagrams/%-controls.d2: docs/diagrams/controls/%.json docs/diagrams/controls-template.d2 scripts/gen_controls_diagram.py
 	$(DIAGRAM_PY) scripts/gen_controls_diagram.py $< -o $@
+
+# SVG -> PDF, via librsvg rather than d2.
+#
+# d2 CAN emit PDF, but only by driving a headless Chromium through Playwright, which it downloads on
+# first use - and that download is currently 404ing from its CDN. rsvg-convert renders the SVG d2
+# already produced, needs no browser, and keeps the text as text: the output carries the embedded
+# fonts rather than rasterising the labels, which is the whole point of shipping a PDF of a diagram
+# somebody intends to print.
+RSVG ?= rsvg-convert
+docs/media/%.pdf: docs/media/%.svg
+	@command -v $(RSVG) >/dev/null 2>&1 || { echo "$(RSVG) not found - install librsvg (brew install librsvg)"; exit 1; }
+	@mkdir -p $(@D)
+	$(RSVG) -f pdf -o $@ $<
 
 # any d2 source -> SVG
 docs/media/%.svg: docs/diagrams/%.d2
@@ -800,6 +888,57 @@ RELEASE_ENGINES ?=
 dist:
 	RELEASE_ENGINES="$(RELEASE_ENGINES)" $(REL_PY) scripts/build_release.py $(VERSION) $(if $(WITH_HEX),--hex,)
 
+# The same release build, driven through the opt-in CMake path instead of this Makefile. Same script,
+# so the manifest, SHA256SUMS, release notes and the in-binary banner check are identical - only the
+# compiler driver differs.
+#
+# Output goes to dist-cmake/<version>/, never dist/. That is deliberate: `make gh-release` globs
+# dist/<version>/* and uploads it, so a shared output directory would make it possible to publish
+# CMake-built binaries as an official release just by running two targets in the wrong order. Keeping
+# the trees apart also lets you build both and diff them, which is the reason to want this at all.
+#
+# These binaries are NOT byte-identical to the canonical ones and are not for shipping: the CMake link
+# resolves newlib's exit/atexit family from full libc rather than nano, costing ~1.25 KB of SRAM_EXEC,
+# and it emits objects in a different order so nearly every address shifts. Both are understood and
+# deliberate - see docs/dev/cmake-gap.md. Use this to compare the two build systems across the whole
+# engine set, not to produce artifacts for users.
+#   make dist-cmake                              # curated engine set, describe-derived version
+#   make dist-cmake VERSION=0.6.2                # explicit version (banner is pinned to it)
+#   make dist-cmake RELEASE_ENGINES="delay reso"  # a subset, for a quick comparison
+.PHONY: dist-cmake
+dist-cmake:
+	RELEASE_ENGINES="$(RELEASE_ENGINES)" $(REL_PY) scripts/build_release.py $(VERSION) --cmake $(if $(WITH_HEX),--hex,)
+
+# Build the base SD card and package it into dist/<version>/sk-card-<version>.zip, so a user can
+# download-and-unzip a correct card instead of hand-authoring eight folder layouts in four audio
+# formats. `make gh-release` globs dist/<version>/*, so the card ships with the binaries for free.
+#
+# Like build_release.py this is deliberately STDLIB-ONLY (plain python3, no venv, no ffmpeg): the demo
+# audio is synthesized, not sampled, which also means the card carries no third-party content and the
+# zip is byte-reproducible for checksumming. Override the interpreter with REL_PY.
+#   make sdcard                      # describe-derived version, with demo audio
+#   make sdcard VERSION=0.6.2        # explicit version (match the tag you will create)
+#   make sdcard SDCARD_DEMO=0        # skeleton + configs + READMEs only, no audio
+#   make sdcard SDCARD_OUT=/media/SK # write the card straight to a mounted card instead of a zip
+SDCARD_DEMO ?= 1
+.PHONY: sdcard
+sdcard:
+ifeq ($(SDCARD_OUT),)
+	$(REL_PY) scripts/sk_card.py dist $(VERSION) $(if $(filter 0,$(SDCARD_DEMO)),--no-demo,)
+else
+	$(REL_PY) scripts/sk_card.py init $(SDCARD_OUT) --force $(if $(filter 0,$(SDCARD_DEMO)),--no-demo,)
+	$(REL_PY) scripts/sk_card.py verify $(SDCARD_OUT)
+endif
+
+# Check a card (yours or a user's) against what the firmware actually accepts. Reports wrong formats,
+# names too long for the directory scan, files under the 32 KB scan floor, macOS metadata stubs, and
+# malformed config.txt - each with the fix. Exits non-zero if anything will not work.
+#   make check-sdcard CARD=/media/SK
+.PHONY: check-sdcard
+check-sdcard:
+	@test -n "$(CARD)" || { echo "usage: make check-sdcard CARD=/path/to/card"; exit 1; }
+	$(REL_PY) scripts/sk_card.py verify $(CARD)
+
 # Upload an already-built dist/<version>/ as a GitHub release (requires `gh auth login`). Tag the
 # release with the SAME bare version so the in-binary banner matches. Run `make dist VERSION=x` first.
 .PHONY: gh-release
@@ -823,6 +962,64 @@ test-scripts-deps:
 test-scripts:
 	@$(TEST_PY) -c 'import pytest' 2>/dev/null || $(TEST_PY) -m pip install -q --group dev
 	$(TEST_PY) -m pytest scripts/
+
+# Regenerate the web front-end's data files and cross-language test fixtures (docs/dev/web-frontend.md).
+# The browser app in web/ consumes the SD card rules AS DATA rather than re-declaring them in
+# JavaScript, so card_layout.json is a build artifact of scripts/card_layout.py; a hand-ported copy
+# would reintroduce exactly the drift that module exists to prevent. The output is committed so the
+# page is a static deploy with no build step - run this after touching card_layout.py or card_audio.py,
+# and `make test-scripts` will fail if you forget.
+#   make web-data                    # regenerate web/card_layout.json, patches.json and the fixtures
+.PHONY: web-data
+web-data:
+	$(REL_PY) scripts/web_export.py
+
+# The web front-end is TypeScript, bundled by bun to web/dist/app.js. The bundle is COMMITTED so the
+# page stays a static deploy - GitHub Pages serves web/ as-is with no CI step - which means it can also
+# go stale, and `make test-web` fails if it is older than src/.
+#   make web-build                   # rebuild web/dist/app.js after editing web/src/
+BUN ?= $(shell command -v bun 2>/dev/null)
+.PHONY: web-build test-web web-serve
+web-build:
+	@test -n "$(BUN)" || { echo "bun not found - install it (https://bun.sh) or set BUN=/path/to/bun"; exit 1; }
+	@# The CSS step shells out to `tailwindcss`, which lives in web/node_modules. A checkout that has
+	@# only ever SERVED the page (which needs no install, the bundle being committed) has no node_modules
+	@# and fails here with a bare `tailwindcss: command not found`. Install on demand instead. The same
+	@# guard is in test-web below, but that one only fires when node_modules is missing entirely - a
+	@# partial tree (typescript present, tailwind not) got past it.
+	@cd web && test -x node_modules/.bin/tailwindcss || $(BUN) install
+	cd web && $(BUN) run build
+
+# Run the web front-end's test suite: the WAV writers asserted byte-identical to card_audio.py, the
+# verify checker asserted to reach the same verdicts as sk_card.py on a deliberately-broken card, the
+# view-models driven by fake ports (no DOM, no device), and the views mounted against a minimal DOM
+# shim. Type-checks first, in two passes - `src/` strictly, the tests with null-checking relaxed.
+#
+# `bun install` is needed once, for TypeScript itself; nothing else is a dependency and nothing ships
+# from node_modules.
+#   make test-web
+test-web:
+	@test -n "$(BUN)" || { echo "bun not found - install it (https://bun.sh) or set BUN=/path/to/bun"; exit 1; }
+	@cd web && test -d node_modules || (cd web && $(BUN) install)
+	cd web && $(BUN) run typecheck
+	cd web && $(BUN) test/run.ts
+
+# Serve web/ locally. The browser APIs this app uses (File System Access, WebSerial) are only offered
+# over HTTPS or localhost, and ES modules will not load from a file:// URL at all, so opening
+# web/index.html directly does not work. Still a plain static server: the TypeScript is bundled ahead
+# of time, so serving needs no toolchain at all.
+#   make web-serve                   # builds, then http://localhost:8000
+#   make web-serve SERVE_BIND=0.0.0.0   # ...and reachable from the LAN, to test on a phone
+#
+# Bound to the loopback address, NOT python's 0.0.0.0 default: this target said localhost while
+# actually listening on every interface, so a laptop on a cafe network was serving the tree to it.
+# Nothing here is secret, but a static server that follows symlinks and has no path allowlist is not
+# something to hand to a strange network by accident. Override SERVE_BIND when LAN access is the point.
+SERVE_PORT ?= 8000
+SERVE_BIND ?= 127.0.0.1
+web-serve: web-build
+	@echo "http://localhost:$(SERVE_PORT)  (Ctrl-C to stop)"
+	@cd web && $(REL_PY) -m http.server $(SERVE_PORT) --bind $(SERVE_BIND)
 
 # Vendored Daisy archives. The core Makefile's link step (-ldaisy -ldaisysp) needs these built, but a
 # fresh checkout has source-only submodules, so a bare `make` used to fail at link with "cannot find
@@ -848,3 +1045,71 @@ libs:
 clean-libs:
 	cd $(LIBDAISY_DIR) && $(MAKE) clean
 	cd $(DAISYSP_DIR) && $(MAKE) clean
+
+# ---------------------------------------------------------------------------------------------------
+# Aggregate test target + help
+# ---------------------------------------------------------------------------------------------------
+#
+# `test` MUST be .PHONY. Without it, make matches the `test/` DIRECTORY, decides it is up to date, and
+# a bare `make test` silently does nothing - which is exactly what the README used to have to warn
+# about. The four suites below are independent and are the whole off-target contract; the on-target
+# one is `make test-hw` (needs a flashed TERMINAL=1 device, and skips cleanly without one).
+.PHONY: test
+test:
+	$(MAKE) check-boundary
+	$(MAKE) -C host test
+	$(MAKE) -C test test
+	$(MAKE) test-scripts
+	$(MAKE) test-web
+
+# `make help` - the discoverable index. This Makefile has ~50 targets and a dozen toggles; before this
+# they were findable only by reading the file or the README end to end.
+.PHONY: help
+help:
+	@echo 'sk-engines - a Spotykach platform/engine firmware.  https://github.com/shakfu/sk-engines'
+	@echo ''
+	@echo 'Build (engine chosen at build time; switching ENGINE needs no clean):'
+	@echo '  make -j8 libs                 build the vendored libDaisy + DaisySP archives (once)'
+	@echo '  make -j8                      build the default engine (ENGINE=granular) -> build/spotykach.bin'
+	@echo '  make -j8 ENGINE=<name>        build another SRAM engine (see the list below)'
+	@echo '  make program-dfu              flash whatever is already in build/ (device in DFU mode)'
+	@echo '  make engine-<name>            clean + build + flash in one step, e.g. make engine-delay'
+	@echo ''
+	@echo 'SRAM engines (ENGINE=):'
+	@echo '  granular graincloud tape shuttle softcut radio bard pstretch'
+	@echo '  delay qdelay reverb gigaverb chorus filter voice'
+	@echo '  edrums reso glitch passthrough'
+	@echo 'QSPI engines (own one-shot target, too large for execution SRAM):'
+	@echo '  make engine-mosc              no prerequisites; Plaits DSP is vendored in-tree'
+	@echo '  make engine-csound            needs scripts/fetch_csound.sh once (libcsound.a)'
+	@echo '  make engine-chuck             needs scripts/fetch_chuck.sh once (libchuck.a)'
+	@echo ''
+	@echo 'Build toggles (append to any build):'
+	@echo '  DEBUG=1        UART logging                LOFI_INT16=1  16-bit loop buffer (2x record time)'
+	@echo '  TERMINAL=1     USB-C command channel       METER=1       CPU-load meter over CDC (excludes TERMINAL)'
+	@echo '  USBDIAG=1      USB bring-up blink codes    WINDOW=<n>    pstretch FFT window (4096/8192)'
+	@echo ''
+	@echo 'Test (off-target, no hardware needed):'
+	@echo '  make test                     all four suites + the boundary guard'
+	@echo '  make -C host test             engine + DSP suites          make -C test test    standalone unit tests'
+	@echo '  make test-scripts             the Python host tooling       make test-web        the browser front end'
+	@echo '  make check-boundary           platform must not include engine DSP'
+	@echo 'Test (on-target, needs a flashed TERMINAL=1 device; skips cleanly without one):'
+	@echo '  make test-hw                  pytest harness over USB-C     python tools/skterm.py   hand REPL'
+	@echo ''
+	@echo 'SD card:'
+	@echo '  make sdcard SDCARD_OUT=/media/SK    build a complete card (folders, configs, demo audio)'
+	@echo '  make check-sdcard CARD=/media/SK    explain anything that will not work, with the fix'
+	@echo ''
+	@echo 'Web front end (same rules as the CLI, exported as data):'
+	@echo '  make web-serve                build + serve on http://localhost:8000'
+	@echo '  make web-data                 regenerate web/ data + fixtures after touching scripts/'
+	@echo '  make web-build                rebuild web/dist/ after touching web/src/'
+	@echo ''
+	@echo 'Release + codegen:'
+	@echo '  make dist                     build the curated engine set into dist/<version>/'
+	@echo '  make faust-kernels            regenerate the Faust engine kernels'
+	@echo '  make gen-engines              regenerate the gen~ engine directories'
+	@echo '  make diagrams                 regenerate the control-surface SVGs'
+	@echo ''
+	@echo 'Docs: README.md - docs/architecture.md - docs/engines/ - docs/engine-types/ - TODO.md'

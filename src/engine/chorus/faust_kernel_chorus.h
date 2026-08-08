@@ -15,7 +15,7 @@
 namespace spotykach { namespace fx_chorus {
 /* ------------------------------------------------------------
 name: "chorus"
-Code generated with Faust 2.85.5 (https://faust.grame.fr)
+Code generated with Faust 2.85.9 (https://faust.grame.fr)
 Compilation options: -lang cpp -fpga-mem-th 4 -ct 1 -es 1 -mcd 16 -mdd 1024 -mdy 33 -single -ftz 0
 ------------------------------------------------------------ */
 
@@ -42,49 +42,6 @@ Compilation options: -lang cpp -fpga-mem-th 4 -ct 1 -es 1 -mcd 16 -mdd 1024 -mdy
 #define RESTRICT __restrict__
 #endif
 
-class mydspSIG0 {
-	
-  private:
-	
-	int iVec2[2];
-	int iRec3[2];
-	int fSampleRate;
-	
-  public:
-	
-	int getNumInputsmydspSIG0() {
-		return 0;
-	}
-	int getNumOutputsmydspSIG0() {
-		return 1;
-	}
-	
-	void instanceInitmydspSIG0(int sample_rate) {
-		fSampleRate = sample_rate;
-		for (int l5 = 0; l5 < 2; l5 = l5 + 1) {
-			iVec2[l5] = 0;
-		}
-		for (int l6 = 0; l6 < 2; l6 = l6 + 1) {
-			iRec3[l6] = 0;
-		}
-	}
-	
-	void fillmydspSIG0(int count, float* table) {
-		for (int i1 = 0; i1 < count; i1 = i1 + 1) {
-			iVec2[0] = 1;
-			iRec3[0] = (iVec2[1] + iRec3[1]) % 65536;
-			table[i1] = std::sin(9.58738e-05f * static_cast<float>(iRec3[0]));
-			iVec2[1] = iVec2[0];
-			iRec3[1] = iRec3[0];
-		}
-	}
-
-};
-
-static mydspSIG0* newmydspSIG0() { return (mydspSIG0*)new mydspSIG0(); }
-static void deletemydspSIG0(mydspSIG0* dsp) { delete dsp; }
-
-static float ftbl0mydspSIG0[65536];
 
 class mydsp : public dsp {
 	
@@ -105,11 +62,11 @@ class mydsp : public dsp {
 	float fRec2[2];
 	float fConst3;
 	FAUSTFLOAT fHslider3;
-	float fRec5[2];
 	float fRec4[2];
-	float fVec3[4096];
+	float fRec3[2];
+	float fVec2[4096];
 	float fConst4;
-	float fRec6[2];
+	float fRec5[2];
 	
  public:
 	mydsp() {
@@ -122,8 +79,6 @@ class mydsp : public dsp {
 	mydsp& operator=(const mydsp&) = default;
 	
 	void metadata(Meta* m) { 
-		m->declare("basics.lib/name", "Faust Basic Element Library");
-		m->declare("basics.lib/version", "1.22.0");
 		m->declare("compile_options", "-lang cpp -fpga-mem-th 4 -ct 1 -es 1 -mcd 16 -mdd 1024 -mdy 33 -single -ftz 0");
 		m->declare("delays.lib/name", "Faust Delay Library");
 		m->declare("delays.lib/version", "1.2.0");
@@ -135,6 +90,8 @@ class mydsp : public dsp {
 		m->declare("maths.lib/name", "Faust Math Library");
 		m->declare("maths.lib/version", "2.9.0");
 		m->declare("name", "chorus");
+		m->declare("oscillators.lib/lf_sawpos:author", "Bart Brouns, revised by Stéphane Letz");
+		m->declare("oscillators.lib/lf_sawpos:licence", "STK-4.3");
 		m->declare("oscillators.lib/name", "Faust Oscillator Library");
 		m->declare("oscillators.lib/version", "1.7.0");
 		m->declare("platform.lib/name", "Generic Platform Library");
@@ -151,10 +108,6 @@ class mydsp : public dsp {
 	}
 	
 	static void classInit(int sample_rate) {
-		mydspSIG0* sig0 = newmydspSIG0();
-		sig0->instanceInitmydspSIG0(sample_rate);
-		sig0->fillmydspSIG0(65536, ftbl0mydspSIG0);
-		deletemydspSIG0(sig0);
 	}
 	
 	virtual void instanceConstants(int sample_rate) {
@@ -190,17 +143,17 @@ class mydsp : public dsp {
 		for (int l4 = 0; l4 < 2; l4 = l4 + 1) {
 			fRec2[l4] = 0.0f;
 		}
-		for (int l7 = 0; l7 < 2; l7 = l7 + 1) {
-			fRec5[l7] = 0.0f;
+		for (int l5 = 0; l5 < 2; l5 = l5 + 1) {
+			fRec4[l5] = 0.0f;
+		}
+		for (int l6 = 0; l6 < 2; l6 = l6 + 1) {
+			fRec3[l6] = 0.0f;
+		}
+		for (int l7 = 0; l7 < 4096; l7 = l7 + 1) {
+			fVec2[l7] = 0.0f;
 		}
 		for (int l8 = 0; l8 < 2; l8 = l8 + 1) {
-			fRec4[l8] = 0.0f;
-		}
-		for (int l9 = 0; l9 < 4096; l9 = l9 + 1) {
-			fVec3[l9] = 0.0f;
-		}
-		for (int l10 = 0; l10 < 2; l10 = l10 + 1) {
-			fRec6[l10] = 0.0f;
+			fRec5[l8] = 0.0f;
 		}
 	}
 	
@@ -251,30 +204,30 @@ class mydsp : public dsp {
 			float fTemp2 = 0.015f * fRec1[0];
 			fRec2[0] = fSlow2 + fConst2 * fRec2[1];
 			int iTemp3 = 1 - iVec1[1];
-			fRec5[0] = fSlow3 + fConst2 * fRec5[1];
-			float fTemp4 = 5.0f * fRec5[0] + 0.05f;
-			float fTemp5 = ((iTemp3) ? 0.0f : fRec4[1] + fConst3 * fTemp4);
-			fRec4[0] = fTemp5 - std::floor(fTemp5);
-			float fTemp6 = fConst0 * (fTemp2 + 0.0025f * fRec2[0] * (ftbl0mydspSIG0[std::max<int>(0, std::min<int>(static_cast<int>(65536.0f * fRec4[0]), 65535))] + 1.0f) + 0.005f);
+			fRec4[0] = fSlow3 + fConst2 * fRec4[1];
+			float fTemp4 = 5.0f * fRec4[0] + 0.05f;
+			float fTemp5 = ((iTemp3) ? 0.0f : fRec3[1] + fConst3 * fTemp4);
+			fRec3[0] = fTemp5 - std::floor(fTemp5);
+			float fTemp6 = fConst0 * (fTemp2 + 0.0025f * fRec2[0] * (std::sin(6.2831855f * fRec3[0]) + 1.0f) + 0.005f);
 			int iTemp7 = static_cast<int>(fTemp6);
 			float fTemp8 = std::floor(fTemp6);
 			output0[i0] = static_cast<FAUSTFLOAT>(fTemp0 * fTemp1 + fRec0[0] * (fVec0[(IOTA0 - std::min<int>(2049, std::max<int>(0, iTemp7))) & 4095] * (fTemp8 + (1.0f - fTemp6)) + (fTemp6 - fTemp8) * fVec0[(IOTA0 - std::min<int>(2049, std::max<int>(0, iTemp7 + 1))) & 4095]));
 			float fTemp9 = static_cast<float>(input1[i0]);
-			fVec3[IOTA0 & 4095] = fTemp9;
-			float fTemp10 = ((iTemp3) ? 0.0f : fRec6[1] + fConst4 * fTemp4);
-			fRec6[0] = fTemp10 - std::floor(fTemp10);
-			float fTemp11 = fConst0 * (fTemp2 + 0.0025f * fRec2[0] * (ftbl0mydspSIG0[std::max<int>(0, std::min<int>(static_cast<int>(65536.0f * fRec6[0]), 65535))] + 1.0f) + 0.005f);
+			fVec2[IOTA0 & 4095] = fTemp9;
+			float fTemp10 = ((iTemp3) ? 0.0f : fRec5[1] + fConst4 * fTemp4);
+			fRec5[0] = fTemp10 - std::floor(fTemp10);
+			float fTemp11 = fConst0 * (fTemp2 + 0.0025f * fRec2[0] * (std::sin(6.2831855f * fRec5[0]) + 1.0f) + 0.005f);
 			int iTemp12 = static_cast<int>(fTemp11);
 			float fTemp13 = std::floor(fTemp11);
-			output1[i0] = static_cast<FAUSTFLOAT>(fTemp9 * fTemp1 + fRec0[0] * (fVec3[(IOTA0 - std::min<int>(2049, std::max<int>(0, iTemp12))) & 4095] * (fTemp13 + (1.0f - fTemp11)) + (fTemp11 - fTemp13) * fVec3[(IOTA0 - std::min<int>(2049, std::max<int>(0, iTemp12 + 1))) & 4095]));
+			output1[i0] = static_cast<FAUSTFLOAT>(fTemp9 * fTemp1 + fRec0[0] * (fVec2[(IOTA0 - std::min<int>(2049, std::max<int>(0, iTemp12))) & 4095] * (fTemp13 + (1.0f - fTemp11)) + (fTemp11 - fTemp13) * fVec2[(IOTA0 - std::min<int>(2049, std::max<int>(0, iTemp12 + 1))) & 4095]));
 			IOTA0 = IOTA0 + 1;
 			iVec1[1] = iVec1[0];
 			fRec0[1] = fRec0[0];
 			fRec1[1] = fRec1[0];
 			fRec2[1] = fRec2[0];
-			fRec5[1] = fRec5[0];
 			fRec4[1] = fRec4[0];
-			fRec6[1] = fRec6[0];
+			fRec3[1] = fRec3[0];
+			fRec5[1] = fRec5[0];
 		}
 	}
 

@@ -23,11 +23,28 @@ title: |md
   style.font-size: 26
 }
 
+# For `shape: sql_table` d2's two keys do not mean what their names suggest, and the difference is
+# the whole point of this block: `fill` paints the HEADER ROW ONLY, and `stroke` paints the TABLE
+# BODY - every data row - rather than a border. (Traced by rendering with marker colours; the
+# container strokes further down are ordinary shapes where `stroke` really is the border.)
+#
+# So the colour goes in `fill`, where it labels the group, and the body stays white. The old values
+# had it the other way round: a near-white header nobody could read against, over rows tinted hard
+# enough to fight their own text.
+# `font-color` is not optional here. d2 renders a table's header label in WHITE, on the assumption
+# that the header fill is dark - so the old near-white header carried white text at 1.11:1, which is
+# why the group titles were barely there. Dark text on these pastels reads at 11:1 or better.
 classes: {
-  knob:   { style: { fill: "#ebf4ff"; stroke: "#90cdf4"; stroke-width: 2 } }
-  pad:    { style: { fill: "#fffaf0"; stroke: "#fbd38d"; stroke-width: 2 } }
-  shared: { style: { fill: "#faf5ff"; stroke: "#d6bcfa"; stroke-width: 2 } }
-  io:     { style: { fill: "#f0fff4"; stroke: "#9ae6b4"; stroke-width: 2 } }
+  knob:   { style: { fill: "#90cdf4"; stroke: "#ffffff"; font-color: "#0a0f25" } }
+  pad:    { style: { fill: "#fbd38d"; stroke: "#ffffff"; font-color: "#0a0f25" } }
+  shared: { style: { fill: "#d6bcfa"; stroke: "#ffffff"; font-color: "#0a0f25" } }
+  io:     { style: { fill: "#9ae6b4"; stroke: "#ffffff"; font-color: "#0a0f25" } }
+  # The LED circles are NOT tables, so here `fill` really is the fill and `stroke` really is the
+  # border - the same two keys, different meaning, which is why they need a class of their own rather
+  # than borrowing `knob`. Left uncoloured on purpose: these stand for a physical light whose colour
+  # is the thing being described in words beside them, so tinting the drawing states a colour that
+  # contradicts its own caption.
+  led:    { style: { fill: "#ffffff"; stroke: "#0a0f25"; font-color: "#0a0f25" } }
 }
 
 panel: Front panel {
@@ -37,6 +54,8 @@ panel: Front panel {
 
   # ----------------------------------------------------------------- DECK A
   deckA: Deck A {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsA: Knobs (7) {
@@ -62,7 +81,7 @@ panel: Front panel {
     }
 
     ringA: "LED Ring A (32px)" {
-      class: knob
+      class: led
       shape: circle
       label: "Ring A\n[ what it shows ]"
     }
@@ -96,7 +115,7 @@ panel: Front panel {
     }
 
     clockled: "Clock LED" {
-      class: shared
+      class: led
       shape: circle
       label: "Clock\n[ src color ]"
     }
@@ -104,6 +123,8 @@ panel: Front panel {
 
   # ----------------------------------------------------------------- DECK B
   deckB: Deck B {
+    grid-columns: 1
+    grid-gap: 30
     style.stroke: "#90cdf4"
 
     knobsB: Knobs (7) {
@@ -129,7 +150,7 @@ panel: Front panel {
     }
 
     ringB: "LED Ring B (32px)" {
-      class: knob
+      class: led
       shape: circle
       label: "Ring B\n[ what it shows ]"
     }

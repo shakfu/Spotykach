@@ -1,0 +1,19 @@
+{
+  "name": "sk-card",
+  "private": true,
+  "type": "module",
+  "description": "Browser SD card builder/checker and WebSerial terminal for sk-engines. TypeScript, bundled by bun; no runtime dependencies.",
+  "scripts": {
+    "build": "bun run build:js && bun run build:css",
+    "build:js": "bun build src/ui/main.ts --outdir dist --entry-naming app.js --sourcemap=linked --target browser",
+    "build:css": "tailwindcss -i src/app.css -o dist/app.css --minify && touch dist/app.css",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "bun test/run.ts"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/bun": "^1.3.14",
+    "tailwindcss": "^4.3.3",
+    "typescript": "5.9.2"
+  }
+}

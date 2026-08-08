@@ -3,7 +3,7 @@
 // Identical strategy to csound_alloc.cpp (see its header comment for the full rationale): the
 // linker's default heap must stay in SRAM, because global constructors malloc before _hw.Init()
 // powers up the SDRAM controller - a heap in SDRAM faults there. But ChucK mallocs megabytes at
-// `new ChucK()` / init() / compileCode(). So we keep the default heap in SRAM (alt_qspi.lds) and
+// `new ChucK()` / init() / compileCode(). So we keep the default heap in SRAM (linker/alt_qspi.lds) and
 // route ONLY ChucK's allocations to a dedicated SDRAM pool, armed by ChuckEngine::init() (which runs
 // AFTER _hw.Init(), so SDRAM is live). We intercept the C malloc family via linker --wrap; when armed,
 // allocations come from the SDRAM pool, otherwise they pass through to the real SRAM heap.

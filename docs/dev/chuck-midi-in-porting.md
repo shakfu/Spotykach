@@ -1,6 +1,6 @@
 # Porting the ChucK `MidiIn` re-introduction to another Daisy/ChucK firmware
 
-This is a replication guide for the change implemented in this repo (`daisy-apps`) so it can be applied to a sibling project that also runs a cross-compiled ChucK on a Daisy device - in particular `~/projects/personal/sk-engines` (the "spotykach" firmware). It records *what was done*, *why each piece is needed*, and *what differs* in the target project. For the design rationale and the feasibility analysis, read [`chuck-midi-in.md`](./chuck-midi-in.md) first; this document is the how-to.
+This is a replication guide for the change implemented in this repo (`daisy-apps`) so it can be applied to a sibling project that also runs a cross-compiled ChucK on a Daisy device - in particular `~/projects/personal/sk-engines` (the "spotykach" firmware). It records *what was done*, *why each piece is needed*, and *what differs* in the target project. For the design rationale and the feasibility analysis, read [`chuck-midi.md`](./chuck-midi.md) first; this document is the how-to.
 
 ## What it gives you
 
@@ -181,4 +181,4 @@ patch -p1 --dry-run -d /tmp/pristine < scripts/patches/midi_daisy.patch   # must
 
 - `examples/chuck/midi_in.ck` - desktop-portable `MidiIn` example.
 
-- `docs/dev/chuck-midi-in.md` - status + design; this file - the porting guide. </content> </invoke>
+- `docs/dev/chuck-midi.md` - status + design; this file - the porting guide.

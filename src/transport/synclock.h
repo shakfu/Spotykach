@@ -99,11 +99,20 @@ private:
     int32_t _ticks_at_last_clock;
     int32_t _tempo_ticks;
     int32_t _tempo_mks;
-    bool _hold;
-    bool _is_running;
-    bool _is_about_to_run;
-    bool _last_state;
-    bool _external_clock;
+    // Default member initializers, not just constructor ones. `_external_clock` was declared here and
+    // omitted from the constructor's initializer list, so it was read indeterminate - the same defect,
+    // in the same subsystem, as Divider::_triplets_on. On target it was masked by .bss zeroing (the
+    // only SynClock lives inside the file-static AppImpl), but any automatic-storage Transport - i.e.
+    // every host test - could come up believing it was slaved to an external clock, in which case
+    // Run() merely ARMS (`_is_about_to_run`) and Tick(false) never emits. The internal clock then
+    // never runs: measured, 0 ticks in 3000 blocks. That is why nothing clock-dependent (the granular
+    // Slice mode, the step sequencer, key/bar boundaries) could be tested off-target, and why the
+    // `transport.tick(false)` calls in test_engine_params were doing nothing.
+    bool _hold             = false;
+    bool _is_running       = false;
+    bool _is_about_to_run  = false;
+    bool _last_state       = false;
+    bool _external_clock   = false;   // internal clock unless a source switch says otherwise
 };
 
 };

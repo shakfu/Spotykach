@@ -12,7 +12,7 @@
 // SKETCH (2026-06, M2): ChuckEngine wraps a ChucK runtime (the language/VM/UGens) behind IEngine,
 // modelled directly on CsoundEngine. Like Csound, it builds ONLY in the QSPI firmware target - the
 // ChucK core links ~1.1 MB of .text (far over the 186 KB SRAM_EXEC budget), so code lives in QSPI
-// flash and the VM heap in SDRAM (alt_qspi.lds + the chuck_alloc.cpp --wrap pool); it cannot link
+// flash and the VM heap in SDRAM (linker/alt_qspi.lds + the chuck_alloc.cpp --wrap pool); it cannot link
 // into the SRAM engine bundle. See docs/dev/chuck-impl.md for the roadmap and the build recipe.
 //
 // The mapping onto IEngine is small and clean (the same shape as Csound):
@@ -49,6 +49,28 @@ public:
 
     // --- control --------------------------------------------------------------------------------
     Capabilities capabilities() const override;
+
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md). Without them the descriptor would
+    // advertise all 24 ids and a host sweep would "pass" on ids that name no ChucK channel - set_param
+    // returns early with `chan == nullptr`, so nothing is written and nothing is asserted.
+    //
+    // These are exactly the ids channel_for() maps (chuck_engine.cpp:88-100): PITCH/MIX/SIZE/ENV/FB/MODAMP, which a patch
+    // reads by name, plus AUX (Alt+PITCH patch selection), which set_param handles ahead of the channel
+    // lookup. ModSpeed IS mapped (`modspA/B`) but stays out: it is platform-owned and reaches the engine
+    // through set_mod_speed, and `describe` filters it regardless.
+    ParamMask live_params() const override {
+        return (1u << static_cast<uint32_t>(ParamId::Speed))
+             | (1u << static_cast<uint32_t>(ParamId::Mix))
+             | (1u << static_cast<uint32_t>(ParamId::Size))
+             | (1u << static_cast<uint32_t>(ParamId::Env))
+             | (1u << static_cast<uint32_t>(ParamId::Feedback))
+             | (1u << static_cast<uint32_t>(ParamId::ModAmp))
+             | (1u << static_cast<uint32_t>(ParamId::Aux));
+    }
+    // This engine implements no set_config - the patch, not a panel switch, decides its topology.
+    ConfigMask live_configs() const override { return static_cast<ConfigMask>(0); }
+#endif
     void         set_param(ParamId id, DeckRef::Ref d, float v) override;
     float        param(ParamId id, DeckRef::Ref d) const override;
 

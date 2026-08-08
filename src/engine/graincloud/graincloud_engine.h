@@ -6,8 +6,8 @@
 #include "engine/engine_params.h"
 #include "engine/engine_leds.h"   // FxLeds/PlayLeds/AltLeds/TransportLeds/DeckLeds/RingGeometry
 #include "engine/display_model.h"
-#include "engine/graincloud/core.h"
-#include "engine/graincloud/speed.map.h"
+#include "engine/granular/core.h"        // shared: graincloud IS the granular tree built with SPK_GRAIN_GF
+#include "engine/granular/speed.map.h"
 #include "nocopy.h"
 
 #include <cstdint>
@@ -19,7 +19,7 @@ namespace spotykach {
 // (after the input migration) owns all granular *input* meaning: parameters, MIDI, and pad
 // gestures - see the grouped methods below. The refactor is PAUSED at this input-decoupled
 // milestone; the output/IO side (LEDs, CV, gate, storage) still reaches the graph through the
-// core() escape hatch documented at that method. See docs/refactor-status.md.
+// core() escape hatch documented at that method.
 class GraincloudEngine : public IEngine {
 public:
     GraincloudEngine() = default;
@@ -50,6 +50,48 @@ public:
     bool       size_sets_tempo(DeckRef::Ref deck) override;
 
     Capabilities capabilities() const override;
+
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md). set_param caches EVERY id into
+    // _param_cache[] before its switch, so the default all-live mask would advertise all 24 and a host
+    // sweep would "pass" on ids the switch drops - reading back its own write while nothing moved.
+    //
+    // This is granular's list (the inherited deck switch is the same shape) PLUS Aux and AltPos, which
+    // granular explicitly no-ops but graincloud claims for the cloud layer: Alt+PITCH -> playhead scan
+    // speed and Alt+POS -> vibrato depth (graincloud_engine.cpp, the gf_cloud switch). Tempo and
+    // KeyInterval stay out - the platform writes those to Transport and the engine ignores them.
+    ParamMask live_params() const override {
+        return (1u << static_cast<uint32_t>(ParamId::Pos))
+             | (1u << static_cast<uint32_t>(ParamId::FluxFb))
+             | (1u << static_cast<uint32_t>(ParamId::Env))
+             | (1u << static_cast<uint32_t>(ParamId::EnvSize))
+             | (1u << static_cast<uint32_t>(ParamId::Size))
+             | (1u << static_cast<uint32_t>(ParamId::Win))
+             | (1u << static_cast<uint32_t>(ParamId::PolySlice))
+             | (1u << static_cast<uint32_t>(ParamId::Speed))
+             | (1u << static_cast<uint32_t>(ParamId::FluxIntensity))
+             | (1u << static_cast<uint32_t>(ParamId::GritIntensity))
+             | (1u << static_cast<uint32_t>(ParamId::FluxMix))
+             | (1u << static_cast<uint32_t>(ParamId::GritMix))
+             | (1u << static_cast<uint32_t>(ParamId::Feedback))
+             | (1u << static_cast<uint32_t>(ParamId::Mix))
+             | (1u << static_cast<uint32_t>(ParamId::ModAmp))
+             | (1u << static_cast<uint32_t>(ParamId::ClickMix))
+             | (1u << static_cast<uint32_t>(ParamId::PanSpeed))
+             | (1u << static_cast<uint32_t>(ParamId::PanRange))
+             | (1u << static_cast<uint32_t>(ParamId::Crossfade))
+             | (1u << static_cast<uint32_t>(ParamId::Aux))       // cloud: playhead scan speed
+             | (1u << static_cast<uint32_t>(ParamId::AltPos));   // cloud: vibrato depth
+    }
+    ConfigMask live_configs() const override {
+        return static_cast<ConfigMask>((1u << static_cast<uint32_t>(ConfigId::Route))
+                                     | (1u << static_cast<uint32_t>(ConfigId::ModType))
+                                     | (1u << static_cast<uint32_t>(ConfigId::LfoShape))
+                                     | (1u << static_cast<uint32_t>(ConfigId::Mode))
+                                     | (1u << static_cast<uint32_t>(ConfigId::StartModOn))
+                                     | (1u << static_cast<uint32_t>(ConfigId::SizeModOn)));
+    }
+#endif
 
     // MIDI meaning (Phase 3c). The platform parses MIDI and clocks transport; the engine
     // decides what notes and transport mean for this instrument.

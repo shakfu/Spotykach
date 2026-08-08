@@ -1,0 +1,32 @@
+<p>A dual-deck crossfaded <strong>overdub looper</strong> built on monome's <a href="https://github.com/monome/softcut-lib">softcut-lib</a>. Each deck holds two softcut voices (a Rev-swapped pair), so there are four voices in all. Unlike the buffer-tape <code>shuttle</code>/<code>tape</code> engines, softcut's read/write head plays and records the same loop at once, with subsample-accurate click-free loop crossfades and <strong>interpolated overdub</strong> - layering live input onto a running loop with a feedback control. That sound-on-sound overdub is the reason to reach for softcut over the existing tape engines.</p>
+<p>Four voices is the hardware-measured safe CPU budget (worst case ~62% avg / 79% peak). See <a href="https://github.com/shakfu/sk-engines/blob/main/docs/dev/softcut-spike.md"><code>docs/dev/softcut-spike.md</code></a> for the feasibility measurements and the path to a future 6-voice build.</p>
+<h3>Controls (focused track)</h3>
+<p>Each deck edits one <strong>focused</strong> voice at a time; the Rev pad swaps which one, and the platform reseeds the pots so the absolute knobs catch the newly-focused voice without a jump. Both voices of a deck keep sounding.</p>
+<table><thead><tr><th>Control</th><th>Function</th></tr></thead><tbody><tr><td>PITCH</td><td>rate, <strong>bipolar</strong> about noon: noon = stop, CW = forward to +2x, CCW = reverse to -2x</td></tr><tr><td>POS</td><td>loop start (slides the loop window through the buffer)</td></tr><tr><td>SIZE</td><td>loop length (a short stutter up to the whole buffer)</td></tr><tr><td>MIX</td><td>track volume</td></tr><tr><td>ENV</td><td><strong>overdub feedback</strong>: 1.0 = infinite sound-on-sound layering, lower = old layers decay as you add, 0 = overwrite (only acts while overdub is armed)</td></tr><tr><td>Alt+POS</td><td>pan</td></tr><tr><td>Alt+PITCH</td><td>SD loop slot - loads a clip into the loop buffer (boot-preloads slot 1-2 per deck)</td></tr><tr><td>MOD_AMT</td><td>loop crossfade time - short = tight, long = lush/smeared loops</td></tr><tr><td>MODFREQ</td><td>rate slew time (glide on varispeed sweeps)</td></tr><tr><td>FLUX pad + PITCH</td><td>post-filter cutoff (boots open; sweep down to engage)</td></tr><tr><td>FLUX pad + MIX</td><td>post-filter resonance</td></tr></tbody></table>
+<h3>Pads</h3>
+<ul><li><strong>Play</strong> - roll / stop the focused loop (snaps rate to unity on engage).</li></ul>
+<ul><li><strong>Alt+Play</strong> - the record gesture, context-sensitive on whether the voice has content:</li></ul>
+<ul><li><strong>Empty voice (looper record):</strong> first press starts recording a <strong>fresh loop</strong> (the buffer is cleared first); the second press <strong>closes the loop at exactly the length you played</strong> and starts looping it. Further presses overdub.</li></ul>
+<ul><li><strong>Voice with content (SD-loaded or already recorded):</strong> arms / disarms <strong>overdub</strong> on top (sound-on-sound).</li></ul>
+<ul><li><strong>Rev</strong> - swap the deck's focused voice.</li></ul>
+<ul><li><strong>Seq</strong> - realign <strong>all</strong> voices to their loop start at once: softcut's <code>cutToPos</code> does a click-free crossfaded jump, so drifted free-running loops snap back to a common downbeat (the voice-sync gesture).</li></ul>
+<ul><li><strong>Alt+Seq (tap)</strong> - <strong>save the full take</strong> (the whole recording, lossless) to the focused voice's currently-selected SD slot.</li></ul>
+<ul><li><strong>Alt+Rev</strong> - <strong>save the trimmed loop</strong> (exactly the POS/SIZE window - "bounce what you hear") to the same slot.</li></ul>
+<ul><li><strong>Alt+Seq (hold ~1.5 s)</strong> - <strong>erase</strong> the focused voice (clean discard - nothing is written). It empties the buffer so the next Alt+Play records a fresh take. Holding cancels the tap's pending save, so an erase never touches the card.</li></ul>
+<p>Both saves write a float32-mono WAV; pick the destination slot with Alt+PITCH first (use an empty slot so you don't overwrite a boot loop). The ring flashes amber while it writes (~1 s, non-blocking - the loop keeps playing). Save and load share the same slot files, so a captured loop reloads on the next boot or via Alt+PITCH. Alt+Seq is the safe everyday save (SIZE/POS stay non-destructive); Alt+Rev prints exactly the loop you hear. Note the Alt+Seq save commits a moment (~1.5 s) after the tap so a hold can turn it into an erase instead; Alt+Rev saves immediately.</p>
+<p>The audio input is summed to mono (both input jacks), so a loop records whichever input the source is patched to.</p>
+<h3>Routing switch (L / C / R)</h3>
+<p>Per-voice pan into the stereo bus: <strong>LEFT</strong> (DoubleMono) manual Alt+POS pan; <strong>CENTRE</strong> (Stereo) auto-spread a deck's two voices hard L/R; <strong>RIGHT</strong> (GenerativeStereo) random pans, re-rolled on entry.</p>
+<h3>Make a loop</h3>
+<ol><li>On an empty voice, <strong>Alt+Play</strong> to start recording, play your phrase, <strong>Alt+Play</strong> again to close the loop - it now repeats at the length you played.</li></ol>
+<ol><li><strong>Alt+Play</strong> once more to overdub. Keep layering (ENV high) or let old layers fade as you add (ENV lower).</li></ol>
+<ol><li>PITCH for varispeed/reverse, the FLUX pad to filter, Seq to re-sync against the other deck.</li></ol>
+<p>Each voice's buffer is <strong>~10.9 s</strong> (2^19 frames @ 48 kHz, 2 MB), so a single take can be up to ~10.9 s at the default 1x record speed.</p>
+<h3>Build / flash</h3>
+<pre><code>make ENGINE=softcut            # normal SRAM build (-O2, ~89% SRAM_EXEC)
+make ENGINE=softcut METER=1    # + on-device CPU load meter over USB serial / ring A
+make program-dfu               # flash (enter DFU first)</code></pre>
+<p>Loop clips are <strong>32-bit float, mono, 48 kHz</strong> WAVs at <code>softcut/loop_&lt;a|b&gt;_&lt;1..8&gt;.wav</code> on the SD card - the same format Alt+Seq/Alt+Rev save, so saved loops reload directly.</p>
+<h3>Not in v1</h3>
+<ul><li><strong>Phase-quantised voice sync</strong> - the Seq-pad realign covers the musical case; locked phase-quant is a later add.</li></ul>
+<ul><li><strong>6 voices</strong> - gated on the <code>std::function</code>-per-sample removal in the vendored core (see the spike doc).</li></ul>

@@ -13,6 +13,7 @@
 //   int   num_outputs();
 //   void  set_param(void* st, ParamId, DeckRef::Ref, float v01);   // v01 in 0..1
 //   float get_param(void* st, ParamId, DeckRef::Ref);              // returns 0..1
+//   int   index_of(ParamId);       // gen-parameter index, or -1 when this id maps to nothing
 //
 // The genlib runtime (genlib_arena.cpp) allocates gen~ state from the platform
 // SDRAM arena; we bind it in init() before creating state.
@@ -94,6 +95,23 @@ public:
             std::memset(out[1], 0, size * sizeof(float));
         }
     }
+
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md). DERIVED from the wrap's own
+    // ParamId -> gen-parameter mapping, which is already the single authority on what an id does here:
+    // `index_of` returns -1 for an id this export does not implement, and set_param drops exactly those.
+    // Without the mask the descriptor would advertise all 24 ids and a host sweep would "pass" on the
+    // unmapped ones, asserting nothing. Deriving keeps the two in step by construction - a hand-written
+    // mask would be a second copy of the same switch, free to drift when the mapping changes.
+    ParamMask live_params() const override {
+        ParamMask m = 0;
+        for (uint32_t i = 0; i < static_cast<uint32_t>(ParamId::Count); i++)
+            if (W::index_of(static_cast<ParamId>(i)) >= 0) m |= (ParamMask{1} << i);
+        return m;
+    }
+    // This wrapper implements no set_config, so no switch reaches the gen~ export.
+    ConfigMask live_configs() const override { return static_cast<ConfigMask>(0); }
+#endif
 
     void set_param(ParamId id, DeckRef::Ref deck, float v) override {
         if (_state) W::set_param(_state, id, deck, v);

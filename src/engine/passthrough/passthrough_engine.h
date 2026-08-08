@@ -42,6 +42,16 @@ public:
 
     Capabilities capabilities() const override { return CapOwnDisplay; }
 
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md). EMPTY, and deliberately so: this
+    // variant overrides neither set_param nor set_config, so every knob and switch lands on the
+    // Strategy-A no-op defaults. The inherited all-live mask would advertise all 24 params on an engine
+    // that has none, and the generic sweep would then write each one and read back the default 0 - a
+    // wall of false failures on the one engine whose correct answer is "nothing to sweep".
+    ParamMask  live_params()  const override { return 0; }
+    ConfigMask live_configs() const override { return static_cast<ConfigMask>(0); }
+#endif
+
     // A non-granular display: a symmetric level meter on both rings + lit play indicators.
     // Drawn with LEDRing's primitives (Option A) - exactly how a granular render() will reuse them.
     void render(DisplayModel& m) override {

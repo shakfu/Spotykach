@@ -5,7 +5,7 @@
 //
 // Unlike the Csound harness, this one links the REAL SDRAM pool (chuck_alloc.cpp + --wrap), so
 // ChuckEngine::init()'s chuck_heap_arm() arms the .sdram_bss pool - exactly the M2 spotykach heap
-// model, exercised on the quick-iterate Pod. The platform heap stays in SRAM (alt_qspi.lds).
+// model, exercised on the quick-iterate Pod. The platform heap stays in SRAM (linker/alt_qspi.lds).
 //
 // Build (from pod/):  make -f Makefile.chuck
 // Flash:              while ! make -f Makefile.chuck program-dfu; do sleep 0.2; done   (then tap RESET)

@@ -1,8 +1,29 @@
-# Spotykach Manual (firmware-tracked)
+# Spotykach platform manual (firmware-tracked)
 
-This is the in-repo user manual. Unlike the published manual, it is kept in sync with the firmware in this repository: when you change behaviour, update this file in the same commit. Where this document and the published manual (<https://tsemah.notion.site/Spotykach-Manual-22c6331933b880c59108c0de25102bb5>) disagree, this document describes what the current code actually does. Differences known at the time of writing are called out in [Notes vs published manual](#notes-vs-published-manual).
+This is the in-repo manual for the **platform** — the parts of the instrument that are the same
+whichever engine you flash: power, the clock and sync, CV and gate, routing, the SD card, `config.txt`,
+MIDI, and firmware update.
 
-Spotykach is a screenless, dual-deck looping and sampling instrument built on an Electro-Smith Daisy Seed. It runs at 48 kHz. The two decks (A and B) are independent recorders/players that share a clock, FX engine families, modulation, routing and SD-card storage.
+**What each engine does with the knobs and pads is per-engine**, and lives in
+[`docs/engines/`](engines/). Start there for the instrument you are actually running:
+
+| If you flashed... | Control reference |
+|---|---|
+| the default build (`make`) | [granular](engines/granular.md) — the stock looper/sampler |
+| an effect | [delay](engines/delay.md) · [qdelay](engines/qdelay.md) · [reverb](engines/reverb.md) · [gigaverb](engines/gigaverb.md) · [chorus](engines/chorus.md) · [filter](engines/filter.md) · [pstretch](engines/pstretch.md) |
+| a looper or player | [tape](engines/tape.md) · [shuttle](engines/shuttle.md) · [softcut](engines/softcut.md) · [radio](engines/radio.md) · [bard](engines/bard.md) · [graincloud](engines/graincloud.md) |
+| an instrument | [edrums](engines/edrums.md) · [reso](engines/reso.md) · [mosc](engines/mosc.md) · [glitch](engines/glitch.md) · [voice](engines/voice.md) · [csound](engines/csound.md) · [chuck](engines/chuck.md) |
+
+Unlike the published manual, this document is kept in sync with the firmware in this repository: when
+you change behaviour, update it in the same commit. Where this document and the published manual
+(<https://tsemah.notion.site/Spotykach-Manual-22c6331933b880c59108c0de25102bb5>) disagree, this one
+describes what the current code actually does. The published manual documents the granular engine, so
+the differences are called out in [the granular page](engines/granular.md#notes-vs-the-published-manual).
+
+Spotykach is a screenless, dual-deck instrument built on an Electro-Smith Daisy Seed. It runs at
+48 kHz. The two decks (A and B) are independent and share a clock, modulation, routing and SD-card
+storage; what a "deck" *is* depends on the engine — two recorders in granular, two delay lines in
+delay, two macro-oscillators in mosc.
 
 ## Power
 
@@ -12,68 +33,6 @@ Spotykach is a screenless, dual-deck looping and sampling instrument built on an
 
 - A ground loop via computer USB can cause high-pitched noise; a standalone USB adapter avoids it.
 
-## Decks and modes
-
-Each deck records into its own loop buffer (up to 42 seconds) and plays it back through a granular engine in one of three modes, indicated by color:
-
-- **Reel (yellow)** - tape emulation, monophonic. Speed and pitch are linked: faster playback raises pitch.
-
-- **Slice (blue)** - digital sampler/looper with independent pitch and speed. Up to 3-voice polyphony; switch to mono with Alt+Size.
-
-- **Drift (purple)** - granular texture generator; builds evolving soundscapes from a short recording.
-
-## Recording and playback
-
-- **Arm**: Alt+Play. Recording starts when the input crosses about -40 dB.
-
-- **Stop and loop**: tap Play; the recorded material begins looping.
-
-- **Overdub**: Alt+Play on a deck that is already playing. Overdub decay is set with Alt+Mix (feedback).
-
-- **Cross-deck record**: Alt+Reverse records one deck into the other.
-
-- **Reverse**: the Reverse pad plays the loop backwards.
-
-## Primary controls (knobs)
-
-| Knob       | Reel                    | Slice                          | Drift                  |
-|------------|-------------------------|--------------------------------|------------------------|
-| Pitch      | playback speed          | pitch (independent of speed)   | grain pitch modulation |
-| Position   | loop start point        | loop start, quantized to 1/8   | grain position         |
-| Size       | loop length (exp.)      | loop length (stepped)          | grain spread           |
-| Envelope   | loop envelope: off, fade-out, fade-in/out, fade-in (cycles) | as Reel | as Reel |
-| Mix        | input vs playback balance; Alt+Mix sets overdub feedback | same | same |
-
-Alt+Pitch enables quantized pitch values. Alt+Size sets grain size in Drift and toggles mono/poly in Slice.
-
-## Effects
-
-Two families, each on a dedicated pad per deck. Hold the effect pad and tap the Tap button to cycle the effect type within the family; shape parameters live on the main knobs while the effect is held.
-
-- **Grit**: signal degradation.
-
-  - Analog saturation - soft saturation through to distortion (driven by Pitch).
-
-  - Bit crusher / decimator - downsampling and bit reduction to harsh digital clipping.
-
-- **Flux**: tape delay - Pitch sets tape speed (delay time), Mix sets wet level, Position sets feedback while Flux is active.
-
-Each effect can be locked on (Alt + effect pad) so it stays engaged without holding.
-
-## Modulation sources A and B
-
-Each deck has a modulation source that is either an LFO or an envelope follower, with its own CV output (0 to +5 V).
-
-- Source A: sample-and-hold or square LFO.
-
-- Source B: sine or sawtooth LFO.
-
-- The Cycle knob sets LFO rate, with tempo-sync divisions from 1/32 up to 4 bars.
-
-- The Glow knob attenuates the modulation depth.
-
-- The envelope follower tracks its deck's post-Mix output.
-
 ## Clock and sync
 
 The internal clock runs 20-250 BPM. Set tempo by:
@@ -82,7 +41,7 @@ The internal clock runs 20-250 BPM. Set tempo by:
 
 2. Hold Tap and turn Cycle A.
 
-3. In Slice mode, hold Tap and turn Size to fit the tempo to the loop.
+3. Hold Tap and turn Size to fit the tempo to what is loaded, where the engine offers it (granular's Slice mode does; an engine advertises this through `size_sets_tempo`).
 
 External sync sources:
 
@@ -94,21 +53,13 @@ Switch clock source with Alt+Tap. The clock LED color shows the source: green (i
 
 **Key beat**: the quantization interval for loop and trigger alignment. Hold Tap and turn Mix A to set it. The clock LED shows white on the key beat and the source color on intermediate beats.
 
-## Sequencer
-
-Each deck has a 1/16-resolution trigger sequencer. Patterns persist across mode changes.
-
-- **Record**: Alt+Seq to arm (Alt LED blinks white), then tap the deck's Seq pad in rhythm. Tap Alt or Play to stop.
-
-- **Clear**: hold Alt+Seq for about 2 seconds (the Play LED blinks quickly).
-
 ## CV and gate
 
 Inputs (tolerate full Eurorack ranges):
 
 - Position/Size CV, with a target switch: up = position, down = size, center = both.
 
-- Mix CV - input vs playback balance.
+- Mix CV - the `Mix` parameter. What that blends is the engine's choice (input vs playback in granular, wet/dry in the effects, output level in mosc).
 
 - V/Oct - modulates pitch/speed.
 
@@ -122,7 +73,7 @@ Outputs:
 
 - Two modulation CV outputs (0 to +5 V).
 
-- Gate outputs - emit a short (about 7 ms) pulse when a deck's granular engine re-triggers. (See notes below: present in this firmware.)
+- Gate outputs - emit a short (about 7 ms) pulse when a deck re-triggers, for engines that report one (`gate_out_triggered`); granular fires it on a loop reset. Present in this firmware, though the published manual lists it as unimplemented.
 
 ## Routing and panning
 
@@ -132,19 +83,17 @@ The Routing switch sets the input/output topology:
 
 - **Stereo (center)**: one input feeds both decks; outputs mix to a stereo pair.
 
-- **Generative stereo (right)**: applies dynamic, mode-dependent panning to the deck outputs:
-
-  - Reel: gradual left-right movement with changing speed and amount.
-
-  - Slice: pan jumps between channels at variable intervals.
-
-  - Drift: each grain gets a randomized pan for width. Pan speed is set with Tap+Cycle B, pan amount with Tap+Glow B.
+- **Generative stereo (right)**: the engine is free to move the two decks around the stereo field rather than hold them still. What that means is per-engine — granular applies mode-dependent panning (see [granular](engines/granular.md)), mosc spreads its two voices out+aux — and an engine that has nothing to offer here simply behaves as Stereo.
 
 Input behaviour: input A alone mirrors to deck B internally; input B alone feeds deck B; both inputs feed A->deck A and B->deck B (or L/R in stereo mode).
 
+The switch reaches the engine as `ConfigId::Route`; the three positions are `Route::DoubleMono`, `Route::Stereo` and `Route::GenerativeStereo`.
+
 ## SD card storage
 
-- FAT32 card up to 32 GB. Layout: `SK/` containing six color-coded tape folders (`B`, `G`, `P`, `R`, `T`, `Y`), each with up to six files `1.WAV`..`6.WAV`. Filenames must be uppercase. Audio is 48 kHz, stereo, 32-bit float; loops over 42 s are truncated.
+- FAT32 card up to 32 GB. Layout: `SK/` containing six color-coded tape folders (`B`, `G`, `P`, `R`, `T`, `Y`), each with up to six files `1.WAV`..`6.WAV`. Filenames must be uppercase. Audio is 48 kHz, stereo, 32-bit float (16-bit PCM is also accepted and converted on load); loops over 42 s are truncated.
+
+- **Other engines use other folders and other formats** — `tapes/`, `shuttle/`, `radio/`, `bard/`, `pstretch/`, `csound/`, `chuck/`. See [`docs/sd-card.md`](sd-card.md): `make sdcard SDCARD_OUT=/media/SK` builds a complete card, and `make check-sdcard CARD=/media/SK` explains anything wrong with an existing one.
 
 - **Enter card mode**: hold Tap, tap a deck's Play.
 
@@ -176,18 +125,4 @@ Plain text, one property name per line followed by its value on the next line:
 
 ## Firmware update
 
-Build with `make -j8` (after `make -j8 libs` once) and flash over the rear USB-C port in DFU mode: hold Reset for about 3 seconds until the bottom pads breathe white, then run `make program-dfu`. See the repository README and CLAUDE.md for details.
-
-## Notes vs published manual
-
-The published manual's "Known Limitations" list is partly out of date relative to this firmware:
-
-- **Gate outputs**: implemented here (short pulse on granular re-trigger); the published manual lists them as not implemented.
-
-- **Buffer clearing**: a buffer clear exists internally and runs when re-arming a deck, but there is no dedicated user-facing "clear without recording" gesture yet.
-
-- **Sample persistence between power cycles**: an auto-preload path exists; confirm the exact behaviour on your unit.
-
-- **Spot pad**: currently used only for calibration entry; broader functionality is not yet implemented.
-
-When you change any of the above (or any feature) in code, update this section and the relevant body text so the manual stays in sync.
+Build with `make -j8` (after `make -j8 libs` once) and flash over the rear USB-C port in DFU mode: hold Reset for about 3 seconds until the bottom pads breathe white, then run `make program-dfu`. See the [repository README](../README.md) for details, and [`docs/engines/`](engines/) for the other engines you can flash onto the same hardware.

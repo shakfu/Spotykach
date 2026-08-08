@@ -5,6 +5,7 @@
 #if SPK_TERMINAL
 
 #include "terminal/command.h"
+#include "terminal/cpu_stat.h"
 #include "terminal/fmt.h"
 #include "terminal/names.h"
 #include "terminal/preset.h"
@@ -206,7 +207,7 @@ void verb_seq(const Command& c, Ctx& x) {
 
 enum PQ : uint8_t {
     PQ_EMPTY, PQ_MIX, PQ_ROUTE, PQ_GATEOUT, PQ_RECORDED, PQ_CAPACITY,
-    PQ_LAYOUT, PQ_SIZETEMPO, PQ_USB, PQ_RESEED, PQ_COUNT
+    PQ_LAYOUT, PQ_SIZETEMPO, PQ_USB, PQ_CPU, PQ_CPUMIN, PQ_CPUMAX, PQ_RESEED, PQ_COUNT
 };
 
 const EngineQuery kPlatformQueries[] = {
@@ -219,6 +220,13 @@ const EngineQuery kPlatformQueries[] = {
     { "layout",    QueryScope::Deck,   ValueKind::Enum,  "0:single 1:slice 2:chord 3:none", true },
     { "sizetempo", QueryScope::Deck,   ValueKind::Bool,  nullptr, true },
     { "usb",       QueryScope::Global, ValueKind::Text,  nullptr, true },
+    // CPU load as PERCENT of the block budget. Three separate Float queries rather than one Text line
+    // of `avg=.. min=.. max=..` (the shape `usb` uses) because these are the numbers a sweep collects:
+    // a Float query comes back as a bare `ok <value>` the existing host tooling already parses, where a
+    // Text blob would need its own parser. min/max are since the last `reset cpu` - see cpu_stat.h.
+    { "cpu",       QueryScope::Global, ValueKind::Float, nullptr, true },
+    { "cpumin",    QueryScope::Global, ValueKind::Float, nullptr, true },
+    { "cpumax",    QueryScope::Global, ValueKind::Float, nullptr, true },
     // Latching: take_param_reseed returns true once and self-clears, so asking changes the answer.
     // safe=false keeps it out of describe, and therefore out of any generic sweep.
     { "reseed",    QueryScope::Deck,   ValueKind::Bool,  nullptr, false },
@@ -238,6 +246,13 @@ void read_platform_query(uint8_t i, Ctx& x, DeckRef::Ref d) {
         case PQ_LAYOUT:    x.reply.append_i32(static_cast<int32_t>(x.engine.deck_layout(d))); break;
         case PQ_SIZETEMPO: x.reply.append_i32(x.engine.size_sets_tempo(d) ? 1 : 0); break;
         case PQ_RESEED:    x.reply.append_i32(x.engine.take_param_reseed(d) ? 1 : 0); break;
+        case PQ_CPU:
+        case PQ_CPUMIN:
+        case PQ_CPUMAX: {
+            CpuStat s; cpu_stat_read(s);
+            x.reply.append_f32(i == PQ_CPU ? s.avg : (i == PQ_CPUMIN ? s.min : s.max));
+            break;
+        }
         case PQ_USB: {
             usb_diag_refresh(x.state.usb);   // live, not the init snapshot
             const UsbDiag& u = x.state.usb;
@@ -345,6 +360,13 @@ int32_t for_each_deck(ParamId id, DeckRef::Ref only, F&& fn) {
 // passing in isolation and failing in sequence. Replies with the number of params written so a harness
 // can assert it did something.
 void verb_reset(const Command& c, Ctx& x) {
+    // `reset cpu` - clear the CPU meter's min/max instead of touching params. Same verb because it is
+    // the same idea (return a measurable thing to a known baseline), and it has to be a distinct
+    // keyword rather than a deck: the sequence a measurement needs is `reset cpu` -> drive the engine
+    // -> `query cpumax`, and without the reset the peak is whatever the boot transient was. Checked
+    // before the deck parse, which would otherwise reject it as `bad-deck`.
+    if (c.argc >= 2 && !strcmp(c.arg(1), "cpu")) { cpu_stat_reset(); x.reply.ok(); return; }
+
     DeckRef::Ref only = DeckRef::Count;   // Count == both decks
     if (c.argc >= 2 && !parse_deck(c.arg(1), only)) { x.reply.err("bad-deck"); return; }
 

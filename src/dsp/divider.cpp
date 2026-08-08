@@ -16,7 +16,8 @@ _odd_count          { 0 },
 _odd_count_max      { 0 },
 _resolution         { resolution },
 _is_odd             { false },
-_swing_on           { false }
+_swing_on           { false },
+_triplets_on        { false }
 {
   if (resolution == Every::_16th || resolution == Every::_32th) {
     _swing_on = true;

@@ -5,7 +5,7 @@
 // there. But Csound mallocs megabytes at csoundCreate/CompileCSD, far more than the ~270 KB SRAM
 // heap holds.
 //
-// THE FIX: keep the default heap in SRAM (alt_qspi.lds), and route ONLY Csound's allocations to a
+// THE FIX: keep the default heap in SRAM (linker/alt_qspi.lds), and route ONLY Csound's allocations to a
 // dedicated SDRAM pool, armed by CsoundEngine::init() (which runs AFTER _hw.Init(), so SDRAM is
 // live by then). We intercept the C malloc family via linker --wrap; when armed, allocations come
 // from the SDRAM pool, otherwise they pass through to the real SRAM heap.

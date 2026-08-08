@@ -13,8 +13,14 @@
 // process interleaved per-sample, so each deck owns its own GfCloud instance (acquire() by deck index).
 // The grain scratch lives in fast regular RAM (static instances); only the audio Buffer is SDRAM.
 
+// <cstdint> BEFORE the vendored headers: gfParam.h declares `enum class ... : std::uint8_t` but never
+// includes <cstdint>, relying on a transitive include that arm-none-eabi happens to provide and the
+// host toolchain does not. Without this, host/test_graincloud.cpp fails to compile on the enum's
+// underlying type - which is why that test sat broken and excluded from `make -C host test`.
+#include <cstdint>
+
 #include "grainflow/gfGrainCollection.h"
-#include "buffer.h"
+#include "buffer.h"   // shared: graincloud is the granular tree built with SPK_GRAIN_GF
 
 namespace spotykach {
 

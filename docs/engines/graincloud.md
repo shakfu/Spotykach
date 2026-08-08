@@ -1,8 +1,8 @@
 # graincloud engine
 
-`ENGINE=graincloud` · `src/engine/graincloud/` · class `GraincloudEngine`
+`ENGINE=graincloud` · `src/engine/granular/` + `src/engine/graincloud/` · class `GraincloudEngine`
 
-A polyphonic grain **cloud** (engine #11 in [`docs/engine-ideas.md`](../engine-ideas.md)) - the granular the looper isn't: dozens of grains with independent pitch / pan / position scattered over the recorded buffer. It is built as a **self-contained variant of the `granular` engine**: `src/engine/graincloud/` is a copy of the granular tree (so it keeps granular's recording, SD save/load, dual-deck, crossfade, FX and UI verbatim) with only the grain-generation core replaced - `Generator::process` sums a GrainflowLib cloud (`gf_cloud.{h,cpp}`) reading the recorded `Buffer` instead of driving the granular Vox. It is its own engine (`SPK_ENGINE_GRAINCLOUD`); plain `granular` is untouched.
+A polyphonic grain **cloud** (engine #11 in [`docs/engine-ideas.md`](../engine-ideas.md)) - the granular the looper isn't: dozens of grains with independent pitch / pan / position scattered over the recorded buffer. It is built as a **flavour of the `granular` engine**: the same source tree compiled with `SPK_GRAIN_GF` (so it keeps granular's recording, SD save/load, dual-deck, crossfade, FX and UI verbatim) with only the grain-generation core replaced - `Generator::process` sums a GrainflowLib cloud (`src/engine/graincloud/gf_cloud.{h,cpp}`) reading the recorded `Buffer` instead of driving the granular Vox. It is its own engine (`SPK_ENGINE_GRAINCLOUD`) with its own IEngine wrapper; plain `granular` is untouched and a granular build never compiles a line of GrainflowLib.
 
 > Implementation, the GrainflowLib port, the per-block/per-sample bridge, and the file map live in [`docs/dev/graincloud-impl.md`](../dev/graincloud-impl.md).
 
@@ -41,11 +41,11 @@ Grain count is 8 per deck (a conservative, CPU-safe default; raise after a `METE
 ## Build / flash
 
 ```text
-make -j8 ENGINE=graincloud        # compiles src/engine/graincloud/ + vendored GrainflowLib, at -Os
+make -j8 ENGINE=graincloud        # compiles the granular tree with SPK_GRAIN_GF + vendored GrainflowLib, at -Os
 make ENGINE=graincloud program-dfu
 make engine-graincloud            # one-shot: clean + build + flash
 ```
 
-Builds at `-Os` (the granular code + the GrainflowLib templates overflow the 186 KB execution SRAM at `-O2`); fits at ~97%. The grain scratch lives in fast RAM (static per-deck), only the recorded buffer is SDRAM. The vendored, de-STL'd GrainflowLib is under `src/engine/graincloud/thirdparty/grainflow/`.
+Builds at `-Os` (the granular code + the GrainflowLib templates overflow the execution SRAM at `-O2`). The grain scratch lives in fast RAM (static per-deck), only the recorded buffer is SDRAM. The vendored, de-STL'd GrainflowLib is under `src/engine/graincloud/thirdparty/grainflow/`.
 
 > **On-device cost** of the scattered grain reads is unconfirmed; if a high-density patch glitches, lower the grain count in `gf_cloud.h` (`kMaxGrains`) and/or run `METER=1` to find the ceiling.

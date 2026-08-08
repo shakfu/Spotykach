@@ -1,0 +1,503 @@
+/* app.css - the Tailwind source. Built to dist/app.css by `make web-build`; edit this, never dist/.
+ *
+ * This replaced three stylesheets over two vendored frameworks (system.css for the System 6 look,
+ * water.css light and dark for the other two). What is kept from that design is the part that was
+ * actually load-bearing:
+ *
+ *   1. TOKENS FIRST. The old app.css was written against 63 custom properties so it survived either
+ *      framework. Those tokens are now the @theme block below, which is the same idea with the
+ *      utilities generated from it - `bg-surface` and `--color-surface` cannot drift apart.
+ *
+ *   2. SEVERITY IS NOT CARRIED BY COLOUR ALONE. The old System 6 theme was genuinely 1-bit, which
+ *      forced every finding to state its level as a WORD in the markup and to reinforce it with
+ *      inversion and rule weight. Colour is available now, so it is used - but the word and the rule
+ *      weight stay, because they are what a colour-blind reader and a screen reader actually get.
+ *      Losing them would be a real regression dressed up as a redesign.
+ *
+ * WHY COMPONENT CLASSES AND NOT PURE UTILITIES. Most of this page's markup is generated in
+ * src/ui/*.ts as template strings, in loops - a finding, a console line, a table row. Inlining
+ * utilities there would put the styling inside TypeScript string concatenation, where it cannot be
+ * read, diffed or reused, and would be repeated per iteration. So static markup in index.html carries
+ * utilities directly, and anything emitted from a loop keeps a semantic name defined here with
+ * @apply. That is the split Tailwind's own docs recommend, not a hedge.
+ */
+
+@import "tailwindcss";
+
+/* Explicit, rather than letting v4 auto-detect from this file's directory upward. Auto-detection
+ * would also walk dist/ and node_modules/, and - worse for correctness - it would MISS engines/,
+ * which is generated markup outside src/. Naming the three roots keeps the scan honest and fast.
+ */
+@source "../index.html";
+@source "../src/**/*.ts";
+@source "../engines/**/*.html";
+
+/* Dark is a CHOICE, not a preference - the same decision the previous design made deliberately.
+ * `prefers-color-scheme` is NOT consulted: the reader picks in the View menu and it is remembered.
+ * Tailwind's stock `dark:` variant follows the media query, so it is redefined here against the
+ * attribute src/ui/theme.ts sets on <html>.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+  /* Palette carried over from themes/plain.css and themes/dark.css so the light theme is the same
+     page it was, and dark keeps the accessible danger/warn/good the old dark skin had to hand-pick
+     (water.css's own reds were unreadable on its dark ground). */
+  --color-ink: #363636;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f5f7ff;
+  --color-muted: #70777f;
+  --color-line: #dbdbdb;
+  --color-accent: #0076d1;
+  --color-danger: #b3261e;
+  --color-warn: #8a5a00;
+  --color-good: #1c6b3c;
+
+  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* The app's reading measure.
+   *
+   * Was 68ch - the classic figure, and the wrong one HERE. The pane it sits in is ~58rem wide, so
+   * prose filled about 62% of it and the empty right-hand third read as a layout bug rather than as
+   * typography. A measure only looks deliberate when it is CLOSE to its container; far short of one,
+   * it just looks like the text failed to reach the margin. 92ch nearly fills the pane at the card's
+   * full width and still caps the line before it becomes hard to track back to.
+   */
+  --container-measure: 92ch;
+
+  /* The measure for rendered engine manuals, which are their own column inside the pane.
+   *
+   * `--container-doc`, NOT `--container-prose`: Tailwind ships a built-in `max-w-prose` hardcoded to
+   * 65ch, and it SHADOWS a same-named theme token rather than being overridden by it. Defining
+   * `--container-prose: 88ch` compiled without complaint and silently emitted 65ch, which is the
+   * measure the manuals were widened away from - 65ch left half the window empty beside a control
+   * table that then had to scroll. A test pins the built value.
+   */
+  --container-doc: 88ch;
+}
+
+/* The dark palette. Only the values change: every rule below is written against the token, so this
+   block is the entire theme rather than a second copy of the app. */
+[data-theme="dark"] {
+  --color-ink: #dbdbdb;
+  --color-surface: #202b38;
+  --color-surface-alt: #1a242f;
+  --color-muted: #a9b1ba;
+  --color-line: #526980;
+  --color-accent: #41adff;
+  --color-danger: #ff8a80;
+  --color-warn: #e0a336;
+  --color-good: #6ee7a8;
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    background: var(--color-surface-alt);
+    color: var(--color-ink);
+    font-family: var(--font-ui);
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-surface-alt);
+    color: var(--color-ink);
+    line-height: 1.45;
+    /* Nothing may push the document wider than the viewport. A single long path or unbroken
+       identifier in a finding is enough to do it, and the symptom is the whole page sliding sideways
+       under a scrollbar rather than the one element that caused it looking wrong. */
+    overflow-x: hidden;
+  }
+
+  /* Long unbroken strings - card paths, device replies, engine identifiers - break rather than
+     stretch their container. */
+  p, li, td, th, summary { overflow-wrap: anywhere; }
+
+  h1 { @apply text-lg font-bold; }
+  h2 { @apply text-base font-bold; }
+  h3 { @apply mt-7 mb-2 text-base font-bold; }
+  h4 { @apply mt-5 mb-1.5 text-[.85rem] font-bold uppercase tracking-[.04em]; }
+
+  a { @apply text-accent underline underline-offset-2 hover:no-underline; }
+  code { @apply font-mono text-[.92em]; }
+  strong { @apply font-bold; }
+  p { margin: .5rem 0; }
+  hr { @apply my-6 border-0 border-t border-line; }
+
+  /* The controls. These were the frameworks' whole job, so they are rebuilt once, here, rather than
+     repeated as utilities on every button the app emits. */
+  button, .btn {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-3 py-1.5
+           text-sm text-ink transition-colors cursor-pointer;
+  }
+  button:hover:not(:disabled) { @apply bg-surface-alt; }
+  button:focus-visible, a:focus-visible, summary:focus-visible,
+  input:focus-visible, select:focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+  button:disabled { @apply cursor-not-allowed opacity-50; }
+
+  button.primary { @apply border-accent bg-accent text-surface; }
+  button.primary:hover:not(:disabled) { @apply brightness-110; }
+
+  input[type="text"], input[type="number"], input[type="search"], select, textarea {
+    @apply rounded-md border border-line bg-surface px-2 py-1 text-sm text-ink;
+  }
+
+  input[type="range"] { @apply accent-accent; }
+
+  table { @apply border-collapse; }
+
+  dialog { @apply text-ink; }
+  dialog::backdrop { background: rgb(0 0 0 / .45); }
+
+  /* Put back what Preflight took away.
+   *
+   * A modal <dialog> is centred by the browser's own `dialog:modal { margin: auto }`, and Tailwind's
+   * Preflight zeroes `margin` on every element - which outranks the UA sheet and pins every modal to
+   * the top-left corner. It is not a layout bug in the dialog's own rules, which is what makes it
+   * confusing to chase: `.modal-dialog` looks correct and the dialog is still in the wrong place.
+   * `:modal` rather than `[open]` on purpose - a non-modal dialog is positioned in flow and should
+   * NOT be centred. A test asserts this survives, because a Preflight interaction is exactly the kind
+   * of fix that vanishes silently on a major upgrade.
+   */
+  dialog:modal { margin: auto; }
+
+  [hidden] { display: none !important; }
+}
+
+@layer components {
+
+  /* --- page chrome ------------------------------------------------------------------------------ */
+
+  /* The window conceit is gone with System 6, but the containing card is not: it is what keeps the
+     tool from being a full-bleed wall of text on a wide screen. */
+  /* `w-[min(...)]` rather than `max-w-5xl mx-auto`: max-width alone lets the card touch both screen
+     edges on any viewport narrower than the cap, which is every phone. This keeps a gutter at all
+     widths and still centres. */
+  .window {
+    @apply mx-auto my-4 rounded-lg border border-line bg-surface shadow-sm;
+    width: min(64rem, 100% - 1.5rem);
+  }
+
+  .window-pane { @apply p-6; }
+
+  .menubar {
+    @apply sticky top-0 z-20 flex items-center gap-1 border-b border-line bg-surface px-3 py-1.5 text-sm;
+  }
+
+  /* A menu is held open by focus - the same contract the old CSS-only menus had, so no JS is needed
+     to open one and the keyboard path is the mouse path.
+     The padding is on the LI, not on its contents: the top-level items are a mix of bare text
+     ("Engines") and buttons ("Home"), and styling only the buttons ran the text ones together into
+     "Engines SD Card Device View". Padding the item makes every kind of top-level entry the same
+     size and gives each a hit area worth aiming at. */
+  .menubar > li {
+    @apply relative list-none rounded px-2.5 py-1 whitespace-nowrap cursor-pointer;
+  }
+  .menubar > li:hover, .menubar > li:focus-within { @apply bg-surface-alt; }
+
+  .menubar [role="menu"] {
+    @apply invisible absolute left-0 top-full z-30 min-w-52 rounded-md border border-line
+           bg-surface p-1 opacity-0 shadow-lg transition-opacity;
+  }
+
+  .menubar > li:hover [role="menu"],
+  .menubar > li:focus-within [role="menu"] { @apply visible opacity-100; }
+
+  .menubar [role="menu"] button,
+  .menubar [role="menu"] a {
+    @apply block w-full rounded border-0 bg-transparent px-2 py-1 text-left text-sm no-underline;
+  }
+
+  .menubar [role="menu"] button:hover,
+  .menubar [role="menu"] a:hover { @apply bg-surface-alt; }
+
+  /* A top-level bar item that IS the control rather than opening one. */
+  /* Negative margins that exactly cancel the item's padding, so the button COVERS the whole item
+     rather than just its text. Without this the padding around the label looks clickable - the item
+     has the pointer cursor and the hover fill - and does nothing, which is the most irritating kind
+     of near-miss. Sizes here must stay in step with `.menubar > li` above. */
+  .menubar > li > button {
+    @apply -mx-2.5 -my-1 rounded border-0 bg-transparent px-2.5 py-1 text-sm font-normal
+           leading-[inherit];
+  }
+  .menubar > li > button:hover { @apply bg-transparent; }
+
+  /* --- front page ------------------------------------------------------------------------------- */
+
+  /* The global actions, repeated from the menus as visible buttons. Auto-fit rather than a fixed
+     column count: four cards on a desktop, two on a tablet, one on a phone, with no breakpoint to
+     maintain per screen size. */
+  .action-grid {
+    @apply my-6 grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  }
+
+  /* A button, not a link: these change what the page is showing rather than navigating to a document,
+     and they carry no href a browser could usefully open in a new tab. */
+  .action-card {
+    @apply h-full items-start gap-1 rounded-lg border border-line bg-surface-alt p-4 text-left;
+    @apply flex flex-col;
+  }
+  .action-card:hover { @apply border-accent bg-surface; }
+  .action-label { @apply text-base font-bold; }
+  .action-note { @apply text-sm text-muted; }
+
+  /* --- engine catalogue --------------------------------------------------------------------------- */
+
+  .engine-grid {
+    @apply my-6 grid gap-3;
+    grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  }
+
+  /* An anchor, unlike the action cards: an engine page has a real, shareable URL, so middle-click and
+     open-in-new-tab have to keep working. `no-underline` undoes the base link rule; the card frame is
+     the affordance here, and an underline through a heading and a paragraph would be noise. */
+  .engine-card {
+    @apply flex h-full flex-col gap-1 rounded-lg border border-line bg-surface-alt p-4 no-underline;
+    @apply text-ink transition-colors;
+  }
+  .engine-card:hover { @apply border-accent bg-surface; }
+  .engine-card-title { @apply text-base font-bold; }
+  .engine-card-desc { @apply text-sm text-muted; }
+
+  /* The one fact worth stating on every card: whether this engine needs an SD card prepared at all.
+     It is the first practical question about any of them. */
+  .engine-card-tag {
+    @apply self-start rounded border border-line px-1.5 py-px text-[.7rem] uppercase tracking-[.05em];
+  }
+
+  /* --- layout helpers --------------------------------------------------------------------------- */
+
+  .controls { @apply my-4 flex flex-wrap items-center gap-2; }
+  .fields { @apply mt-4 mb-2 flex flex-wrap gap-4; }
+  .field { @apply flex flex-col gap-0.5 text-sm; }
+  .field.inline { @apply flex-row items-center gap-1.5; }
+  /* No cap of its own: an intro paragraph is the widest thing on a screen and should meet the same
+     margin as the controls beneath it. The pane and --container-measure bound it already. */
+  .lead { @apply mb-4; }
+  .note { @apply text-sm; }
+  .muted { @apply text-muted; }
+  .mono { @apply font-mono text-[.92em]; }
+  .status { @apply my-2 font-mono text-[.88rem]; }
+  .actions { @apply flex flex-wrap gap-1.5; }
+
+  /* Sized inputs. These needed an #panels prefix before, to out-specify a theme resetting
+     `input[type=text] { width: auto }` at the same weight but later in the cascade. There is no
+     second stylesheet to lose to now, so they are plain classes again. */
+  input.slot { @apply w-24; }
+  input.filter { @apply w-full max-w-88; }
+
+  /* A button that reads as a link: used for destructive-but-minor actions like removing one queued
+     file, where a full button would out-shout the thing it sits next to. */
+  button.link { @apply border-0 bg-transparent px-1.5 py-0.5 text-accent underline; }
+  button.link:hover { @apply bg-transparent no-underline; }
+  button.danger { @apply border-danger bg-surface-alt text-danger; }
+  button.danger:hover:not(:disabled) { @apply bg-danger text-surface; }
+  .actions button { @apply font-mono text-[.85rem]; }
+
+  /* --- dropzone --------------------------------------------------------------------------------- */
+
+  .dropzone {
+    @apply rounded-lg border-2 border-dashed border-line px-4 py-5 text-center transition-colors;
+  }
+  /* `dragging` is the name the views toggle (dom.ts / verify_view.ts), not `over`. */
+  .dropzone.dragging { @apply border-accent bg-surface-alt; }
+  .dropzone p { @apply my-1; }
+
+  .filelist { @apply my-3 list-none p-0; }
+  .filelist li {
+    @apply flex items-center gap-3 border-b border-dotted border-line px-1.5 py-1 text-sm;
+  }
+  .filelist .name { @apply flex-1 font-mono; }
+
+  /* --- findings: severity, still not carried by colour alone ------------------------------------ */
+
+  /* Each finding states its level as a WORD in the markup (.badge), and reinforces it with rule
+     WEIGHT and STYLE - solid and heavy for an error, dotted for a warning, hairline for ok. Colour is
+     now a fourth channel rather than the only one. Drop the badge or the weight and this page stops
+     working for a colour-blind reader, which is exactly how it was before the redesign. */
+
+  /* The modifier names here are the ones the VIEWS emit - `error` (not `err`), and bad/mixed/good on
+     a verdict. Getting this wrong is silent and severe: the rule still parses, the markup still
+     renders, and the only symptom is that a failing card no longer looks like one. */
+  .verdict {
+    @apply my-4 rounded-lg border-2 border-line bg-surface-alt px-4 py-3;
+  }
+  .verdict p { @apply mt-1.5 mb-0; }
+  .verdict.good { @apply border-good; }
+  .verdict.bad { @apply border-danger; }
+  .verdict.mixed { @apply border-warn; }
+
+  .finding { @apply my-2 rounded-r-md border-l-[6px] border-line px-3 py-2; }
+  .finding.error { @apply border-danger bg-danger/5; }
+  .finding.warn { @apply border-warn border-dotted bg-warn/5; }
+  .finding.ok { @apply border-l-2 border-good; }
+
+  .finding .badge {
+    @apply mr-1.5 inline-block rounded border border-line px-1.5 py-px align-middle
+           font-ui text-[.72rem] font-bold uppercase tracking-[.06em];
+  }
+  .finding.error .badge { @apply border-danger bg-danger text-surface; }
+  .finding.warn .badge { @apply border-warn text-warn; }
+  .finding.ok .badge { @apply border-good text-good; }
+
+  .finding .path { @apply font-mono text-sm font-bold; }
+  .finding .problem { @apply mt-0.5; }
+  .finding .fix { @apply mt-1 whitespace-pre-wrap text-sm; }
+  .finding .fix::before { content: "-> "; }
+
+  /* A standing fact about the tool, not a result - so it stays quieter than a verdict or a finding. */
+  .callout { @apply my-4 border-l-2 border-line py-2 pl-3 text-[.92rem]; }
+  .callout.warn { @apply border-l-4 border-warn; }
+  .callout.engine { @apply border-accent; }
+  .results { @apply mt-4; }
+
+  /* --- folded explanation ----------------------------------------------------------------------- */
+
+  /* Every rule on this page has a reason worth keeping and none is worth reading before you can press
+     a button, so the reasoning folds. */
+  .aside { @apply my-4 text-[.92rem]; }
+  .aside + .aside { @apply mt-1.5; }
+  .aside > summary { @apply cursor-pointer list-none py-0.5 underline underline-offset-2; }
+  .aside > summary::-webkit-details-marker { display: none; }
+  .aside > summary::before {
+    content: "";
+    @apply mr-1.5 inline-block h-0 w-0 align-middle transition-transform;
+    border: .3rem solid transparent;
+    border-left-color: currentColor;
+  }
+  .aside[open] > summary::before { @apply rotate-90; }
+  .aside > * { @apply max-w-measure; }
+  .aside > p { @apply my-2 ml-4; }
+  .aside > table { @apply ml-4; }
+
+  /* --- tables ----------------------------------------------------------------------------------- */
+
+  table.layout { @apply my-2 w-full text-sm; }
+  table.layout th { @apply px-2 py-1.5 text-left font-bold; }
+  table.layout td { @apply border-t border-line px-2 py-1.5; }
+
+  table.spec th {
+    @apply w-36 border-t border-line px-2 py-1.5 align-top font-normal text-left;
+  }
+  table.spec td { @apply border-t border-line px-2 py-1.5 align-top break-words; }
+
+  /* --- reference -------------------------------------------------------------------------------- */
+
+  .chips { @apply my-1 flex flex-wrap gap-1; }
+  .chips button { @apply px-2 py-0.5 font-mono text-[.85rem]; }
+  .chips button.on { @apply border-accent bg-accent text-surface; }
+
+  .ref-banks tr.src { @apply hidden; }
+  .ref-banks.show-src tr.src { @apply table-row; }
+
+  .ref-bank { @apply my-6; }
+  .ref-bank h3 { @apply mb-1 uppercase; }
+  .ref-bank h3 span { @apply text-[.82rem] font-normal normal-case; }
+  .ref-bank p { @apply my-1 max-w-measure; }
+  .summary { @apply my-1 max-w-measure text-muted; }
+
+  /* --- terminal --------------------------------------------------------------------------------- */
+
+  .console {
+    @apply h-68 overflow-y-auto rounded-md border border-line bg-surface-alt px-3 py-2
+           font-mono text-[.88rem];
+  }
+
+  /* Line kinds are distinguished by weight and colour together, never colour alone. */
+  .console .line { @apply whitespace-pre-wrap break-words; }
+  .console .sent { @apply font-bold; }
+  .console .ok { @apply font-bold text-good; }
+  .console .err { @apply font-bold text-danger; }
+  .console .log, .console .meta { @apply text-muted; }
+
+  .cmdline { @apply w-full font-mono text-sm; }
+
+  /* The terminal's three stacked panels: the control surface, the CPU readout and the USB diagnostic. */
+  .surface { @apply my-3 grid gap-1; }
+  .cpu { @apply my-3; }
+  .cpu-readout { @apply ml-2 font-bold; }
+  .usb { @apply my-3; }
+  .row { @apply grid grid-cols-1 items-center gap-2 text-sm md:grid-cols-[11rem_1fr_auto_auto]; }
+  .row label { @apply font-mono; }
+  .row .value { @apply min-w-20 font-mono md:text-right; }
+  .row input[type="range"] { @apply w-full; }
+
+  canvas.plot { @apply my-2 h-auto w-full rounded-md border border-line; }
+
+  /* --- engine documentation --------------------------------------------------------------------- */
+
+  /* The one place on the page showing prose written for READING rather than labels written for
+     scanning, so it gets a measure and a looser rhythm. The measure belongs to the prose only:
+     a paragraph wants 88 characters, a 4000-unit-wide control diagram wants every pixel there is. */
+  .engine-meta { @apply mb-3 font-mono; }
+  .engine-format { @apply mb-4; }
+  .engine-doc { @apply max-w-none [overflow-wrap:anywhere]; }
+  .engine-doc > p,
+  .engine-doc > ul,
+  .engine-doc > ol,
+  .engine-doc > blockquote,
+  .engine-doc > h2,
+  .engine-doc > h3,
+  .engine-doc > h4 { @apply max-w-doc; }
+
+  .engine-doc h2 { @apply mt-7 mb-1.5 text-lg; }
+  .engine-doc h3 { @apply mt-6 mb-1 text-base; }
+  .engine-doc h4, .engine-doc h5, .engine-doc h6 { @apply mt-4 mb-1 text-[.92rem] normal-case tracking-normal; }
+  .engine-doc p, .engine-doc li { @apply leading-relaxed; }
+  .engine-doc ul { @apply list-disc pl-6; }
+  .engine-doc ol { @apply list-decimal pl-6; }
+  .engine-doc li { @apply my-0.5; }
+  .engine-doc blockquote { @apply my-4 border-l-4 border-double border-line pl-4; }
+  .engine-doc a { @apply break-words; }
+  .engine-doc pre { @apply my-3 overflow-x-auto rounded-md border border-line bg-surface-alt p-3 text-[.85rem] leading-snug; }
+  .engine-doc pre code { @apply text-[1em]; }
+
+  /* Doc tables are control maps and parameter lists - the widest cannot reflow, so they scroll inside
+     their own box rather than pushing the page sideways. */
+  .engine-doc table { @apply my-3 block max-w-full overflow-x-auto text-[.88rem]; }
+  .engine-doc th, .engine-doc td { @apply border border-line px-2 py-1.5 text-left align-top; }
+  .engine-doc th { @apply font-bold; }
+
+  .engine-doc figure { @apply my-5 max-w-none; }
+  .engine-doc figure a { @apply block no-underline; }
+  /* White backing in BOTH themes on purpose: the control diagrams are black line art on transparency,
+     so on a dark ground they would otherwise be black on black. */
+  .engine-doc img { @apply block h-auto w-full rounded border border-line bg-white; }
+  .engine-doc figcaption { @apply mt-1 text-[.85rem] text-muted; }
+  /* Emitted by scripts/web_export.py into the generated engine pages, not by src/ - so the rule has
+     to exist here whether or not the class appears anywhere the scanner reads. */
+  .engine-doc figcaption .pdf-link { @apply ml-2; }
+  .lightbox-actions .pdf-link { @apply self-center; }
+
+  /* --- dialogs ---------------------------------------------------------------------------------- */
+
+  .modal-dialog {
+    @apply max-w-xl rounded-lg border border-line bg-surface p-0 text-ink shadow-xl;
+  }
+  .modal-contents { @apply p-5; }
+
+  /* Fit shows the shape of a diagram, Actual shows what its labels say; no screen does both at once
+     for a four-thousand-unit drawing, so the viewer opens on Fit and the toggle is one click away. */
+  .lightbox {
+    @apply h-[92vh] max-h-[92vh] w-[96vw] max-w-[96vw] overflow-hidden rounded-lg border
+           border-line bg-surface p-0 text-ink;
+  }
+  .lightbox-bar {
+    @apply flex items-center justify-between gap-4 border-b border-line px-3 py-2;
+  }
+  .lightbox-bar p { @apply m-0; }
+  .lightbox-actions { @apply flex gap-2; }
+  .lightbox-frame {
+    @apply grid h-[calc(92vh-3.25rem)] place-items-center overflow-auto bg-white;
+  }
+  .lightbox-frame img { @apply h-auto max-h-full w-auto max-w-full; }
+  .lightbox-frame.actual { @apply place-items-start; }
+  .lightbox-frame.actual img { @apply h-auto w-auto max-h-none max-w-none; }
+
+  footer { @apply mt-8 border-t border-line pt-3 text-sm; }
+  footer p { @apply max-w-measure; }
+}

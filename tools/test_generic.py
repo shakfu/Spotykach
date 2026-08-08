@@ -20,10 +20,22 @@ _MASKED = [True]   # filled by _params(); a list so the closure can write it at 
 
 
 def _params():
-    """Collection-time: open, describe, close. Returns [] when no hardware."""
+    """Collection-time: open, describe, close. Returns [] when no USABLE hardware.
+
+    Catches OSError as well as Timeout, and the difference is not cosmetic. This runs at MODULE level
+    (the parametrize decorator calls it), so anything it raises is a pytest COLLECTION error, which
+    aborts the entire session - including test_descriptor.py, which needs no device at all. Timeout
+    alone covers "nothing attached"; it does not cover a port that exists but cannot be opened:
+    permission denied (the port is root:dialout and the user is not in that group), the port already
+    held by a REPL/screen session, or the device unplugged between discovery and open. pyserial raises
+    SerialException for all of those, which subclasses OSError.
+
+    Returning [] degrades to zero parametrized cases, so the run reports skips instead of collapsing.
+    The `device` fixture in conftest.py reports the actual reason.
+    """
     try:
         dev = Device()
-    except Timeout:
+    except (Timeout, OSError):
         return []
     try:
         d = dev.describe()

@@ -1,0 +1,15 @@
+<p><code>ENGINE=granular</code> (default) · <code>src/engine/granular/</code> (~50 files: adapter <code>granular_engine.{h,cpp}</code> + DSP) · class <code>GranularEngine</code></p>
+<p>The original instrument and the default build: a two-deck granular looper/sampler with recording, overdub, feedback, a per-deck step sequencer, FX, and CV/MIDI. This is the largest engine; this page is an orientation. Deeper material lives in <code>docs/architecture.md</code>, <code>docs/engine-layout.md</code>, and the refactor-history docs.</p>
+<blockquote><p>Implementation, the DSP graph, and the file map live in <a href="https://github.com/shakfu/sk-engines/blob/main/docs/dev/granular-impl.md"><code>docs/dev/granular-impl.md</code></a>.</p></blockquote>
+<h3>Modes (the routing/sequencer behavior the manual describes)</h3>
+<ul><li><strong>Slice</strong> — playback and recording are synced to the clock.</li></ul>
+<ul><li><strong>Reel / Drift</strong> — playback and recording are unsynced (free).</li></ul>
+<ul><li>When the <strong>sequencer</strong> is engaged, the clock drives playback in all modes.</li></ul>
+<p>These per-mode decisions live inside <code>Deck</code>; the engine forwards every transport tick to every deck and the deck's mode logic decides whether to act (see the transport-decoupling note below).</p>
+<h3>Transport</h3>
+<p>Granular <code>Core</code> subscribes to the platform transport (<code>ITransport::set_on_tick</code>) and fans each tick out to the decks / panner / modulators / metronome click (the <code>Core::_on_transport_tick</code> sink — the granular half of the old <code>Driver</code>, which was split into the platform <code>Transport</code> + this sink). It also reads <code>is_key_sub_quarter()</code> for sequencer arming. Tempo, tap, clock-source, key-interval, and clock-out are platform-owned (see <a href="https://github.com/shakfu/sk-engines/blob/main/docs/engines/README.md#the-transport-shared-clock">README</a>).</p>
+<h3>Controls</h3>
+<p>Granular is the engine the platform's knob/modifier grammar was designed around, so it uses the full surface (the modifier columns in the <a href="https://github.com/shakfu/sk-engines/blob/main/docs/engines/README.md#knobs-how-a-physical-control-reaches-an-engine">README routing table</a>): the direct knobs (Size/Pos/Speed/Mix/Env), the Flux/Grit FX-pad layers, the Alt layer (Feedback, PolySlice, mod sync), and the tap-hold layer (Tempo, KeyInterval, ClickMix, Pan). Pads drive record / play / reverse / sequencer-arm / FX, and MIDI notes trigger pitched grains. The mode/route switches go through <code>set_config</code>.</p>
+<p>For the exhaustive control reference, the device's user manual is the authority (see the project <code>spotykach-manual</code> notes); <code>docs/architecture.md</code> covers the platform/engine seam.</p>
+<h3>Persistence</h3>
+<p><code>Storage</code> saves/loads loop audio and <code>config.txt</code> on the SD card via the engine's byte-range audio port (<code>audio_data</code> / <code>audio_recorded_bytes</code> / ...); <code>Settings</code> persists smaller settings. Granular advertises the tape-storage capability.</p>

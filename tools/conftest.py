@@ -22,6 +22,14 @@ def device():
         dev = Device()
     except Timeout:
         pytest.skip("no sk-engines device attached")   # make test-hw no-ops without hardware
+    except OSError as e:
+        # The port EXISTS but will not open - a different situation from "nothing attached", and one
+        # the Timeout-only guard used to turn into a hard error. Commonly: permission denied (the port
+        # is root:dialout; `sudo usermod -aG dialout $USER`, then re-login), or the port already held
+        # by skterm.py / screen. pyserial's SerialException subclasses OSError. Skip rather than fail,
+        # since none of these say anything about the firmware - but name the reason, because a silent
+        # skip here looks identical to "no hardware" and that cost a debugging cycle once already.
+        pytest.skip(f"sk-engines device found but not usable: {e}")
     yield dev
     dev.close()
 

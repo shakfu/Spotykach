@@ -5,6 +5,15 @@
 build-cmake/
 build-*/
 dist/
+# `make dist-cmake` output. Needs its own entry: `dist/` above matches that name exactly and
+# `build-*/` does not apply, so without this line every CMake-built release artifact shows up as
+# untracked. Kept separate from dist/ on purpose - see the dist-cmake target in the Makefile.
+dist-cmake/
+# ...but the web front-end's bundle IS a tracked artifact: GitHub Pages serves web/ as-is, so the
+# built app.js has to be in the tree or a fresh checkout cannot open the page. `make web-build`
+# regenerates it, and a test fails if it is older than src/.
+!web/dist/
+!web/dist/**
 *.log
 *.mmon
 .*_cache
@@ -25,9 +34,13 @@ __pycache__/
 *.dSYM
 runner
 
+# web front-end: typescript is a devDependency for `tsc --noEmit` only; nothing ships from here
+node_modules/
+
 # agents
 .claude
 CLAUDE.md
+REVIEW.md
 
 
 # tooling (clangd) - regenerate with: bear -- make

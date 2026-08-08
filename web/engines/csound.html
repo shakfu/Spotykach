@@ -1,0 +1,45 @@
+<p>The <code>csound</code> engine runs a full <a href="https://csound.com">Csound</a> 7 instance as a synth on the spotykach. An orchestra (a <code>.csd</code> text document) is compiled and performed at runtime, so the <strong>patch — not the firmware — defines the sound</strong>. You load orchestras from the SD card, switch between them live, and play them from the panel knobs and over MIDI.</p>
+<p>It behaves like any other engine on the panel, but is built and flashed a little differently: Csound's code is ~2 MB (too big for SRAM), so this is a <strong>QSPI build</strong> that executes from flash. Internals (memory model, allocator, bring-up notes, roadmap) are in <a href="https://github.com/shakfu/sk-engines/blob/main/docs/dev/csound-impl.md"><code>docs/dev/csound-impl.md</code></a>.</p>
+<figure><a href="engines/media/csound-controls.svg" target="_blank" rel="noreferrer"><img src="engines/media/csound-controls.svg" alt="Csound control surface" loading="lazy" width="1891" height="1874"></a><figcaption>Csound control surface - open full size <a href="engines/media/csound-controls.pdf" download class="pdf-link">download PDF</a></figcaption></figure>
+<p>_Generated from <a href="https://github.com/shakfu/sk-engines/blob/main/docs/diagrams/controls/csound.json"><code>docs/diagrams/controls/csound.json</code></a> via <code>make diagrams</code>._</p>
+<h3>Build &amp; flash</h3>
+<p>One-time: build the Csound library (needs <code>cmake</code> and the <code>arm-none-eabi</code> GCC toolchain):</p>
+<pre><code>scripts/fetch_csound.sh          # download Csound 7 + cross-build libcsound.a</code></pre>
+<p>Then build + flash the engine (put the board in DFU first):</p>
+<pre><code>make engine-csound               # clean + build the QSPI image + flash
+make program-csound              # re-flash the last build without rebuilding</code></pre>
+<p>Recover the board at any time by flashing any normal engine.</p>
+<h3>Controls</h3>
+<p>With the built-in orchestra (used when no SD patch is loaded):</p>
+<table><thead><tr><th>Control</th><th>Effect</th></tr></thead><tbody><tr><td><strong>PITCH</strong></td><td>pitch</td></tr><tr><td><strong>SIZE</strong></td><td>brightness (filter cutoff)</td></tr><tr><td><strong>MIX</strong></td><td>level</td></tr><tr><td><strong>MIDI NoteOn</strong></td><td>plays a note (channel 1 → deck A, channel 2 → deck B)</td></tr><tr><td><strong>centre mode LED</strong></td><td>white = built-in orchestra, cyan = an SD patch is loaded</td></tr></tbody></table>
+<p>What each knob actually does is up to the patch (it reads named control channels) — the table above is the convention the bundled patches follow.</p>
+<h3>Loading patches from the SD card</h3>
+<p>Put full CSD documents in a <code>csound/</code> folder at the card root, named <code>0.csd</code> … <code>7.csd</code>:</p>
+<pre><code>&lt;card&gt;/csound/0.csd
+&lt;card&gt;/csound/1.csd</code></pre>
+<p>Ready-to-copy examples are in <a href="https://github.com/shakfu/sk-engines/blob/main/examples/csound"><code>examples/csound/</code></a> — a drone+pluck, a fat bass, and a polyphonic MIDI lead, with a README.</p>
+<ul><li>At boot the engine <strong>auto-loads</strong> the lowest-numbered patch (or the built-in if the card has none).</li></ul>
+<ul><li><strong>Hold Alt and turn PITCH</strong> to scroll the selector (a dot per patch around the rings); <strong>release</strong> to switch to it live. The centre LED turns cyan for an SD patch, white for the built-in.</li></ul>
+<ul><li>Anything missing, malformed, or that fails to compile falls back to the built-in, so the unit always makes sound.</li></ul>
+<h3>Writing a patch</h3>
+<p>A patch is an ordinary CSD. To be driven by the panel, read these control channels with <code>chnget</code> (deck A / deck B):</p>
+<table><thead><tr><th>Knob</th><th>Channel</th></tr></thead><tbody><tr><td>PITCH</td><td><code>speedA</code> / <code>speedB</code></td></tr><tr><td>MIX</td><td><code>mixA</code> / <code>mixB</code></td></tr><tr><td>SIZE</td><td><code>sizeA</code> / <code>sizeB</code></td></tr><tr><td>ENV</td><td><code>envA</code> / <code>envB</code></td></tr><tr><td>modifier layer</td><td><code>fbA</code>, <code>modspA</code>, <code>modampA</code> (+ <code>B</code>)</td></tr></tbody></table>
+<p>Define <code>instr MidiNote</code> (with <code>p4</code> = note frequency in Hz) to make the patch playable from MIDI. The <code>examples/csound/</code> orchestras are the templates.</p>
+<p><strong>Format rules that matter</strong> — the on-device CSD parser is line-oriented and strict:</p>
+<ul><li>Each section tag on its <strong>own line</strong>: <code>&lt;CsScore&gt;</code> then <code>&lt;/CsScore&gt;</code>, never <code>&lt;CsScore&gt;&lt;/CsScore&gt;</code> on one line (an empty section collapsed to one line won't compile).</li></ul>
+<ul><li>Include a <code>&lt;CsOptions&gt;&lt;/CsOptions&gt;</code> block (it can be empty).</li></ul>
+<ul><li>A UTF-8 BOM and CRLF (Windows) line endings are tolerated — the engine strips them on load.</li></ul>
+<pre><code>&lt;CsoundSynthesizer&gt;
+&lt;CsOptions&gt;
+&lt;/CsOptions&gt;
+&lt;CsInstruments&gt;
+  ; sr / 0dbfs / nchnls, then your instr 1.. and instr MidiNote
+&lt;/CsInstruments&gt;
+&lt;CsScore&gt;
+&lt;/CsScore&gt;
+&lt;/CsoundSynthesizer&gt;</code></pre>
+<p><strong>MIDI is NoteOn-only</strong> on this platform (no note-off, no velocity), so MIDI notes are fixed-length stabs, not hold-while-pressed. For clean polyphony, sum your voices through a limiter rather than each calling <code>outs</code> (otherwise overlapping notes clip) — see <code>examples/csound/2.csd</code>.</p>
+<h3>Limitations</h3>
+<ul><li><strong>Opcodes:</strong> the entire Csound <strong>core</strong> opcode library is available (oscillators, filters, envelopes, delays, reverbs, the <code>pvs</code> spectral family, granular, physical models — well over a thousand). Excluded by the bare-metal build: <strong>plugin / external opcodes</strong> (no runtime loading) and <strong>soundfile I/O</strong> (<code>diskin</code>, <code>soundin</code>, <code>GEN01</code> / sample-from-WAV — table-generating GENs still work), plus OSC and MIDI-/audio-device opcodes (the host feeds I/O).</li></ul>
+<ul><li><strong>CPU:</strong> code runs from QSPI flash (slower than SRAM), so heavy or dense patches can glitch. Lighter voices and a capped polyphony (<code>maxalloc</code>) help.</li></ul>
+<ul><li><strong>Memory:</strong> Csound gets a 12 MB pool for its patches.</li></ul>

@@ -1,0 +1,22 @@
+<p><code>ENGINE=chorus</code> · <code>src/engine/chorus/</code> · generated from <code>chorus.dsp</code> + <code>chorus.json</code></p>
+<p>A simple <strong>stereo chorus</strong> - and the worked example of the <strong>generated-Faust-engine</strong> path: it is authored as a Faust <code>.dsp</code> plus a small JSON manifest, with <strong>no hand-written C++</strong>. The generator (<code>scripts/gen_faust_engine.py</code>) builds the cyfaust kernel, emits the engine wrapper on the shared <code>FaustEngine&lt;Traits&gt;</code> template, and wires the build. See <a href="https://github.com/shakfu/sk-engines/blob/main/docs/dev/engine-gen.md"><code>docs/dev/engine-gen.md</code></a> for the generator design and <a href="https://github.com/shakfu/sk-engines/blob/main/docs/engine-types/faust.md"><code>docs/engine-types/faust.md</code></a> for the Faust path.</p>
+<hr>
+<h3>Controls</h3>
+<figure><a href="engines/media/chorus-controls.svg" target="_blank" rel="noreferrer"><img src="engines/media/chorus-controls.svg" alt="Chorus control surface" loading="lazy" width="1603" height="1596"></a><figcaption>Chorus control surface - open full size <a href="engines/media/chorus-controls.pdf" download class="pdf-link">download PDF</a></figcaption></figure>
+<p>_Generated from <a href="https://github.com/shakfu/sk-engines/blob/main/docs/diagrams/controls/chorus.json"><code>docs/diagrams/controls/chorus.json</code></a> via <code>make diagrams</code>._</p>
+<table><thead><tr><th>Control</th><th><code>ParamId</code></th><th>Faust slider</th><th>Effect</th></tr></thead><tbody><tr><td><strong>MODFREQ</strong></td><td><code>ModSpeed</code> (<code>set_mod_speed</code>)</td><td><code>rate</code></td><td>LFO rate (0.05–5 Hz)</td></tr><tr><td><strong>MOD_AMT</strong></td><td><code>ModAmp</code></td><td><code>depth</code></td><td>modulation depth (0–5 ms)</td></tr><tr><td><strong>SIZE</strong></td><td><code>Size</code></td><td><code>delay</code></td><td>base delay (5–20 ms)</td></tr><tr><td><strong>SOS</strong></td><td><code>Mix</code></td><td><code>mix</code></td><td>dry/wet</td></tr></tbody></table>
+<p>The platform's 0–1 knob is linear-mapped into each slider's native range, captured from the kernel at <code>init()</code>. The other knobs/pads/CV are unused (a stereo FX). The LED rings show an output-level meter.</p>
+<hr>
+<h3>Authoring (the generated-Faust path)</h3>
+<p>The whole engine is two files in <code>src/engine/chorus/</code>:</p>
+<ul><li><strong><code>chorus.dsp</code></strong> - the DSP (flat <code>hslider</code>s named <code>rate</code>/<code>depth</code>/<code>delay</code>/<code>mix</code>).</li></ul>
+<ul><li><strong><code>chorus.json</code></strong> - the manifest mapping platform knobs to those slider labels:</li></ul>
+<pre><code class="lang-json">{ "engine": "chorus", "backend": "faust",
+  "knobs": { "Cycle": "rate", "Glow": "depth", "Size": "delay", "Mix (SOS)": "mix" },
+  "features": { "meter": true, "color": "0x33ccff" } }</code></pre>
+<p>Then:</p>
+<pre><code class="lang-text">make faust-engine MANIFEST=src/engine/chorus/chorus.json   # kernel + wrapper + build wiring + control spec
+make -j8 ENGINE=chorus                                    # build (~80.5% SRAM_EXEC)
+make engine-chorus                                        # clean + build + DFU flash
+make -C host test-chorus                                  # host test</code></pre>
+<p>The generator also emits <code>docs/diagrams/controls/chorus.json</code>, so <code>make diagrams</code> renders the control surface above - one manifest drives the engine, the build, and the diagram. <code>chorus_engine.h</code> and the generated kernel are checked in (a normal build needs no cyfaust); regenerate the wrapper with <code>--force-glue</code>.</p>

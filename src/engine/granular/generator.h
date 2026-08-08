@@ -12,6 +12,15 @@
 
 namespace spotykach {
 
+#if SPK_GRAIN_GF
+// ENGINE=graincloud only. graincloud is this same engine tree compiled with SPK_GRAIN_GF, where the
+// per-sample Vox array is replaced by a per-block GrainflowLib cloud; the only source file it
+// substitutes is generator.cpp (see src/engine/graincloud/). This forward declaration keeps the
+// GrainflowLib templates out of every other translation unit - only graincloud's generator.cpp and
+// gf_cloud.cpp ever see the definition. Nothing here is compiled into a granular image.
+class GfCloud;
+#endif
+
 class Generator {
 
 friend class Deck;
@@ -71,6 +80,13 @@ public:
 
   void process(float& out0, float& out1);
 
+#if SPK_GRAIN_GF
+  // graincloud: the Play pad gates the cloud. Deck sets this from its _is_playing state; process()
+  // emits silence (and clears the "generating" flag) when not playing. Without it the cloud would
+  // granulate the buffer continuously - including a preloaded sample - with Play off.
+  void set_playing(bool p) { _playing = p; }
+#endif
+
 protected:
   void set_mode(const Vox::Mode);
 
@@ -112,6 +128,10 @@ private:
 
   Buffer* _buffer;
   std::array<Vox, kVoxCount> _voxs;
+#if SPK_GRAIN_GF
+  GfCloud* _gf = nullptr; // process() sums this GrainflowLib cloud instead of the Vox array
+  bool _playing = false;  // Play-pad gate (set by Deck::play/stop); the cloud is silent when false
+#endif
 
   std::function<void(const uint8_t)> _on_vox_stop;
 

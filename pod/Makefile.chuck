@@ -60,11 +60,11 @@ ifeq ($(NOCHUCK), 1)
 C_DEFS += -DCHUCK_SKIP_RUNTIME
 endif
 
-# Spotykach v2 bootloader + the ChucK QSPI linker script (repo root). alt_qspi_chuck.lds reclaims the
+# Spotykach v2 bootloader + the ChucK QSPI linker script (repo root). linker/alt_qspi_chuck.lds reclaims the
 # unused 186K SRAM_EXEC region into SRAM (the full firmware needs it; harmless headroom here). The
 # harness re-injects VTOR itself, so it boots regardless of whether the bootloader sets it.
 BOOT_BIN = ../bootloader-spotykach-v2.bin
-LDSCRIPT = ../alt_qspi_chuck.lds
+LDSCRIPT = ../linker/alt_qspi_chuck.lds
 
 SYSTEM_FILES_DIR = $(LIBDAISY_DIR)/core
 include $(SYSTEM_FILES_DIR)/Makefile

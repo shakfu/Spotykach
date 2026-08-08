@@ -100,6 +100,24 @@ public:
 
     Capabilities capabilities() const override { return Traits::caps; }
 
+#if SPK_TERMINAL
+    // Liveness masks for `describe` - same reasoning as faust_fx.h, derived from what each stage's
+    // kernel actually bound rather than hand-listed, because these engines are generated.
+    //
+    // The UNION of both decks, unlike the single-kernel wrapper: the two stages here bind DIFFERENT
+    // tables (binds_a / binds_b), so a param can be live on one deck and dead on the other. ParamMask is
+    // not per-deck, and under-reporting would hide a real control from every host, where over-reporting
+    // costs one sweep write that lands in _v[] and is read back consistently. Union is the safe side.
+    ParamMask live_params() const override {
+        ParamMask m = 0;
+        for (int d = 0; d < 2; d++)
+            for (int r = 0; r < kRoles; r++) if (_role[d][r].bound()) m |= (ParamMask{1} << r);
+        return m;
+    }
+    // No set_config on this wrapper either - nothing to advertise.
+    ConfigMask live_configs() const override { return static_cast<ConfigMask>(0); }
+#endif
+
     void set_param(ParamId id, DeckRef::Ref deck, float v) override {
         const int r = static_cast<int>(id);
         if (r < 0 || r >= kRoles) return;

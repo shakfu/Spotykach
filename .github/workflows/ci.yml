@@ -1,0 +1,216 @@
+# sk-engines CI
+#
+# Three things this catches that nothing else in the repo does:
+#
+#   1. An engine that has stopped BUILDING. This has happened twice and went unnoticed both times -
+#      `chorus` and `pstretch` each stopped linking entirely (not degraded: no link at all) and stayed
+#      that way until someone happened to rebuild them by hand. A 20-engine matrix is the single
+#      highest-yield check here.
+#   2. The four off-target test suites, which are independent and easy to leave red - two of them were
+#      red on the committed tree when this file was written.
+#   3. Makefile <-> CMake divergence. Nothing forces the two to agree, and seven divergences had
+#      accumulated by the time anyone checked, two of them hard build failures.
+#
+# Deliberately NOT built here: `csound` and `chuck`. Both need a one-time cross-build of a large
+# third-party library (~115 MB of Csound source; a ChucK tree) that is gitignored and reproduced by
+# scripts/fetch_{csound,chuck}.sh. That is a 20+ minute job per engine and would dominate every run,
+# so they live in the separate `qspi-libs.yml` workflow. `mosc` IS built here - it is a QSPI engine
+# but vendors its DSP in-tree and needs no fetch.
+#
+# Note the matrix numbers in the comments below describe what a full run does; while the workflow is
+# manual-only (see `on:`) that is per dispatch rather than per push.
+name: CI
+
+# MANUAL ONLY for now, deliberately. Run it from Actions -> CI -> "Run workflow".
+#
+# The automatic triggers are written out below and commented, not deleted: this workflow has never run
+# on a GitHub runner, and a 28-job matrix that turns out to be misconfigured is a poor thing to
+# discover on every push. Uncomment the two blocks once a manual run has gone green - that is the
+# whole point of the file, since the failures it exists to catch (an engine that silently stops
+# linking) arrive with a commit, not with someone remembering to press a button.
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: ["**"]
+  # pull_request:
+
+# A new run on the same ref supersedes the old one: these matrices are wide and there is no value in
+# finishing a build of code that has already been replaced (or of a dispatch you have just re-issued).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The toolchain the project is developed against (arm-none-eabi-gcc 10.2.1). Pinned rather than
+  # floating: SRAM_EXEC headroom is measured in hundreds of bytes on some engines, and a compiler bump
+  # moves code size enough to turn a passing link into `region ... overflowed`.
+  ARM_GCC_RELEASE: "10-2020-q4"
+
+jobs:
+  # ---------------------------------------------------------------------------------------------
+  # Off-target tests. No ARM toolchain, no hardware - the four suites `make test` runs.
+  # ---------------------------------------------------------------------------------------------
+  tests:
+    name: tests (host, unit, python, web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Python test deps
+        # Only pytest is actually needed: the suites skip cleanly without sox, and cyfaust/gen-dsp/
+        # cysox are code GENERATORS used by `make faust-gen`, not by the tests. Installing pytest here
+        # also stops `make test-scripts` from pulling the whole `dev` group itself.
+        run: python3 -m pip install --upgrade pytest
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Platform/engine boundary guard
+        run: make check-boundary
+
+      - name: Host engine + DSP suites
+        run: make -C host test
+
+      - name: Standalone unit tests
+        run: make -C test test
+
+      - name: Python host tooling
+        run: make test-scripts TEST_PY=python3
+
+      - name: Browser front end
+        run: make test-web
+
+  # ---------------------------------------------------------------------------------------------
+  # Every engine, through the canonical Makefile path.
+  #
+  # The matrix entry is the full argument list rather than an engine name, so a flag build (TERMINAL=1)
+  # is just another entry. Using `include:` for those would have been wrong: an include entry whose
+  # keys match an existing combination AUGMENTS that combination instead of adding a new one, so
+  # `{engine: delay, terminal: true}` would have replaced the plain delay build rather than joining it.
+  # ---------------------------------------------------------------------------------------------
+  firmware:
+    name: build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          # SRAM engines
+          - ENGINE=granular
+          - ENGINE=graincloud
+          - ENGINE=passthrough
+          - ENGINE=delay
+          - ENGINE=qdelay
+          - ENGINE=edrums
+          - ENGINE=reso
+          - ENGINE=tape
+          - ENGINE=shuttle
+          - ENGINE=softcut
+          - ENGINE=radio
+          - ENGINE=bard
+          - ENGINE=glitch
+          - ENGINE=pstretch
+          - ENGINE=reverb
+          - ENGINE=gigaverb
+          - ENGINE=chorus
+          - ENGINE=filter
+          - ENGINE=voice
+          # QSPI, but vendored in-tree - no library fetch needed. The extra flags are NOT optional:
+          # a bare `ENGINE=mosc` links against the SRAM script and fails on the Plaits resource tables
+          # (`undefined reference to plaits::lut_sine`). They are what `make engine-mosc` passes as
+          # $(MOSC_FLAGS); that target also cleans and FLASHES, which is no use without a device.
+          - ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds
+          # SPK_TERMINAL adds virtuals to IEngine and members to CoreUI/AppImpl - it changes type
+          # layout, so it is a genuinely different build, not just a flag. ~19-25 KB of SRAM_EXEC
+          # decides which engines can host it at all, so cover a lean one and a tight one.
+          - ENGINE=delay TERMINAL=1
+          - ENGINE=pstretch TERMINAL=1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: ${{ env.ARM_GCC_RELEASE }}
+
+      - name: Key the library cache on the submodule commits
+        id: subs
+        run: echo "sha=$(git submodule status | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libDaisy + DaisySP archives
+        id: libs-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            lib/libDaisy/build
+            lib/DaisySP/build
+          key: daisy-libs-${{ env.ARM_GCC_RELEASE }}-${{ steps.subs.outputs.sha }}
+
+      - name: Build vendored libraries
+        if: steps.libs-cache.outputs.cache-hit != 'true'
+        run: make -j$(nproc) libs
+
+      - name: Build ${{ matrix.target }}
+        # The link step prints --print-memory-usage, so the log carries the per-region figures. That is
+        # the number to read when an engine starts creeping toward a region overflow.
+        run: make -j$(nproc) ${{ matrix.target }}
+
+      - name: Report image size and check the boot banner
+        run: |
+          ls -l build/spotykach.bin
+          arm-none-eabi-size build/spotykach.elf
+          # The self-identifying boot banner must survive --gc-sections. If this is empty, the version
+          # string is not in the image and `strings firmware.bin` cannot identify a flashed binary.
+          arm-none-eabi-strings build/spotykach.bin | grep '^spotykach ' \
+            || { echo "::error::boot banner missing from the image"; exit 1; }
+
+  # ---------------------------------------------------------------------------------------------
+  # The opt-in CMake path, on the engines whose build is not plain vanilla. Nothing else forces CMake
+  # and the Makefile to agree, so this is what stands between them and silent divergence.
+  # ---------------------------------------------------------------------------------------------
+  cmake-parity:
+    name: cmake ${{ matrix.engine }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Chosen for the flags they exercise, not for coverage: pstretch has its own linker script,
+        # reverb and graincloud force -Os, softcut has extra sources, mosc is the QSPI boot path, and
+        # granular is the default. Every past divergence would have been caught by one of these.
+        #
+        # `mosc` takes no extra flags here, unlike the Makefile job above: CMake drives the QSPI boot
+        # path off an ENGINE_BOOT_QSPI property on the engine rather than off APP_TYPE/LDSCRIPT passed
+        # on the command line. That asymmetry is intentional and is itself worth having under test.
+        engine: [granular, graincloud, pstretch, reverb, softcut, mosc]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: ${{ env.ARM_GCC_RELEASE }}
+
+      - name: Key the library cache on the submodule commits
+        id: subs
+        run: echo "sha=$(git submodule status | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libDaisy + DaisySP archives
+        id: libs-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            lib/libDaisy/build
+            lib/DaisySP/build
+          key: daisy-libs-${{ env.ARM_GCC_RELEASE }}-${{ steps.subs.outputs.sha }}
+
+      - name: Build vendored libraries
+        if: steps.libs-cache.outputs.cache-hit != 'true'
+        run: make -j$(nproc) libs
+
+      - name: Build ${{ matrix.engine }} via CMake
+        run: make -f Makefile.cmake ENGINE=${{ matrix.engine }}

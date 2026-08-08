@@ -19,7 +19,7 @@ make engine-csound      # clean + build the QSPI image + flash
 make program-csound      # re-flash the last build without rebuilding
 ```
 
-Both expand to `ENGINE=csound APP_TYPE=BOOT_QSPI LDSCRIPT=alt_qspi.lds` + the core `program-dfu` (`dfu-util -a 0 -s 0x90040000:leave -D build/spotykach.bin -d ,0483:df11`). The leading `-` on the flash step swallows the benign `Error 74` (the `get_status` on the QSPI `:leave` — the write succeeds).
+Both expand to `ENGINE=csound APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds` + the core `program-dfu` (`dfu-util -a 0 -s 0x90040000:leave -D build/spotykach.bin -d ,0483:df11`). The leading `-` on the flash step swallows the benign `Error 74` (the `get_status` on the QSPI `:leave` — the write succeeds).
 
 Prerequisite, once: build `libcsound.a` (see "Building libcsound.a" below). Recover the board anytime by flashing any normal engine.
 

@@ -1,0 +1,29 @@
+<p><code>ENGINE=voice</code> · <code>src/engine/voice/</code> · generated from <code>osc.dsp</code> + <code>filter.dsp</code> + <code>voice.json</code></p>
+<p>A <strong>drone voice</strong> - and the worked example of the <strong>series (chain) dual-deck</strong> generated path: <strong>two different</strong> Faust kernels wired in sequence, with deck A driving the first stage and deck B the second. Here stage 1 is a <strong>drone oscillator</strong> (an instrument - it generates sound from its knobs with no audio input) and stage 2 is a <strong>resonant filter</strong>, so the signal flows <strong>osc → filter → out</strong>. Authored as two <code>.dsp</code> files plus a JSON manifest with <strong>no hand-written C++</strong> (the generator emits the wrapper on the shared <code>FaustChainEngine&lt;Traits&gt;</code> template). See <a href="https://github.com/shakfu/sk-engines/blob/main/docs/dev/engine-gen.md"><code>docs/dev/engine-gen.md</code></a> §9 for the dual-deck design and <a href="https://github.com/shakfu/sk-engines/blob/main/docs/engine-types/faust.md"><code>docs/engine-types/faust.md</code></a> for the Faust path.</p>
+<hr>
+<h3>Controls</h3>
+<figure><a href="engines/media/voice-controls.svg" target="_blank" rel="noreferrer"><img src="engines/media/voice-controls.svg" alt="Voice control surface" loading="lazy" width="1959" height="1596"></a><figcaption>Voice control surface - open full size <a href="engines/media/voice-controls.pdf" download class="pdf-link">download PDF</a></figcaption></figure>
+<p>_Generated from <a href="https://github.com/shakfu/sk-engines/blob/main/docs/diagrams/controls/voice.json"><code>docs/diagrams/controls/voice.json</code></a> via <code>make diagrams</code>._</p>
+<p><strong>Deck A drives the oscillator (stage 1):</strong></p>
+<table><thead><tr><th>Control</th><th><code>ParamId</code></th><th>Faust slider</th><th>Effect</th></tr></thead><tbody><tr><td><strong>PITCH</strong></td><td><code>Speed</code></td><td><code>freq</code></td><td>oscillator pitch (~40 Hz – 2.5 kHz)</td></tr><tr><td><strong>SIZE</strong></td><td><code>Size</code></td><td><code>shape</code></td><td>saw ↔ square morph</td></tr><tr><td><strong>SOS</strong></td><td><code>Mix</code></td><td><code>level</code></td><td>oscillator level</td></tr></tbody></table>
+<p><strong>Deck B drives the filter (stage 2):</strong></p>
+<table><thead><tr><th>Control</th><th><code>ParamId</code></th><th>Faust slider</th><th>Effect</th></tr></thead><tbody><tr><td><strong>PITCH</strong></td><td><code>Speed</code></td><td><code>cutoff</code></td><td>low-pass cutoff</td></tr><tr><td><strong>POS</strong></td><td><code>Pos</code></td><td><code>reso</code></td><td>resonance / Q</td></tr><tr><td><strong>SIZE</strong></td><td><code>Size</code></td><td><code>drive</code></td><td>pre-filter saturation</td></tr><tr><td><strong>SOS</strong></td><td><code>Mix</code></td><td><code>mix</code></td><td>dry/wet</td></tr></tbody></table>
+<p>The same physical knobs mean different things on each deck because each deck drives its own stage. The chain is mono internally and duplicated to the stereo bus; the LED rings show an output-level meter. As an instrument, it makes sound on its own - no input patch needed.</p>
+<hr>
+<h3>Authoring (the series dual-deck path)</h3>
+<p>Three files in <code>src/engine/voice/</code>:</p>
+<ul><li><strong><code>osc.dsp</code></strong> - stage 1, a 0-input drone oscillator (<code>freq</code>/<code>shape</code>/<code>level</code>).</li></ul>
+<ul><li><strong><code>filter.dsp</code></strong> - stage 2, a resonant low-pass (<code>cutoff</code>/<code>reso</code>/<code>drive</code>/<code>mix</code>).</li></ul>
+<ul><li><strong><code>voice.json</code></strong> - the manifest. <code>"deck_mode": "series"</code> lists the two stages (stage 1 → deck A, stage 2 → deck B), each with its own knob map:</li></ul>
+<pre><code class="lang-json">{ "engine": "voice", "backend": "faust", "deck_mode": "series",
+  "stages": [
+    { "dsp": "osc",    "knobs": { "Pitch": "freq", "Size": "shape", "Mix (SOS)": "level" } },
+    { "dsp": "filter", "knobs": { "Pitch": "cutoff", "Position": "reso", "Size": "drive", "Mix (SOS)": "mix" } }
+  ],
+  "features": { "meter": true, "color": "0x88ff33" } }</code></pre>
+<p>Then:</p>
+<pre><code class="lang-text">make faust-engine MANIFEST=src/engine/voice/voice.json   # both kernels + wrapper + build + diagram
+make -j8 ENGINE=voice                                  # build (~84% SRAM_EXEC)
+make engine-voice                                      # clean + build + DFU flash
+make -C host test-voice                                # host test (chain + per-stage independence)</code></pre>
+<p>Stage A may have inputs (an FX→FX chain) or none (instrument→FX, as here). The two stage kernels get engine-scoped namespaces (<code>fx_voice_osc</code>, <code>fx_voice_filter</code>) so stage names can't collide across engines. <code>voice_engine.h</code> and the generated kernels are checked in; regenerate the wrapper with <code>--force-glue</code>.</p>

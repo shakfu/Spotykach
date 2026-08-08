@@ -376,6 +376,9 @@ void Deck::toggle_play()
 void Deck::play() {
     _is_play_queued = false;
     _is_playing = true;
+#if SPK_GRAIN_GF
+    _generator.set_playing(true);  // graincloud: gate the cloud on play
+#endif
 
     if (!_track.is_empty()) return; // going to be triggered from tick method
     switch (_mode) {
@@ -396,6 +399,9 @@ void Deck::play() {
 void Deck::stop()
 {
     _is_playing = false;
+#if SPK_GRAIN_GF
+    _generator.set_playing(false);  // graincloud: gate the cloud off when stopped
+#endif
     _loop_tick_count = -1;
     _through_loop_ticks = -1;
     _dispatcher.all_off();

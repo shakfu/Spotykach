@@ -1,0 +1,98 @@
+# The two engines that embed a language runtime: `csound` (Csound 7) and `chuck` (the ChucK VM).
+#
+# Split out of ci.yml because each one first has to fetch and CROSS-BUILD a large third-party library
+# that is deliberately gitignored rather than vendored (~115 MB of Csound source; a ChucK tree),
+# via scripts/fetch_csound.sh / fetch_chuck.sh. That is tens of minutes per engine and would dominate
+# every push, for two engines whose sources change rarely.
+#
+# Run it manually (Actions -> this workflow -> Run workflow) before tagging a release, or after
+# touching src/engine/{csound,chuck}/, the fetch scripts, or anything in the QSPI boot path
+# (linker/alt_qspi*.lds, src/engine/csound/spotykach_qspi_vtor.cpp). The weekly schedule that would
+# catch an upstream Csound/ChucK change breaking the cross-build without anyone asking is commented
+# out for now; see `on:` below.
+name: QSPI engines (csound, chuck)
+
+# MANUAL ONLY for now, deliberately - see the same note in ci.yml. The weekly schedule is written out
+# and commented rather than deleted; uncomment it once a manual run has gone green, since noticing an
+# upstream Csound/ChucK change that breaks the cross-build is the reason to have a schedule at all.
+on:
+  workflow_dispatch:
+  # schedule:
+  #   # Mondays 04:00 UTC. Nothing here is time-sensitive; the point is to notice upstream drift.
+  #   - cron: "0 4 * * 1"
+
+concurrency:
+  group: qspi-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ARM_GCC_RELEASE: "10-2020-q4"
+
+jobs:
+  qspi:
+    name: build ${{ matrix.engine }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `target` carries the QSPI flags because a bare `ENGINE=<name>` is not a valid build for
+          # these: it picks the SRAM linker script and fails at link. These are exactly what
+          # $(CSOUND_FLAGS)/$(CHUCK_FLAGS) pass. Note chuck has its OWN script (a larger stack for the
+          # VM's init), which is why the two lines differ.
+          - engine: csound
+            fetch: scripts/fetch_csound.sh
+            target: ENGINE=csound APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds
+          - engine: chuck
+            fetch: scripts/fetch_chuck.sh
+            target: ENGINE=chuck APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi_chuck.lds
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: ${{ env.ARM_GCC_RELEASE }}
+
+      - name: Key the library cache on the submodule commits
+        id: subs
+        run: echo "sha=$(git submodule status | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libDaisy + DaisySP archives
+        id: libs-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            lib/libDaisy/build
+            lib/DaisySP/build
+          key: daisy-libs-${{ env.ARM_GCC_RELEASE }}-${{ steps.subs.outputs.sha }}
+
+      - name: Build vendored libraries
+        if: steps.libs-cache.outputs.cache-hit != 'true'
+        run: make -j$(nproc) libs
+
+      # Keyed on the fetch script: it pins what is fetched and how it is configured, so a change to it
+      # is exactly when the cross-built archive must be rebuilt.
+      - name: Cache the cross-built runtime
+        id: rt-cache
+        uses: actions/cache@v4
+        with:
+          path: thirdparty
+          key: qspi-${{ matrix.engine }}-${{ env.ARM_GCC_RELEASE }}-${{ hashFiles(matrix.fetch) }}
+
+      - name: Fetch + cross-build the runtime
+        if: steps.rt-cache.outputs.cache-hit != 'true'
+        run: ${{ matrix.fetch }}
+
+      # `make engine-<name>` is clean+build+FLASH; there is no device here, so build the image only.
+      - name: Build ${{ matrix.engine }}
+        run: make -j$(nproc) ${{ matrix.target }}
+
+      - name: Report image size and check the boot banner
+        run: |
+          ls -l build/spotykach.bin
+          arm-none-eabi-size build/spotykach.elf
+          arm-none-eabi-strings build/spotykach.bin | grep '^spotykach ' \
+            || { echo "::error::boot banner missing from the image"; exit 1; }

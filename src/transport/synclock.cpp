@@ -18,7 +18,8 @@ _tempo_mks           { 500000 },
 _hold                { false },
 _is_running          { false },
 _is_about_to_run     { false },
-_last_state          { false }
+_last_state          { false },
+_external_clock      { false }
 {};
 
 void SynClock::Init(const uint32_t update_interval_mks, const uint32_t ppqn_out) {

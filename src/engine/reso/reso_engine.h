@@ -42,6 +42,27 @@ public:
         return CapOwnDisplay | CapDualDeck | CapAux | CapTransport;
     }
 
+#if SPK_TERMINAL
+    // Liveness masks for `describe` (docs/dev/terminal-dispatch.md). The impl's set_param caches EVERY
+    // id into param_cache[] before its switch, so the default all-live mask would advertise all 24 and a
+    // host sweep would "pass" on ids the switch drops - reading back its own write while the resonator
+    // never moved. These are the ids the switch acts on (reso_engine.cpp:231-243): PITCH=note,
+    // SIZE/POS/ENV/MODAMP=resonator shape, MIX, AUX=model select.
+    ParamMask live_params() const override {
+        return (1u << static_cast<uint32_t>(ParamId::Speed))
+             | (1u << static_cast<uint32_t>(ParamId::Size))
+             | (1u << static_cast<uint32_t>(ParamId::Pos))
+             | (1u << static_cast<uint32_t>(ParamId::Env))
+             | (1u << static_cast<uint32_t>(ParamId::ModAmp))
+             | (1u << static_cast<uint32_t>(ParamId::Mix))
+             | (1u << static_cast<uint32_t>(ParamId::Aux));
+    }
+    // Mode (Slice/Reel/Drift) is the only switch set_config acts on.
+    ConfigMask live_configs() const override {
+        return static_cast<ConfigMask>(1u << static_cast<uint32_t>(ConfigId::Mode));
+    }
+#endif
+
     void  set_param(ParamId id, DeckRef::Ref deck, float value) override;
     float param(ParamId id, DeckRef::Ref deck) const override;
     void  set_mod_speed(DeckRef::Ref deck, float value, bool sync) override;

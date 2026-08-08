@@ -1,0 +1,60 @@
+<p>The <code>chuck</code> engine runs the <a href="https://chuck.stanford.edu">ChucK</a> language and virtual machine as a synth on the spotykach. A program (a <code>.ck</code> text file) is compiled and run at runtime, so the <strong>patch — not the firmware — defines the sound</strong>. You load programs from the SD card, switch between them live, and play them from the panel knobs.</p>
+<p>ChucK is <em>strongly-timed</em>: a program sporks concurrent "shreds" that the VM schedules sample-accurately against a unit-generator graph. So a single patch can run several self-playing voices in polyrhythm, not just one signal path.</p>
+<p>It behaves like any other engine on the panel, but is built and flashed a little differently: ChucK's code is ~1.1 MB (too big for SRAM), so this is a <strong>QSPI build</strong> that executes from flash, with ChucK's heap in SDRAM. Internals (memory model, allocator, the live-swap design, bring-up notes, roadmap) are in <a href="https://github.com/shakfu/sk-engines/blob/main/docs/dev/chuck-impl.md"><code>docs/dev/chuck-impl.md</code></a>.</p>
+<h3>Build &amp; flash</h3>
+<p>One-time: build the ChucK library (needs the <code>arm-none-eabi</code> GCC toolchain). The script fetches a pinned ChucK release and cross-builds it for the Daisy — there is no official ChucK Daisy port, so the script <em>is</em> the port:</p>
+<pre><code>scripts/fetch_chuck.sh           # fetch ChucK + cross-build libchuck.a (gitignored sources)</code></pre>
+<p>Then build + flash the engine (put the board in DFU first):</p>
+<pre><code>make engine-chuck                # clean + build the QSPI image + flash
+make program-chuck               # re-flash the last build without rebuilding</code></pre>
+<p>Recover the board at any time by flashing any normal engine.</p>
+<h3>Controls</h3>
+<p>With the built-in program (used when no SD patch is loaded — a <code>SawOsc =&gt; LPF =&gt; dac</code> drone):</p>
+<table><thead><tr><th>Control</th><th>Effect</th></tr></thead><tbody><tr><td><strong>PITCH</strong></td><td>pitch</td></tr><tr><td><strong>SIZE</strong></td><td>brightness (filter cutoff)</td></tr><tr><td><strong>MIX</strong></td><td>level</td></tr><tr><td><strong>Alt + PITCH</strong></td><td>patch selector (see below)</td></tr><tr><td><strong>centre mode LED</strong></td><td>white = built-in program, cyan = an SD patch is loaded</td></tr></tbody></table>
+<p>What each knob actually does is up to the patch (it reads named global variables) — the table above is the convention the bundled patches follow. Patches can also be played from a <strong>MIDI keyboard</strong>: MIDI <em>input</em> is supported through ChucK's standard <code>MidiIn</code> (see <a href="#limitations">Limitations → MIDI</a>).</p>
+<h3>Loading patches from the SD card</h3>
+<p>Put <code>.ck</code> programs in a <code>chuck/</code> folder at the card root, named <code>0.ck</code> … <code>7.ck</code>:</p>
+<pre><code>&lt;card&gt;/chuck/0.ck
+&lt;card&gt;/chuck/1.ck</code></pre>
+<p>Ready-to-copy examples are in <a href="https://github.com/shakfu/sk-engines/blob/main/examples/chuck"><code>examples/chuck/</code></a> — a clean two-saw drone, a fat super-saw, a concurrent generative pad, and an STK Rhodey arpeggio, with a README.</p>
+<ul><li>At boot the engine <strong>auto-loads</strong> the lowest-numbered patch (or the built-in if the card has none).</li></ul>
+<ul><li><strong>Hold Alt and turn PITCH</strong> to scroll the selector (a dot per patch around the rings); <strong>release</strong> to switch to it live. The centre LED turns cyan for an SD patch, white for the built-in.</li></ul>
+<ul><li>Anything missing, empty, or that fails to compile falls back to the built-in, so the unit always makes sound.</li></ul>
+<h4>How live switching works</h4>
+<p>The engine keeps <strong>one</strong> ChucK VM running for the whole session and swaps the patch's shreds inside it. The first time you select a given patch it is compiled (a brief silence while that happens); every later switch back to it is <strong>instant</strong> (the compiled program is cached and re-run, not recompiled). Memory use therefore rises a little the first time each distinct patch is visited and then stays flat — you can cycle patches indefinitely without the unit degrading. (The why, and the ChucK-internals story behind it, is in <a href="https://github.com/shakfu/sk-engines/blob/main/docs/dev/chuck-impl.md"><code>docs/dev/chuck-impl.md</code></a>.)</p>
+<h3>Writing a patch</h3>
+<p>A patch is an ordinary <code>.ck</code> program — no required header. To be driven by the panel, declare and read these globals (deck A / deck B):</p>
+<table><thead><tr><th>Knob</th><th>Global</th></tr></thead><tbody><tr><td>PITCH</td><td><code>speedA</code> / <code>speedB</code></td></tr><tr><td>MIX</td><td><code>mixA</code> / <code>mixB</code></td></tr><tr><td>SIZE</td><td><code>sizeA</code> / <code>sizeB</code></td></tr><tr><td>ENV</td><td><code>envA</code> / <code>envB</code></td></tr><tr><td>modifier layer</td><td><code>fbA</code>, <code>modspA</code>, <code>modampA</code> (+ <code>B</code>)</td></tr></tbody></table>
+<p>A program reads whichever globals it declares; writes to globals a patch doesn't declare are ignored. Keep to the convention the bundled patches follow — PITCH = pitch/tempo, SIZE = brightness, MIX = level — so the knobs feel consistent when you switch patches. A minimal patch:</p>
+<pre><code class="lang-chuck">global float speedA;   // PITCH
+global float sizeA;    // SIZE
+global float mixA;     // MIX
+
+SawOsc s =&gt; LPF f =&gt; dac;
+while( true )
+{
+    110.0 + speedA * 770.0   =&gt; s.freq;    // pitch
+    1500.0 + sizeA * 6000.0  =&gt; f.freq;    // brightness
+    (0.15 + mixA * 0.85) * 0.3 =&gt; s.gain;  // level
+    10::ms =&gt; now;                          // re-poll the knobs
+}</code></pre>
+<p><strong>Format notes</strong> — a UTF-8 BOM and CRLF (Windows) line endings are tolerated (the engine strips them on load); an empty or whitespace-only file falls back to the built-in. There is no structural validation beyond that — the real check is whether the program compiles.</p>
+<p><strong>Two caveats from the one-VM design</strong> (fine for a curated bank, worth knowing if you author your own):</p>
+<ul><li>A patch's compiled code is cached for the session, so <strong>editing a slot's <code>.ck</code> file on the card while the unit is running won't take effect until you power-cycle</strong>.</li></ul>
+<ul><li>All loaded patches share one namespace, so <strong>two patches that define the same top-level <code>class</code> name</strong> will collide when the second is compiled. Give your classes distinct names if you use them across slots.</li></ul>
+<h3>CPU and the meter</h3>
+<p>Every concurrent shred and every UGen costs time inside one audio block, and code runs from QSPI flash (slower than SRAM), so heavy or dense patches can run out of headroom. If a patch genuinely can't keep up, the engine <strong>mutes it and lights both rings solid red</strong> (a safeguard that keeps the controls alive) — switch to another patch with Alt+PITCH to recover. Lighter voices and a capped shred/voice count are the fix.</p>
+<p>Build with <code>METER=1</code> to see the headroom on the panel instead of guessing:</p>
+<pre><code>make engine-chuck METER=1</code></pre>
+<ul><li><strong>Ring A</strong> = CPU load (green → amber → red; red ≈ at/over budget).</li></ul>
+<ul><li><strong>Ring B</strong> = SDRAM pool usage (how much of ChucK's heap the loaded patches occupy).</li></ul>
+<h3>Limitations</h3>
+<ul><li><strong>UGens:</strong> this is a bare-metal, <strong>core-only</strong> ChucK build. <em>Available:</em> the oscillators (<code>SinOsc</code>/<code>SawOsc</code>/<code>SqrOsc</code>/<code>TriOsc</code>/<code>PulseOsc</code>/<code>Noise</code>), filters (<code>LPF</code>/<code>HPF</code>/<code>BPF</code>/<code>ResonZ</code>/…), envelopes (<code>ADSR</code>/<code>Envelope</code>), <code>Gain</code>, delays, the reverbs (<code>JCRev</code>/<code>NRev</code>/<code>PRCRev</code>), the FFT/analysis UAnae, and the <strong>STK instruments</strong> (<code>Rhodey</code>, <code>Wurley</code>, <code>TubeBell</code>, <code>Mandolin</code>, <code>Moog</code>, …), plus <code>Math</code>/<code>Std</code>, sporked shreds, events, and global variables. <em>Excluded:</em> <strong>chugins</strong> (no dynamic loading), <strong>sound-file I/O</strong> (<code>SndBuf</code>/<code>WvIn</code>/<code>WvOut</code> — no filesystem audio), and the <strong>OSC/HID/serial</strong> device UGens (the host owns I/O). <strong><code>MidiIn</code> is the exception</strong> — it has been re-introduced over the UART (the host feeds it; see MIDI below), though <strong><code>MidiOut</code> is inert</strong>.</li></ul>
+<ul><li><strong>MIDI:</strong> MIDI <strong>input</strong> is supported. A patch uses ChucK's standard API unchanged — <code>MidiIn min; min.open(0); MidiMsg msg; min =&gt; now; while( min.recv(msg) ) { /* msg.data1/2/3 */ }</code> — and receives the <strong>full channel-voice stream</strong> (NoteOn/NoteOff with real velocity, control change, pitch-bend, aftertouch, program change) plus system realtime (clock/start/continue/stop), exactly as a desktop ChucK patch would. The host owns the UART and feeds bytes into ChucK's own MIDI buffer (there is no RtMidi backend on bare metal), so the language semantics are unchanged: <code>min =&gt; now</code> wakes on a message, <code>recv()</code> drains the queue, and <code>data1</code> is the status byte (incl. channel), <code>data2</code>/<code>data3</code> the data bytes. A ready example is <a href="https://github.com/shakfu/sk-engines/blob/main/examples/chuck/midi_in.ck"><code>examples/chuck/midi_in.ck</code></a>; the design and how-to are in <a href="https://github.com/shakfu/sk-engines/blob/main/docs/dev/chuck-midi-in-porting.md"><code>docs/dev/chuck-midi-in-porting.md</code></a>.</li></ul>
+<p><strong>Remaining incompatibilities with desktop ChucK</strong> (all are limitations of the bare-metal port, not changes to the language API):</p>
+<ul><li><strong>No MIDI output.</strong> <code>MidiOut</code> is registered so patches that reference it still compile, but <code>open()</code> always fails — <code>send()</code>/<code>noteOn()</code>/etc. are silent no-ops. Nothing is sent out the UART.</li></ul>
+<ul><li><strong>One virtual device, no enumeration.</strong> There is a single input device (device 0). <code>MidiIn.open(n)</code> opens that one UART regardless of <code>n</code>, <code>open("name")</code> maps to device 0, and <code>MidiIn.name()</code> returns <code>"UART (virtual)"</code> — patches that enumerate or pick devices by name won't find a list.</li></ul>
+<ul><li><strong>3-byte messages only.</strong> <code>MidiMsg</code> carries <code>data1</code>/<code>data2</code>/<code>data3</code> as usual, but <strong>SysEx and MIDI system-common messages are not delivered</strong> (they don't fit the 3-byte model).</li></ul>
+<ul><li><strong>Wake path pending on-hardware sign-off.</strong> The re-introduction is build-verified (library + firmware link with matching ABI); confirming that a shred blocked on <code>min =&gt; now</code> actually resumes on the threadless build is the one step still to be checked on a device.</li></ul>
+<ul><li><strong>CPU:</strong> code executes from QSPI flash, so heavy or dense patches can glitch or trip the mute-and-recover safeguard. Watch ring A on a <code>METER=1</code> build.</li></ul>
+<ul><li><strong>Memory:</strong> ChucK gets a 40 MB SDRAM pool for its VM and patches. Live switching is memory-stable (see "How live switching works") — patches are compiled once and cached, so cycling them does not grow memory without bound.</li></ul>

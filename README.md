@@ -1,5 +1,30 @@
 # sk-engines: A Spotykach (platform/engine fork)
 
+[![CI](https://github.com/shakfu/sk-engines/actions/workflows/ci.yml/badge.svg)](https://github.com/shakfu/sk-engines/actions/workflows/ci.yml)
+
+**One Spotykach, twenty-one instruments.** This firmware turns the hardware into a platform: the panel, pads, knobs, clock, CV and SD card stay exactly as they are, and the DSP engine underneath is swappable. Flash a different `.bin` and the same box is a granular looper, a dub delay, a Plaits macro-oscillator, a tape deck, a resonator, or a Csound/ChucK interpreter you write patches for.
+
+## Quickstart — from nothing to a sound
+
+**1. Get a binary.** Download a `sk-<engine>-<version>.bin` from the [releases](https://github.com/shakfu/sk-engines/releases), or build one: `make -j8 libs` once, then `make -j8 ENGINE=delay`. (Need the bootloader? It ships as `bootloader-spotykach-v2.bin`.)
+
+**2. Flash it.** Connect the **rear USB-C** port on the main PCB — not the one on the Seed — with a data-capable cable. Hold `Reset` for ~3 s until the bottom pads breathe white, then `make ENGINE=delay program-dfu`. The unit reboots into the new engine.
+
+**3. Card, if the engine needs one.** Effects and synths (`delay`, `reverb`, `reso`, `mosc`, `edrums`, …) need nothing — skip this. Players and loopers (`tape`, `radio`, `bard`, `shuttle`, `softcut`, `pstretch`) read the card, and the firmware converts nothing, so a wrong-format file plays as noise instead of being rejected. Don't hand-build it:
+
+```sh
+make sdcard SDCARD_OUT=/media/SK     # a complete, correct card
+make check-sdcard CARD=/media/SK     # or explain what's wrong with the one you have
+```
+
+A prebuilt `sk-card-<version>.zip` ships with each release, and [`web/`](web/) does all of this in a browser if you would rather not install Python.
+
+**4. Make a sound.** Turn it on and read your engine's control map in [`docs/engines/`](docs/engines/) — each page has a knob-by-knob table and a control-surface diagram. For `delay`: play something in, **SOS** sets wet/dry, **SIZE** picks the musical division, **POS** is feedback. Everything shared by all engines — clock and sync, CV/gate, routing, `config.txt`, MIDI — is in the [platform manual](docs/manual.md).
+
+`make help` lists every build, test, card and release command.
+
+---
+
 A fork of the official [Synthux Academy Spotykach](https://synthux.academy/store/spotykach) firmware, restructured as a fixed hardware/UI **platform** with a swappable DSP **engine** architecture.
 
 The hardware and interaction model remain constant across firmware variants: multi-function encoders with pickup behavior and LED ring feedback, pad gestures, transport controls, SD-card sample storage, CV/gate I/O, and MIDI support. Individual firmware builds replace only the DSP engine and its parameter set. Clocking and transport are also provided as shared platform services, allowing any engine to synchronize to the same internal, TS4, or MIDI clock sources.
@@ -51,7 +76,7 @@ Four further engines live in the tree and build the same way, but are not (yet) 
 | Engine | Type | SD card | Build | Authored in | Notes |
 | --- | --- | --- | --- | --- | --- |
 | [granular](docs/engines/granular.md) | Looper / sampler | Optional (save/load loops) | SRAM | C++ | Default build; the original firmware as an engine |
-| [graincloud](docs/engines/graincloud.md) | Looper / sampler | Optional (save/load loops) | SRAM (`-Os`) | C++ | Granular variant with a GrainflowLib cloud |
+| [graincloud](docs/engines/graincloud.md) | Looper / sampler | Optional (save/load loops) | SRAM (`-Os`) | C++ | The granular tree built with `SPK_GRAIN_GF`: a GrainflowLib cloud replaces the grain core |
 | [tape](docs/engines/tape.md) | Looper / recorder | **Required** (streams) | SRAM | C++ | Two SD-streamed decks, no length cap |
 | [shuttle](docs/engines/shuttle.md) | Looper | Optional (load slots) | SRAM | C++ | Four in-SDRAM tracks, bipolar varispeed |
 | [softcut](docs/engines/softcut.md) | Looper (overdub) | Optional (load/save clips) | SRAM | C++ | Vendored monome softcut-lib, 4 voices |
@@ -178,20 +203,42 @@ For convenience there are one-shot targets that **clean + build + flash** a vari
 
 Once finished, the device will automatically boot the new firmware. This can "brick" (temporarily) the device and require reinstallation of either the bootloader, the firmware binary, or both.
 
+## The SD card
+
+Ten engines read the card, using nine folder layouts and four incompatible audio formats — and the firmware converts nothing, so a wrong-format file plays as noise rather than being rejected. You do not have to learn that: build a correct card, and check one that misbehaves.
+
+```sh
+make sdcard SDCARD_OUT=/media/SK          # build a complete card (folders, configs, patches, demo audio)
+make check-sdcard CARD=/media/SK          # explain anything that will not work, with the fix
+python3 scripts/sk_card.py convert --engine tape /media/SK loop.mp3   # add your own audio
+```
+
+A prebuilt `sk-card-<version>.zip` ships with each release. See [`docs/sd-card.md`](docs/sd-card.md).
+
+All three commands also exist as a **browser page** in [`web/`](web/), for when a checkout, Python and a working decoder are more than you want to install to put a file on a card — the browser decodes mp3/flac/wav/ogg itself. `make web-serve`, then open <http://localhost:8000>. It reads the same rules the CLI does, exported as data rather than reimplemented, and the same page carries a WebSerial terminal for `TERMINAL=1` builds. See [`web/README.md`](web/README.md).
+
 ## Testing
 
 There are two independent suites: one that runs on your machine, and one that drives a flashed device.
+
+Both, plus a build of every engine, run in [CI](.github/workflows/ci.yml): 22 firmware builds through the canonical `make` path (20 engines, and `TERMINAL=1` on two of them because that flag changes type layout), the four off-target suites, and a CMake build of the six engines whose flags are not vanilla — the only thing keeping the opt-in CMake path from drifting away from the Makefile. `csound` and `chuck` each have to cross-build a large runtime first, so they sit in a separate workflow ([`qspi-libs.yml`](.github/workflows/qspi-libs.yml)).
+
+Both workflows are currently **`workflow_dispatch` only** — run them from the repository's Actions tab. The push/PR and weekly triggers are written out and commented in each file, to be enabled once a manual run has gone green on a real runner. Until then the automatic safety net is off, so `make test` locally is still the thing standing between a change and a broken engine.
 
 ### Off-target (no hardware)
 
 The engines and the platform's hardware-free layers compile for the host against a small `<daisy.h>` shim, so most DSP and all of the control-plane logic is testable without a device:
 
 ```sh
+make test              # all four suites + the boundary guard (this is what CI runs)
+
 make -C host test      # engine + DSP suites (delay, tape, reso, granular, csound, the terminal codec, ...)
 make -C test test      # small standalone unit tests (wav, config, dividers, ...) - 116 checks
+make test-scripts      # the Python host tooling (SD card rules, release packaging, converters)
+make test-web          # the browser front-end in web/ (node or bun; no npm install)
 ```
 
-Note that a bare `make test` in the repo root does **nothing** — it matches the `test/` directory rather than a target. Use the two commands above.
+`make test-scripts` and `make test-web` are two halves of one contract: the browser app reads the SD card rules as data exported from `scripts/card_layout.py`, so the Python side fails if the committed export has drifted, and the JS side fails if its WAV writers or its card checker disagree with the Python they mirror.
 
 ### On-target (a flashed device)
 
