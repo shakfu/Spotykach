@@ -1,8 +1,8 @@
 // SYNTHUX ACADEMY /////////////////////////////////////////
 // SPOTYKACH ///////////////////////////////////////////////
 #include "engine/graincloud/graincloud_engine.h"
-#include "engine/graincloud/mode.h"
-#include "engine/graincloud/event.h"
+#include "engine/granular/mode.h"
+#include "engine/granular/event.h"
 #include "config.h"
 #include "engine/graincloud/gf_cloud.h"  // tap raw knobs straight to the GrainflowLib cloud
 

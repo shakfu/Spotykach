@@ -1,5 +1,9 @@
 # sk-engines: A Spotykach (platform/engine fork)
 
+[![CI](https://github.com/shakfu/sk-engines/actions/workflows/ci.yml/badge.svg)](https://github.com/shakfu/sk-engines/actions/workflows/ci.yml)
+
+> New here? `make help` lists every build, test, card and release command.
+
 A fork of the official [Synthux Academy Spotykach](https://synthux.academy/store/spotykach) firmware, restructured as a fixed hardware/UI **platform** with a swappable DSP **engine** architecture.
 
 The hardware and interaction model remain constant across firmware variants: multi-function encoders with pickup behavior and LED ring feedback, pad gestures, transport controls, SD-card sample storage, CV/gate I/O, and MIDI support. Individual firmware builds replace only the DSP engine and its parameter set. Clocking and transport are also provided as shared platform services, allowing any engine to synchronize to the same internal, TS4, or MIDI clock sources.
@@ -51,7 +55,7 @@ Four further engines live in the tree and build the same way, but are not (yet) 
 | Engine | Type | SD card | Build | Authored in | Notes |
 | --- | --- | --- | --- | --- | --- |
 | [granular](docs/engines/granular.md) | Looper / sampler | Optional (save/load loops) | SRAM | C++ | Default build; the original firmware as an engine |
-| [graincloud](docs/engines/graincloud.md) | Looper / sampler | Optional (save/load loops) | SRAM (`-Os`) | C++ | Granular variant with a GrainflowLib cloud |
+| [graincloud](docs/engines/graincloud.md) | Looper / sampler | Optional (save/load loops) | SRAM (`-Os`) | C++ | The granular tree built with `SPK_GRAIN_GF`: a GrainflowLib cloud replaces the grain core |
 | [tape](docs/engines/tape.md) | Looper / recorder | **Required** (streams) | SRAM | C++ | Two SD-streamed decks, no length cap |
 | [shuttle](docs/engines/shuttle.md) | Looper | Optional (load slots) | SRAM | C++ | Four in-SDRAM tracks, bipolar varispeed |
 | [softcut](docs/engines/softcut.md) | Looper (overdub) | Optional (load/save clips) | SRAM | C++ | Vendored monome softcut-lib, 4 voices |
@@ -196,18 +200,22 @@ All three commands also exist as a **browser page** in [`web/`](web/), for when 
 
 There are two independent suites: one that runs on your machine, and one that drives a flashed device.
 
+Both, plus a build of every engine, run in [CI](.github/workflows/ci.yml): 22 firmware builds through the canonical `make` path (20 engines, and `TERMINAL=1` on two of them because that flag changes type layout), the four off-target suites, and a CMake build of the six engines whose flags are not vanilla — the only thing keeping the opt-in CMake path from drifting away from the Makefile. `csound` and `chuck` each have to cross-build a large runtime first, so they sit in a separate workflow ([`qspi-libs.yml`](.github/workflows/qspi-libs.yml)).
+
+Both workflows are currently **`workflow_dispatch` only** — run them from the repository's Actions tab. The push/PR and weekly triggers are written out and commented in each file, to be enabled once a manual run has gone green on a real runner. Until then the automatic safety net is off, so `make test` locally is still the thing standing between a change and a broken engine.
+
 ### Off-target (no hardware)
 
 The engines and the platform's hardware-free layers compile for the host against a small `<daisy.h>` shim, so most DSP and all of the control-plane logic is testable without a device:
 
 ```sh
+make test              # all four suites + the boundary guard (this is what CI runs)
+
 make -C host test      # engine + DSP suites (delay, tape, reso, granular, csound, the terminal codec, ...)
 make -C test test      # small standalone unit tests (wav, config, dividers, ...) - 116 checks
 make test-scripts      # the Python host tooling (SD card rules, release packaging, converters)
 make test-web          # the browser front-end in web/ (node or bun; no npm install)
 ```
-
-Note that a bare `make test` in the repo root does **nothing** — it matches the `test/` directory rather than a target. Use the four commands above.
 
 `make test-scripts` and `make test-web` are two halves of one contract: the browser app reads the SD card rules as data exported from `scripts/card_layout.py`, so the Python side fails if the committed export has drifted, and the JS side fails if its WAV writers or its card checker disagree with the Python they mirror.
 

@@ -217,18 +217,32 @@ ENGINE_SOURCES = src/engine/mosc/mosc_engine.cpp src/engine/csound/spotykach_qsp
 	$(MOSC_TP)/plaits/resources.cc \
 	$(STMLIB_TP)/dsp/units.cc $(STMLIB_TP)/utils/random.cc $(STMLIB_TP)/dsp/atan.cc
 else ifeq ($(ENGINE), graincloud)
-# graincloud is a self-contained variant of the granular engine (a copy under src/engine/graincloud/)
-# with its grain DSP replaced by a GrainflowLib cloud (gf_cloud.*). Its vendored GrainflowLib lives in
+# graincloud is THE GRANULAR ENGINE TREE compiled with -DSPK_GRAIN_GF, not a copy of it. Under that
+# flag Generator's per-sample Vox array is replaced by a per-block GrainflowLib cloud (gf_cloud.*) and
+# Deck gates it from the Play pad; every other file - Core, Buffer, Track, Vox, the FX, the modulators
+# - is the same source, compiled twice into two different images. Its vendored GrainflowLib lives in
 # src/engine/graincloud/thirdparty/grainflow/.
-C_DEFS += -DSPK_ENGINE_GRAINCLOUD
+#
+# It used to be a byte-for-byte fork: 35 of 42 files identical, ~3,400 duplicated lines that a fix to
+# granular/ silently did not reach (and graincloud is the PUBLISHED one of the pair). The three files
+# that genuinely differ now carry `#if SPK_GRAIN_GF` blocks in the granular tree - generator.h,
+# generator.cpp and two lines of deck.cpp - so granular/ stays exactly where upstream put it and stays
+# diffable against it, which a shared "graincore" directory would have cost.
+#
+# Include order matters: src/engine/graincloud comes FIRST so granular/generator.cpp's guarded
+# `#include "gf_cloud.h"` resolves (it is not in granular/, so the quoted lookup falls through to -I).
+C_DEFS += -DSPK_ENGINE_GRAINCLOUD -DSPK_GRAIN_GF=1
 # gfSyn pulls M_PI via <cmath>, which strict -std=c++17 does not expose on arm-none-eabi.
 C_DEFS += -DM_PI=3.14159265358979323846
-# Granular + the GrainflowLib templates overflow the 186 KB execution SRAM at -O2; build at -Os to fit
+# Granular + the GrainflowLib templates overflow the execution SRAM at -O2; build at -Os to fit
 # (as reso/reverb do). The M7 @ 480 MHz has ample compute headroom.
 OPT = -Os
 GRAINCLOUD_TP  = src/engine/graincloud/thirdparty
-GRAINCLOUD_INC = -I$(GRAINCLOUD_TP)
-ENGINE_SOURCES = $(wildcard src/engine/graincloud/*.cpp)
+GRAINCLOUD_INC = -Isrc/engine/graincloud -I$(GRAINCLOUD_TP) -Isrc/engine/granular
+# The granular tree MINUS its IEngine wrapper (graincloud_engine.cpp replaces granular_engine.cpp),
+# plus graincloud's own two files. generator.cpp is shared - the SPK_GRAIN_GF branches are inside it.
+ENGINE_SOURCES = $(filter-out src/engine/granular/granular_engine.cpp, $(wildcard src/engine/granular/*.cpp)) \
+                 $(wildcard src/engine/graincloud/*.cpp)
 # gen~ engines (ENGINE=gen_<name>) are appended below by scripts/gen_engine.py, one marker-delimited
 # `else ifeq` block per export. They use the genlib-isolation bridge from gen-dsp + the shared
 # src/engine/gen/ family (GenEngine<W> + the arena-bound genlib runtime). See `make gen-engines`.
@@ -466,8 +480,31 @@ build/stream_deck.o build/fat_file.o build/buffer.sdram.o: build/.engine-stamp
 # NOTE: after `scripts/gen_engine.py --remove`, run `make clean` once - the removed engine's stale
 # build/_ext_daisy.d still names its now-deleted source, which make rejects before any recipe runs.
 build/_ext_daisy.o build/genlib_arena.o: build/.engine-stamp
+# Same class of collision between reso and mosc: BOTH vendor a file called `resources.cc` (Rings' and
+# Plaits' wavetables), which compile to the same build/resources.o. A `reso` -> `mosc` switch without
+# this reuses Rings' object and the link fails with `undefined reference to plaits::lut_sine` - which
+# reads like a missing source rather than a stale object, and is why `make engine-mosc` opens with a
+# full `make clean`. (The clean is still there and still correct; this makes a plain
+# `make ENGINE=mosc` after a reso build work too, as the README promises for every engine.)
+build/resources.o: build/.engine-stamp
+# Basename-colliding objects are DELETED on an engine switch, along with their .d files, rather than
+# merely declared out of date. Listing them as prerequisites (above) is not enough: the stale
+# build/<name>.d still names the OTHER engine's source as a prerequisite of build/<name>.o, and the
+# pattern rule compiles `$<` - the first prerequisite - so make dutifully rebuilds resources.o from
+# rings/resources.cc during a mosc build and the link still fails on `plaits::lut_sine`. Removing the
+# .d removes the stale prerequisite, after which vpath resolves against the current engine's sources.
+# This is also what the gen~ note above warns about for `--remove`; deleting the .d handles that too.
+#
+# The list: three of these are reso-vs-mosc, because Rings and Plaits are the same author's codebases
+# and reuse file names (rings/dsp/{resonator,string}.cc + rings/resources.cc vs the Plaits equivalents).
+# The other two are the gen~ wrapper objects, whose names gen-dsp fixes across exports. Regenerate with:
+#
+#   find src -name '*.cc' -o -name '*.cpp' | xargs -n1 basename | sort | uniq -d
+#
+ENGINE_COLLIDING_OBJS = resources resonator string _ext_daisy genlib_arena
 build/.engine-stamp: FORCE | $(BUILD_DIR)
-	@echo '$(ENGINE)' | cmp -s - $@ 2>/dev/null || echo '$(ENGINE)' > $@
+	@echo '$(ENGINE)' | cmp -s - $@ 2>/dev/null || { echo '$(ENGINE)' > $@; \
+	  rm -f $(addprefix $(BUILD_DIR)/,$(addsuffix .o,$(ENGINE_COLLIDING_OBJS)) $(addsuffix .d,$(ENGINE_COLLIDING_OBJS))); }
 
 # Same trick for the baked-in version string: -DSPK_VERSION_STR is invisible to make's dependency
 # graph, so without this a new commit (new `git describe`) would leave a stale version in the
@@ -493,9 +530,31 @@ build/.version-stamp: FORCE | $(BUILD_DIR)
 # whose stale subset depends on timing. That is exactly the layout-mismatch case above, and it bit us
 # on hardware (see docs/dev/terminal-impl.md). Deleting the objects is immune to timestamp resolution.
 #
-# The stamps are prerequisites of every object, so all three recipes run before any compilation starts;
+# The stamps are prerequisites of every object, so all the recipes run before any compilation starts;
 # the rm therefore cannot race a concurrent -j compile.
-$(OBJECTS): build/.terminal-stamp build/.usbdiag-stamp build/.termport-stamp
+#
+# -DSPK_GRAIN_GF is in the same class and is why granular <-> graincloud needs one. Those two engines
+# compile THE SAME granular tree to the same object basenames (build/generator.o, build/deck.o, ...),
+# and the flag adds members to Generator - so a `make ENGINE=granular` over a stale graincloud tree
+# would otherwise reuse objects whose Generator is two members longer, i.e. the layout mismatch above.
+# The .engine-stamp above cannot cover this: it only re-makes a named handful of objects, and here the
+# whole shared tree is affected. (Before the dedup the two engines had separate directories and this
+# could not arise; deleting ~3,400 duplicated lines is what makes the stamp necessary.)
+#
+# -DSPK_USB_MIDI needs one for a subtler reason than layout: it defaults ON for BOOT_QSPI and OFF
+# otherwise (see USB_MIDI below), so switching from any SRAM engine to a QSPI one reuses platform
+# objects compiled WITHOUT it. The result builds, links, boots, and silently ignores device MIDI -
+# byte-for-byte the failure the CMake gap produced (see CHANGELOG), reachable from the Makefile too:
+# a clean `mosc` image is ~304 KB, the same image built over a stale reso tree ~292 KB.
+$(OBJECTS): build/.terminal-stamp build/.usbdiag-stamp build/.termport-stamp build/.grainflavor-stamp \
+            build/.usbmidi-stamp
+
+build/.usbmidi-stamp: FORCE | $(BUILD_DIR)
+	@echo '$(USB_MIDI)' | cmp -s - $@ 2>/dev/null || { echo '$(USB_MIDI)' > $@; rm -f $(BUILD_DIR)/*.o; }
+
+build/.grainflavor-stamp: FORCE | $(BUILD_DIR)
+	@echo '$(ENGINE)' | grep -qx graincloud && echo 1 > $(BUILD_DIR)/.gf-want || echo 0 > $(BUILD_DIR)/.gf-want
+	@cmp -s $(BUILD_DIR)/.gf-want $@ 2>/dev/null || { cp $(BUILD_DIR)/.gf-want $@; rm -f $(BUILD_DIR)/*.o; }
 
 build/.terminal-stamp: FORCE | $(BUILD_DIR)
 	@echo '$(TERMINAL)' | cmp -s - $@ 2>/dev/null || { echo '$(TERMINAL)' > $@; rm -f $(BUILD_DIR)/*.o; }
@@ -919,6 +978,12 @@ BUN ?= $(shell command -v bun 2>/dev/null)
 .PHONY: web-build test-web web-serve
 web-build:
 	@test -n "$(BUN)" || { echo "bun not found - install it (https://bun.sh) or set BUN=/path/to/bun"; exit 1; }
+	@# The CSS step shells out to `tailwindcss`, which lives in web/node_modules. A checkout that has
+	@# only ever SERVED the page (which needs no install, the bundle being committed) has no node_modules
+	@# and fails here with a bare `tailwindcss: command not found`. Install on demand instead. The same
+	@# guard is in test-web below, but that one only fires when node_modules is missing entirely - a
+	@# partial tree (typescript present, tailwind not) got past it.
+	@cd web && test -x node_modules/.bin/tailwindcss || $(BUN) install
 	cd web && $(BUN) run build
 
 # Run the web front-end's test suite: the WAV writers asserted byte-identical to card_audio.py, the
@@ -976,3 +1041,71 @@ libs:
 clean-libs:
 	cd $(LIBDAISY_DIR) && $(MAKE) clean
 	cd $(DAISYSP_DIR) && $(MAKE) clean
+
+# ---------------------------------------------------------------------------------------------------
+# Aggregate test target + help
+# ---------------------------------------------------------------------------------------------------
+#
+# `test` MUST be .PHONY. Without it, make matches the `test/` DIRECTORY, decides it is up to date, and
+# a bare `make test` silently does nothing - which is exactly what the README used to have to warn
+# about. The four suites below are independent and are the whole off-target contract; the on-target
+# one is `make test-hw` (needs a flashed TERMINAL=1 device, and skips cleanly without one).
+.PHONY: test
+test:
+	$(MAKE) check-boundary
+	$(MAKE) -C host test
+	$(MAKE) -C test test
+	$(MAKE) test-scripts
+	$(MAKE) test-web
+
+# `make help` - the discoverable index. This Makefile has ~50 targets and a dozen toggles; before this
+# they were findable only by reading the file or the README end to end.
+.PHONY: help
+help:
+	@echo 'sk-engines - a Spotykach platform/engine firmware.  https://github.com/shakfu/sk-engines'
+	@echo ''
+	@echo 'Build (engine chosen at build time; switching ENGINE needs no clean):'
+	@echo '  make -j8 libs                 build the vendored libDaisy + DaisySP archives (once)'
+	@echo '  make -j8                      build the default engine (ENGINE=granular) -> build/spotykach.bin'
+	@echo '  make -j8 ENGINE=<name>        build another SRAM engine (see the list below)'
+	@echo '  make program-dfu              flash whatever is already in build/ (device in DFU mode)'
+	@echo '  make engine-<name>            clean + build + flash in one step, e.g. make engine-delay'
+	@echo ''
+	@echo 'SRAM engines (ENGINE=):'
+	@echo '  granular graincloud tape shuttle softcut radio bard pstretch'
+	@echo '  delay qdelay reverb gigaverb chorus filter voice'
+	@echo '  edrums reso glitch passthrough'
+	@echo 'QSPI engines (own one-shot target, too large for execution SRAM):'
+	@echo '  make engine-mosc              no prerequisites; Plaits DSP is vendored in-tree'
+	@echo '  make engine-csound            needs scripts/fetch_csound.sh once (libcsound.a)'
+	@echo '  make engine-chuck             needs scripts/fetch_chuck.sh once (libchuck.a)'
+	@echo ''
+	@echo 'Build toggles (append to any build):'
+	@echo '  DEBUG=1        UART logging                LOFI_INT16=1  16-bit loop buffer (2x record time)'
+	@echo '  TERMINAL=1     USB-C command channel       METER=1       CPU-load meter over CDC (excludes TERMINAL)'
+	@echo '  USBDIAG=1      USB bring-up blink codes    WINDOW=<n>    pstretch FFT window (4096/8192)'
+	@echo ''
+	@echo 'Test (off-target, no hardware needed):'
+	@echo '  make test                     all four suites + the boundary guard'
+	@echo '  make -C host test             engine + DSP suites          make -C test test    standalone unit tests'
+	@echo '  make test-scripts             the Python host tooling       make test-web        the browser front end'
+	@echo '  make check-boundary           platform must not include engine DSP'
+	@echo 'Test (on-target, needs a flashed TERMINAL=1 device; skips cleanly without one):'
+	@echo '  make test-hw                  pytest harness over USB-C     python tools/skterm.py   hand REPL'
+	@echo ''
+	@echo 'SD card:'
+	@echo '  make sdcard SDCARD_OUT=/media/SK    build a complete card (folders, configs, demo audio)'
+	@echo '  make check-sdcard CARD=/media/SK    explain anything that will not work, with the fix'
+	@echo ''
+	@echo 'Web front end (same rules as the CLI, exported as data):'
+	@echo '  make web-serve                build + serve on http://localhost:8000'
+	@echo '  make web-data                 regenerate web/ data + fixtures after touching scripts/'
+	@echo '  make web-build                rebuild web/dist/ after touching web/src/'
+	@echo ''
+	@echo 'Release + codegen:'
+	@echo '  make dist                     build the curated engine set into dist/<version>/'
+	@echo '  make faust-kernels            regenerate the Faust engine kernels'
+	@echo '  make gen-engines              regenerate the gen~ engine directories'
+	@echo '  make diagrams                 regenerate the control-surface SVGs'
+	@echo ''
+	@echo 'Docs: README.md - docs/architecture.md - docs/engines/ - docs/engine-types/ - TODO.md'

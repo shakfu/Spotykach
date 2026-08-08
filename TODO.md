@@ -2,6 +2,56 @@
 
 Deferred work, in priority order (highest first). See `docs/` for the platform/engine design and `CHANGELOG.md` for done work.
 
+- [ ] add web controls in the web frontend to control the newly implemented OSC layer / protocol.
+      (Note: as of 2026-08-08 the OSC layer is **designed, not implemented** — `docs/dev/terminal-osc.md`
+      is ~700 lines of spec and there is no `SPK_TERMINAL_OSC` anywhere in `src/` or the Makefile. This
+      item is blocked on P7, which is itself blocked on the same unresolved question as P6: whether
+      `TERMINAL=1` ships in releases at all.)
+
+## Done 2026-08-08 — the review's host-verifiable items
+
+Closed out from `REVIEW.md`; see the sections below for what remains.
+
+- [x] **CI** (`.github/workflows/ci.yml`) — 22 firmware builds (20 engines + `TERMINAL=1` on two), the
+      four off-target suites + `check-boundary`, and a CMake build of the six flag-sensitive engines.
+      `csound`/`chuck` are in `qspi-libs.yml` because each cross-builds a large runtime first. This is
+      the standing answer to the `chorus`/`pstretch` class of breakage (an engine that stops linking
+      and nobody notices) and to P5's CMake drift.
+      - [ ] **Arm the automatic triggers.** Both workflows are `workflow_dispatch`-only for an initial
+            period; the push/PR and weekly blocks are written out and commented in each file. Dispatch
+            each once from the Actions tab, confirm green, then uncomment. **Until this is done the
+            safety net is not actually deployed** — the whole value of CI is that it runs on a commit
+            nobody thought to check. First likely friction on a real runner: the
+            `carlosperate/arm-none-eabi-gcc-action` pin (`10-2020-q4`, matching the local 10.2.1).
+- [x] **`Divider::_triplets_on` was never initialized** — omitted from the constructor's init list and
+      with no default member initializer, so it read as indeterminate. Masked on target by `.bss`
+      zeroing (every Divider lives inside the file-static `AppImpl`), live UB on the host, and the
+      reason 7 checks in `test/test_divider.cpp` failed. `test/` is now 116/116. Note that
+      `set_triplets_on()`/`set_swing()` are still **reached from nowhere in the firmware** — implemented,
+      integrated into `tick()`, tested, and unreachable by any gesture. Kept deliberately (see the note
+      in `src/dsp/divider.h`); wiring them to a gesture is open work.
+- [x] **The `web/` export was order-dependent** — `sk_card.verify_card` walked with an unsorted
+      `os.walk`, so the finding ORDER varied by filesystem while the committed fixture is compared
+      byte-for-byte. It could fail on another machine with identical code. Sorted at the walk and again
+      in the exporter.
+- [x] **graincloud/granular duplication removed** — `src/engine/graincloud/` was a byte-for-byte copy of
+      the granular tree (35 of 42 files identical, ~3,400 lines) that had begun to drift, with the
+      *published* engine being the copy that received fewer fixes. Restored to the `SPK_GRAIN_GF`
+      design its own impl doc already described. `src/engine/granular/` did **not** move — see
+      `docs/dev/graincloud-impl.md` for why (upstream diffability).
+- [x] **`host/test_graincloud` was broken and excluded from `make -C host test`** — a missing `<cstdint>`
+      in the vendored GrainflowLib headers. Fixed and wired into the suite; it now covers the whole
+      assembled engine, not just the kernel.
+- [x] **Doc sweep** — 7 broken links fixed, a stale `CLAUDE.md` reference dropped, a stray tool-call
+      artifact removed from `chuck-midi-in-porting.md`, the stale "186 KB SRAM_EXEC" figure in
+      `architecture.md` corrected, plus `make help` and a real `.PHONY: test`.
+
+**Still open from the review** (each needs a decision or a bench, not just typing): host tests for
+`granular` and `mosc` (the default engine and the largest new one have none); P5, the CMake decision —
+CI now keeps the two honest, which makes *keeping* both viable, so this is a choice rather than a
+liability; the front-door restructure (a quickstart above the engine catalogue); and the P2 bench
+session, which everything hardware-gated still funnels into.
+
 > **Update 2026-08-01 - the bench session is now instrumented.** This file was written as if P2 could > only be a manual listening pass. That predates the USB-C terminal channel, which was fixed and verified > on hardware 2026-07-31 (root cause: the panel jack is on OTG_HS, not OTG_FS - see > [`terminal-impl.md`](docs/dev/terminal-impl.md)). Two things landed since, both host-verified: > > - **`query cpu` / `cpumin` / `cpumax` + `reset cpu`** - the platform's `CpuLoadMeter` is now readable >   over the channel, so P2's headroom numbers are `reset cpu` -> drive the engine -> `query cpumax`, >   scripted per engine. Previously the meter needed `METER=1`, which brings up a second USB device on >   the same OTG core the terminal uses - the numbers and the channel that would collect them were >   mutually exclusive. > - **`live_params()`/`live_configs()` on every engine** - the stated blocker on `make test-hw`. The >   generic sweep no longer sets params engines ignore, so the mechanical half of P2 can run unattended. > > Neither is hardware-verified yet; both fold into the P2 session. > > **And one regression found on the way - now FIXED and hardware-verified.** `pstretch` had stopped > building entirely: not "cannot host the terminal" but no link at all, terminal or not, at either > window (`region SRAM overflowed by 80576 bytes` on the committed `v0.6.1` tree). Commit `993210f` > moved 114K from the data `SRAM` region into `SRAM_EXEC` (186K -> 300K) so the channel would fit > everywhere; pstretch's FFT working set needed 297664 B of exactly that region. > > Fixed with a per-engine linker script, `linker/alt_sram_pstretch.lds` (200K/312K instead of > 300K/212K), selected automatically on `ENGINE=pstretch` so a plain `make ENGINE=pstretch` is correct > too. Same approach and precedent as `linker/alt_qspi_chuck.lds`, and it leaves the other 20 engines on > the 300K split untouched. **All three pstretch images flashed and confirmed working on hardware > 2026-08-01** (8192 with and without the terminal, and 4096 with it) - so the moved code/data boundary > boots, which a link check could not have established. > > **P2 is therefore no longer purely pending - its first engine is measured.** `make test-hw` ran > against real hardware for the first time (`30 passed, 3 skipped`), and pstretch has CPU numbers: >
 > | | WINDOW=8192 | WINDOW=4096 |
 > |---|---|---|

@@ -39,10 +39,16 @@ TRANSPORT_SRC = $(wildcard $(ROOT)/src/transport/*.cpp)
 ENGINE_SRC  = $(wildcard $(ROOT)/src/engine/*.cpp)
 DAISYSP_SRC = $(wildcard $(DAISYSP)/*/*.cpp)
 LIB_SRC     = $(CORE_SRC) $(DSP_SRC) $(TRANSPORT_SRC) $(ENGINE_SRC) $(DAISYSP_SRC)
-# graincloud is a separate copy of the granular tree; its test links graincloud/*.cpp INSTEAD of the
-# granular CORE_SRC (same class names live in both, so never link both into one binary).
-GC_CORE_SRC = $(wildcard $(ROOT)/src/engine/graincloud/*.cpp)
+# graincloud is the granular tree compiled with -DSPK_GRAIN_GF (Generator's Vox array swapped for the
+# GrainflowLib cloud), plus its own two files. It used to be a byte-for-byte copy of the tree; the
+# duplication is gone, so this is the same CORE_SRC with the IEngine wrapper swapped. Never link both
+# wrappers into one binary - the granular classes are shared and would be defined twice.
+GC_CORE_SRC = $(filter-out $(ROOT)/src/engine/granular/granular_engine.cpp, $(CORE_SRC)) \
+              $(wildcard $(ROOT)/src/engine/graincloud/*.cpp)
 GC_LIB_SRC  = $(GC_CORE_SRC) $(DSP_SRC) $(TRANSPORT_SRC) $(ENGINE_SRC) $(DAISYSP_SRC)
+# The flag + the include dir that makes granular/generator.cpp's guarded `#include "gf_cloud.h"`
+# resolve (gf_cloud.h is not in granular/, so the quoted lookup falls through to -I).
+GC_FLAGS    = -DSPK_GRAIN_GF=1 -I$(ROOT)/src/engine/graincloud -I$(ROOT)/src/engine/granular
 # The edrums/reso/reverb engines live under src/engine/<name>/ (outside the wildcards above); add for tests.
 DELAY_SRC   = $(ROOT)/src/engine/delay/delay_engine.cpp
 # The terminal channel's hardware-free layers: codec (command.h/fmt), names/describe metadata, reply
@@ -113,7 +119,7 @@ TEST_CHUCK_PATCH = $(BUILD)/test_chuck_patch
 BENCH_REVERB     = $(BUILD)/bench_reverb
 BENCH_GRAINCLOUD = $(BUILD)/bench_graincloud
 
-.PHONY: all clean run bard-card-check test test-terminal test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
+.PHONY: all clean run bard-card-check test test-terminal test-granular test-edrums test-reso test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
 all: $(TARGET)
 
 $(TARGET): $(SRC) | $(BUILD)
@@ -171,7 +177,7 @@ $(TEST_GRAINCLOUD_KERNEL): test_graincloud_kernel.cpp $(wildcard $(GRAINCLOUD_TP
 # graincloud full-engine test (links the graincloud tree, NOT granular).
 TEST_GRAINCLOUD = $(BUILD)/test_graincloud
 $(TEST_GRAINCLOUD): test_graincloud.cpp $(GC_LIB_SRC) | $(BUILD)
-	$(CXX) $(CXXFLAGS) test_graincloud.cpp $(GC_LIB_SRC) -o $@
+	$(CXX) $(CXXFLAGS) $(GC_FLAGS) test_graincloud.cpp $(GC_LIB_SRC) -o $@
 test-graincloud: $(TEST_GRAINCLOUD)
 	./$(TEST_GRAINCLOUD)
 
@@ -287,7 +293,7 @@ run: $(TARGET)
 
 # `test` runs both engine harnesses. Both inject the transport via EngineContext (granular drives the
 # real platform Transport; edrums uses a small stub ITransport) - the post-transport-decoupling way.
-test: test-terminal test-granular test-edrums test-reso test-graincloud-kernel test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-softcut test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
+test: test-terminal test-granular test-edrums test-reso test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-softcut test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
 
 test-granular: $(TEST)
 	./$(TEST)

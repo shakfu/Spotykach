@@ -222,10 +222,24 @@ def _entry(root: Path, path: Path) -> dict:
     }
 
 
+def _findings(root: Path) -> list[dict]:
+    """verify_card's findings, in a stable order.
+
+    Belt-and-braces with the sorted os.walk in sk_card.verify_card: these fixtures are committed and
+    compared BYTE-FOR-BYTE against a fresh export, so any traversal-order dependency turns into a test
+    that fails on someone else's filesystem. The JS side sorts before comparing, so re-ordering here
+    costs nothing.
+    """
+    return sorted(
+        ({"level": f.level, "path": f.path, "problem": f.problem, "fix": f.fix}
+         for f in sk_card.verify_card(root)),
+        key=lambda f: (f["path"], f["level"], f["problem"]),
+    )
+
+
 def _verify_cases(tmp: Path) -> dict:
     root = tmp / "card"
     _build_broken_card(root)
-    findings = sk_card.verify_card(root)
     files = sorted((p for p in root.rglob("*") if p.is_file()),
                    key=lambda p: p.relative_to(root).as_posix())
     dirs = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_dir())
@@ -234,8 +248,7 @@ def _verify_cases(tmp: Path) -> dict:
         "head_bytes": HEAD_BYTES,
         "files": [_entry(root, p) for p in files],
         "dirs": dirs,
-        "findings": [{"level": f.level, "path": f.path, "problem": f.problem, "fix": f.fix}
-                     for f in findings],
+        "findings": _findings(root),
     }
 
 
@@ -247,14 +260,12 @@ def _clean_card_case(tmp: Path) -> dict:
     files = sorted((p for p in root.rglob("*") if p.is_file()),
                    key=lambda p: p.relative_to(root).as_posix())
     dirs = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_dir())
-    findings = sk_card.verify_card(root)
     return {
         "note": "a freshly built card, from sk_card.build_card(demo=True)",
         "head_bytes": HEAD_BYTES,
         "files": [_entry(root, p) for p in files],
         "dirs": dirs,
-        "findings": [{"level": f.level, "path": f.path, "problem": f.problem, "fix": f.fix}
-                     for f in findings],
+        "findings": _findings(root),
     }
 
 

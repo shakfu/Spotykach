@@ -217,8 +217,11 @@ def verify_card(root: Path) -> list[Finding]:
         rel_dir = d.relative_to(root).as_posix()
         if rel_dir == ".":
             rel_dir = ""
-        # Skip the device's own state directory and FS bookkeeping.
-        dirnames[:] = [x for x in dirnames if x not in cl.SKIP_DIRS]
+        # Skip the device's own state directory and FS bookkeeping. SORTED, because os.walk yields
+        # subdirectories in filesystem order: without this the finding ORDER varies by machine, which
+        # made the committed web/ export (which is compared byte-for-byte) fail on a different box
+        # with byte-identical code. Filenames are already sorted below.
+        dirnames[:] = sorted(x for x in dirnames if x not in cl.SKIP_DIRS)
         bank = cl.bank_for_path(rel_dir) if rel_dir else None
         counted = 0
         for name in sorted(filenames):

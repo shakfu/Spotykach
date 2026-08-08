@@ -19,7 +19,7 @@ namespace spotykach {
 // (after the input migration) owns all granular *input* meaning: parameters, MIDI, and pad
 // gestures - see the grouped methods below. The refactor is PAUSED at this input-decoupled
 // milestone; the output/IO side (LEDs, CV, gate, storage) still reaches the graph through the
-// core() escape hatch documented at that method. See docs/refactor-status.md.
+// core() escape hatch documented at that method.
 class GranularEngine : public IEngine {
 public:
     GranularEngine() = default;

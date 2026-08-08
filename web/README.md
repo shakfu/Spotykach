@@ -3,7 +3,9 @@
 A static page: what sk-engines is, a browsable catalogue of its engines, SD card tools, and a WebSerial
 terminal for `TERMINAL=1` builds. TypeScript bundled by [bun](https://bun.sh) and CSS built by
 [Tailwind](https://tailwindcss.com); both are build-time only, and both artifacts are committed, so
-there is no server and nothing to install to *serve* the page. Design rationale and the constraints
+there is no server and nothing to install to *serve* the page. **Re**building it is another matter:
+`make web-build` needs the dev dependencies, so run `bun install` in this directory first — without it
+the CSS step fails with a bare `tailwindcss: command not found`. Design rationale and the constraints
 that shaped it are in [`../docs/dev/web-frontend.md`](../docs/dev/web-frontend.md).
 
 It ships **two themes**, switched from the View menu and remembered in `localStorage`: **Light**

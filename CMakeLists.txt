@@ -129,15 +129,20 @@ elseif(ENGINE STREQUAL mosc)
         ${STMLIB_TP}/dsp/atan.cc
     )
 elseif(ENGINE STREQUAL graincloud)
-    # graincloud = a self-contained variant of the granular engine (copy under src/engine/graincloud/)
-    # with its grain DSP replaced by a GrainflowLib cloud (gf_cloud.*).
+    # graincloud = THE GRANULAR ENGINE TREE built with -DSPK_GRAIN_GF, not a copy of it: that flag
+    # swaps Generator's per-sample Vox array for a per-block GrainflowLib cloud (gf_cloud.*) and gates
+    # it from the Play pad. Only the IEngine wrapper is substituted. Mirrors the Makefile branch.
     set(ENGINE_DEFINE SPK_ENGINE_GRAINCLOUD)
-    set(GRAINCLOUD_TP ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/graincloud/thirdparty)
-    file(GLOB ENGINE_SOURCES CONFIGURE_DEPENDS src/engine/graincloud/*.cpp)
-    set(ENGINE_INCLUDES ${GRAINCLOUD_TP})
+    set(GRAINCLOUD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/graincloud)
+    set(GRAINCLOUD_TP ${GRAINCLOUD_DIR}/thirdparty)
+    file(GLOB ENGINE_SOURCES CONFIGURE_DEPENDS src/engine/granular/*.cpp src/engine/graincloud/*.cpp)
+    list(REMOVE_ITEM ENGINE_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/granular/granular_engine.cpp)
+    # graincloud's own dir first, so granular/generator.cpp's guarded `#include "gf_cloud.h"` resolves.
+    set(ENGINE_INCLUDES ${GRAINCLOUD_DIR} ${GRAINCLOUD_TP} ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/granular)
     # M_PI for gfSyn under strict -std=c++17 on arm-none-eabi.
-    set(ENGINE_DEFINES M_PI=3.14159265358979323846)
-    # Granular + GrainflowLib templates overflow the 186 KB execution SRAM at -O2; build at -Os.
+    set(ENGINE_DEFINES M_PI=3.14159265358979323846 SPK_GRAIN_GF=1)
+    # Granular + GrainflowLib templates overflow the execution SRAM at -O2; build at -Os.
     set(APP_OPT -Os)
 elseif(ENGINE STREQUAL tape)
     set(ENGINE_DEFINE SPK_ENGINE_TAPE)

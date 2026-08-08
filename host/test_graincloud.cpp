@@ -13,7 +13,7 @@
 #include <functional>
 
 #include "engine/graincloud/graincloud_engine.h"
-#include "engine/graincloud/buffer.h"
+#include "engine/granular/buffer.h"   // shared: graincloud is the granular tree built with SPK_GRAIN_GF
 #include "engine/itransport.h"
 #include "host_setup.h"
 

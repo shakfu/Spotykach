@@ -144,6 +144,30 @@
   ],
   "findings": [
     {
+      "level": "error",
+      "path": "SK/config.txt",
+      "problem": "mid_ch_a = '99' is outside 1..16",
+      "fix": "Set a value in 1..16."
+    },
+    {
+      "level": "warn",
+      "path": "SK/config.txt",
+      "problem": "odd number of lines - the last property has no value",
+      "fix": "Every property name needs a value on the following line."
+    },
+    {
+      "level": "warn",
+      "path": "SK/config.txt",
+      "problem": "unknown property 'nonsense'",
+      "fix": "Known: mid_ch_a, mid_ch_b, mid_ps_a, mid_ps_b, pre_load"
+    },
+    {
+      "level": "error",
+      "path": "bard/0/The Hobbit Chapter 3.wav",
+      "problem": "filename is 24 characters; the scan skips anything over 12, so this file is INVISIBLE to the device",
+      "fix": "Rename to 12 characters or fewer including the extension (e.g. THEHOBBI.WAV). For a whole library, scripts/prepare_audiobooks.py does the renaming and records the real titles in BOOKS.TXT."
+    },
+    {
       "level": "warn",
       "path": "notes.txt",
       "problem": "file in the card root belongs to no engine",
@@ -151,9 +175,15 @@
     },
     {
       "level": "error",
-      "path": "bard/0/The Hobbit Chapter 3.wav",
-      "problem": "filename is 24 characters; the scan skips anything over 12, so this file is INVISIBLE to the device",
-      "fix": "Rename to 12 characters or fewer including the extension (e.g. THEHOBBI.WAV). For a whole library, scripts/prepare_audiobooks.py does the renaming and records the real titles in BOOKS.TXT."
+      "path": "pstretch/SONG.MP3",
+      "problem": ".MP3 is a compressed/unsupported source format - the firmware has no decoder, and the scan only indexes .raw/.wav",
+      "fix": "Convert it: sk_card.py convert --engine pstretch CARD SONG.MP3"
+    },
+    {
+      "level": "error",
+      "path": "pstretch/TINY.WAV",
+      "problem": "file is 1.9 KB; the scan skips anything under 32 KB, so this file is INVISIBLE to the device",
+      "fix": "Make the clip longer (the floor exists to drop macOS metadata stubs, and catches genuinely short clips too)."
     },
     {
       "level": "warn",
@@ -166,6 +196,18 @@
       "path": "radio/0/odd.raw",
       "problem": "odd byte count for a 16-bit format (last frame is partial)",
       "fix": "Harmless - the firmware floors to a whole frame - but usually means the file was truncated or is not actually int16."
+    },
+    {
+      "level": "warn",
+      "path": "shuttle",
+      "problem": "no files for the shuttle engine",
+      "fix": "Same format and slot names as tape, but LOADED into RAM: ~30 s per track, longer files truncate."
+    },
+    {
+      "level": "warn",
+      "path": "softcut",
+      "problem": "no files for the softcut engine",
+      "fix": "Loops you record on the device: Alt+Seq/Alt+Rev save to the slot picked with Alt+PITCH, Play loads it."
     },
     {
       "level": "warn",
@@ -202,48 +244,6 @@
       "path": "tapes/tape_b_1.wav",
       "problem": "the firmware's WAV parser would reject this file: not a RIFF/WAVE file (missing the 'RIFF'/'WAVE' magic)",
       "fix": "Re-encode it: sk_card.py convert --engine tape CARD tape_b_1.wav"
-    },
-    {
-      "level": "error",
-      "path": "pstretch/SONG.MP3",
-      "problem": ".MP3 is a compressed/unsupported source format - the firmware has no decoder, and the scan only indexes .raw/.wav",
-      "fix": "Convert it: sk_card.py convert --engine pstretch CARD SONG.MP3"
-    },
-    {
-      "level": "error",
-      "path": "pstretch/TINY.WAV",
-      "problem": "file is 1.9 KB; the scan skips anything under 32 KB, so this file is INVISIBLE to the device",
-      "fix": "Make the clip longer (the floor exists to drop macOS metadata stubs, and catches genuinely short clips too)."
-    },
-    {
-      "level": "error",
-      "path": "SK/config.txt",
-      "problem": "mid_ch_a = '99' is outside 1..16",
-      "fix": "Set a value in 1..16."
-    },
-    {
-      "level": "warn",
-      "path": "SK/config.txt",
-      "problem": "unknown property 'nonsense'",
-      "fix": "Known: mid_ch_a, mid_ch_b, mid_ps_a, mid_ps_b, pre_load"
-    },
-    {
-      "level": "warn",
-      "path": "SK/config.txt",
-      "problem": "odd number of lines - the last property has no value",
-      "fix": "Every property name needs a value on the following line."
-    },
-    {
-      "level": "warn",
-      "path": "shuttle",
-      "problem": "no files for the shuttle engine",
-      "fix": "Same format and slot names as tape, but LOADED into RAM: ~30 s per track, longer files truncate."
-    },
-    {
-      "level": "warn",
-      "path": "softcut",
-      "problem": "no files for the softcut engine",
-      "fix": "Loops you record on the device: Alt+Seq/Alt+Rev save to the slot picked with Alt+PITCH, Play loads it."
     }
   ]
 }

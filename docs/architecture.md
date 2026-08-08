@@ -1,6 +1,6 @@
 # Spotykach 'engines' Architecture
 
-This document describes the big-picture architecture of the Spotykach firmware: the hardware platform, the platform/engine decoupling, the execution model, how the subsystems fit together, and how audio and control data flow through the system. For a file-by-file map of the source tree see [source-guide.md](source-guide.md). For the status and roadmap of the platform/engine refactor see [refactor-status.md](dev/refactor-status.md) and [item3-plan.md](dev/item3-plan.md). For an analysis of weaknesses and improvement opportunities see [review-260529.md](dev/review-260529.md).
+This document describes the big-picture architecture of the Spotykach firmware: the hardware platform, the platform/engine decoupling, the execution model, how the subsystems fit together, and how audio and control data flow through the system. For a file-by-file map of the source tree see [source-guide.md](source-guide.md). The platform/engine refactor those sections describe is **complete**; its running notes (`dev/refactor-status.md`, `dev/item3-plan.md`) and the original code review (`dev/review-260529.md`) have been retired into [`CHANGELOG.md`](../CHANGELOG.md). For open work see [`TODO.md`](../TODO.md), and for the current review see [`REVIEW.md`](../REVIEW.md).
 
 > **Refactor status note.** The firmware is mid-transformation from a monolith into a > platform + swappable engine. Sections 3-4 describe the decoupled design and mark, where it > matters, what is implemented today versus what the remaining refactor items finish. The > hardware (section 2), DSP graph (section 7), and memory model (section 8) are accurate as-is.
 
@@ -18,7 +18,7 @@ On top of the two decks sit shared facilities: a clock/transport with internal, 
 
 This granular looper is the **reference engine** for the platform/engine design (section 3): all of the above except the granular DSP itself is platform behaviour reusable by other engines.
 
-The feature set documented in the user manual is summarised in [review-260529.md](dev/review-260529.md#appendix-manual-feature-map), where it is also cross-checked against the code.
+The feature set documented in the user manual is the granular engine's; [`manual.md`](manual.md) is the firmware-tracked copy, kept in sync with the code in the same commit as a behaviour change.
 
 ## 2. Hardware platform
 
@@ -112,7 +112,7 @@ Because the defaults are inert, adding a method to `IEngine` does not break exis
 
 ### Known residual coupling (closes during the remaining refactor items)
 
-- ~~**Switch-config writes + deck-state readbacks** reach `Core` via `engine.core()`~~ **RESOLVED by item 3(a) (2026-06-02): `engine.core()` is deleted; `CoreUI`'s ctor takes `IEngine&`.** The former Categories 2-3 are now the `set_config`/`tempo_to_fit`/`toggle_grit_mode` config channel and the `DeckLayout`/`size_sets_tempo` knob-layout queries; seeding reads the engine's pre-seeded `param()`. The platform no longer touches `Core`. See [item3-plan.md](dev/item3-plan.md).
+- ~~**Switch-config writes + deck-state readbacks** reach `Core` via `engine.core()`~~ **RESOLVED by item 3(a) (2026-06-02): `engine.core()` is deleted; `CoreUI`'s ctor takes `IEngine&`.** The former Categories 2-3 are now the `set_config`/`tempo_to_fit`/`toggle_grit_mode` config channel and the `DeckLayout`/`size_sets_tempo` knob-layout queries; seeding reads the engine's pre-seeded `param()`. The platform no longer touches `Core`.
 
 - **`Driver`/transport** lives inside `Core` and is forwarded through `transport_*`. Conceptually platform; relocation to a platform transport service is deferred and will likely be forced by a second engine's `CapTransport`.
 
@@ -310,7 +310,7 @@ All large buffers live in external SDRAM and are handed out once at init by the 
 
 The platform pulls these pointers from the pool, packs them into the `EngineBuffers` of an `EngineContext` (section 3), and passes that to `engine.init`; the engine then routes them into each deck through a `Deck::Params` struct. Decks and effects never allocate their own large storage. Smaller state lives in the objects themselves (statically allocated). Calibration data persists in QSPI flash via `Settings` and libDaisy's `PersistentStorage`; user config (MIDI channels, preload) persists as `SK/config.txt` on the SD card and is parsed by `Config`.
 
-The application boots from SRAM; code lives in the 186 KB `SRAM_EXEC` region, which is the binding memory constraint (hundreds of bytes free) - any added abstraction surface must watch it. See [refactor-status.md](dev/refactor-status.md) for the running budget.
+The application boots from SRAM; code lives in the `SRAM_EXEC` region, which is the binding memory constraint - any added abstraction surface must watch it. It was 186 KB until commit `993210f` moved 114 KB across from the data `SRAM` region (300 KB / 212 KB today) so the `TERMINAL=1` channel would fit on every engine; `pstretch`, whose FFT working set needs the data side instead, gets its own 200 KB / 312 KB split via [`linker/alt_sram_pstretch.lds`](../linker/alt_sram_pstretch.lds). Each build prints the live figure (`--print-memory-usage`).
 
 ## 9. Control and persistence flow
 

@@ -6,8 +6,8 @@
 #include "engine/engine_params.h"
 #include "engine/engine_leds.h"   // FxLeds/PlayLeds/AltLeds/TransportLeds/DeckLeds/RingGeometry
 #include "engine/display_model.h"
-#include "engine/graincloud/core.h"
-#include "engine/graincloud/speed.map.h"
+#include "engine/granular/core.h"        // shared: graincloud IS the granular tree built with SPK_GRAIN_GF
+#include "engine/granular/speed.map.h"
 #include "nocopy.h"
 
 #include <cstdint>
@@ -19,7 +19,7 @@ namespace spotykach {
 // (after the input migration) owns all granular *input* meaning: parameters, MIDI, and pad
 // gestures - see the grouped methods below. The refactor is PAUSED at this input-decoupled
 // milestone; the output/IO side (LEDs, CV, gate, storage) still reaches the graph through the
-// core() escape hatch documented at that method. See docs/refactor-status.md.
+// core() escape hatch documented at that method.
 class GraincloudEngine : public IEngine {
 public:
     GraincloudEngine() = default;

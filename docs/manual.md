@@ -2,6 +2,8 @@
 
 This is the in-repo user manual. Unlike the published manual, it is kept in sync with the firmware in this repository: when you change behaviour, update this file in the same commit. Where this document and the published manual (<https://tsemah.notion.site/Spotykach-Manual-22c6331933b880c59108c0de25102bb5>) disagree, this document describes what the current code actually does. Differences known at the time of writing are called out in [Notes vs published manual](#notes-vs-published-manual).
 
+**Scope.** This manual describes the **granular** engine — the stock upstream firmware, and this repo's `ENGINE=granular` default. It doubles as the platform manual, because everything outside the "Decks and modes", "Recording and playback", "Primary controls" and "Effects" sections (power, clock/sync, CV/gate, routing, the card, `config.txt`, MIDI, flashing) is shared by every engine. For the other twenty engines, each of which replaces the knob/pad meanings with its own, see [`docs/engines/`](engines/).
+
 Spotykach is a screenless, dual-deck looping and sampling instrument built on an Electro-Smith Daisy Seed. It runs at 48 kHz. The two decks (A and B) are independent recorders/players that share a clock, FX engine families, modulation, routing and SD-card storage.
 
 ## Power
@@ -178,7 +180,7 @@ Plain text, one property name per line followed by its value on the next line:
 
 ## Firmware update
 
-Build with `make -j8` (after `make -j8 libs` once) and flash over the rear USB-C port in DFU mode: hold Reset for about 3 seconds until the bottom pads breathe white, then run `make program-dfu`. See the repository README and CLAUDE.md for details.
+Build with `make -j8` (after `make -j8 libs` once) and flash over the rear USB-C port in DFU mode: hold Reset for about 3 seconds until the bottom pads breathe white, then run `make program-dfu`. See the [repository README](../README.md) for details, and [`docs/engines/`](engines/) for the other engines you can flash onto the same hardware.
 
 ## Notes vs published manual
 

@@ -1,6 +1,11 @@
 #include "generator.h"
 #include "config.h"
 #include "expose.h"
+#if SPK_GRAIN_GF
+#include "gf_cloud.h"   // ENGINE=graincloud: the GrainflowLib core that replaces the Vox output.
+                        // Lives in src/engine/graincloud/, which is on the include path for that
+                        // build only - so the templates stay out of every granular translation unit.
+#endif
 
 using namespace spotykach;
 
@@ -37,6 +42,10 @@ void Generator::init(Buffer* buffer, size_t* slice_points)
     v.init(buffer, cnt);
     cnt ++;
   }
+#if SPK_GRAIN_GF
+  _gf = gf_cloud_acquire(ref);   // ref (deck index) is set by Deck before init()
+  _gf->init(buffer, 48000.f);    // platform is 48 kHz
+#endif
 };
 
 void Generator::set_mode(const Vox::Mode value)
@@ -295,6 +304,19 @@ void Generator::process(float& out0, float& out1)
   
   if (_buffer->is_empty()) return;
 
+#if SPK_GRAIN_GF
+  // ENGINE=graincloud: the GrainflowLib cloud replaces the Vox array wholesale. Its parameters are
+  // set DIRECTLY from the engine's raw knobs (GraincloudEngine::set_param), NOT from granular's
+  // mode-dependent Generator fields, so the cloud always has consistent control. The Vox array stays
+  // allocated and compiled - Deck/Drifter are unchanged - but produces no audio.
+  //
+  // Play-pad gate: silent unless the deck is playing (Deck::play/stop -> set_playing).
+  if (!_playing) { _is_active.reset(); return; }
+  (void)set_increment;
+  _gf->process(out0, out1);
+  _is_active.set(0, true);
+}
+#else
   auto s_out0 = 0.f;
   auto s_out1 = 0.f;
   auto speed_mod = _trig_speed_mod_mult;
@@ -320,3 +342,4 @@ void Generator::process(float& out0, float& out1)
   }
   if (!is_generating()) _trig_speed_mod_mult = 1.f;
 }
+#endif  // SPK_GRAIN_GF
