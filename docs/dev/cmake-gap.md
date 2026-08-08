@@ -2,6 +2,52 @@
 
 The repo has two firmware build systems: the canonical, hardware-proven **Makefile** (output in `build/`) and an opt-in **CMake** path (`CMakeLists.txt` + the thin `Makefile.cmake` frontend, output in `build-cmake/<engine>/`). They are kept at parity. This note records why the CMake binaries were once ~5 % larger in `SRAM_EXEC`, how that was traced and mostly fixed, and the one residual difference that remains by choice.
 
+## Decision (2026-08-08): keep both — Makefile canonical, CMake supported
+
+TODO P5 framed this as binary: *finish the CMake adoption or back it out*, on the grounds that three
+build files on `main` with a hand-duplicated engine list is a standing liability. That framing was
+right at the time, because nothing detected the duplication going wrong. Seven divergences had
+accumulated silently, two of them hard build failures and one — the missing `USB_MIDI` equivalent —
+producing an image that built, booted, ran, and ignored MIDI.
+
+**What changed is that the drift is now mechanically caught.** `.github/workflows/ci.yml` builds six
+flag-sensitive engines through CMake alongside the full Makefile matrix, chosen for what they exercise
+rather than for coverage: `pstretch` (own linker script), `reverb` and `graincloud` (`-Os`), `softcut`
+(extra sources), `mosc` (QSPI boot), `granular` (the default). Every past divergence would have been
+caught by one of those six. The liability was never *having* two build systems; it was having no
+forcing function, and that is the part that was missing.
+
+So: **both stay.** The Makefile is canonical — it is what `make`, the README, the release script and
+every hardware-verified image use. CMake is *supported*, at parity, and CI keeps it there.
+
+**This decision is conditional, and the condition is not yet met.** Both workflows currently ship
+`workflow_dispatch`-only (see the note in `ci.yml`), so nothing runs unasked. Until the push trigger is
+armed, this decision rests on someone remembering to press a button — which is the state it was
+supposed to replace. **Arm CI, or revisit this.**
+
+**What is being given up.** TODO P5's headline justification for adopting CMake was item 4: per-target
+`target_include_directories(... PRIVATE)` making a platform→engine include a *compile error* instead of
+a grep hit. That is not built and is not planned here. Without it, CMake's remaining advantages over
+the Makefile are real but modest:
+
+- **Per-engine cached build dirs** (`build-cmake/<engine>/`), so switching engines never rebuilds. The
+  Makefile shares one `build/`, which is exactly why it needs the `.engine-stamp` / `.grainflavor-stamp`
+  / `.usbmidi-stamp` machinery — three stamps that exist purely to work around the shared directory.
+- **Flag changes are tracked properly.** `SPK_TERMINAL`, `TERM_USBDIAG` and `SPK_GRAIN_GF` change *type
+  layout*, so a partial rebuild puts members at the wrong offsets — a frozen panel with a working
+  terminal, which cost a hardware session to diagnose. CMake records definitions in `flags.make`, which
+  every object already depends on; the Makefile has to delete objects and defend against GNU Make
+  3.81's whole-second mtime resolution.
+- `compile_commands.json` falls out natively, with no `bear`.
+
+**What would reopen this:** CI staying unarmed; a third build file appearing; or someone wanting the
+compiler-enforced boundary badly enough to build item 4, at which point CMake becomes canonical and the
+Makefile goes. Backing CMake out remains a clean revert — nothing depends on it.
+
+**Still not established, either way:** no CMake-built `.bin` has been flashed. P5's acceptance gate 5
+stands unchanged and belongs to the P2 bench session. CI proves the two agree on the host; only a
+device proves the CMake image boots.
+
 ## Symptom
 
 After the CMake build was brought to full engine parity, every CMake binary linked ~5 % larger in `SRAM_EXEC` than the Makefile's. For `glitch`: Make **78.74 %** vs CMake **84.35 %** (~14 KB). The app TUs compile at the same opt level (`-O2`/`-Os` via `APP_OPT`), libDaisy and DaisySP are `-O3` in both, and neither uses LTO, so the opt levels were not the cause.

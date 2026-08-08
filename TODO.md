@@ -46,11 +46,29 @@ Closed out from `REVIEW.md`; see the sections below for what remains.
       artifact removed from `chuck-midi-in-porting.md`, the stale "186 KB SRAM_EXEC" figure in
       `architecture.md` corrected, plus `make help` and a real `.PHONY: test`.
 
-**Still open from the review** (each needs a decision or a bench, not just typing): host tests for
-`granular` and `mosc` (the default engine and the largest new one have none); P5, the CMake decision —
-CI now keeps the two honest, which makes *keeping* both viable, so this is a choice rather than a
-liability; the front-door restructure (a quickstart above the engine catalogue); and the P2 bench
-session, which everything hardware-gated still funnels into.
+- [x] **Host tests for `granular` and `mosc`.** `host/test_mosc.cpp` instantiates and renders **all 24
+      Plaits engines**, plus Gate-vs-Drone, level, and the `live_params` round-trip — mosc was the
+      largest engine in the tree with no off-target coverage, and being a QSPI build it is not even
+      exercised by the normal `ENGINE=` sweep. `host/test_granular_audio.cpp` covers granular's **audio
+      path** (load → play → level scaling, record → playback, all three modes); the pre-existing
+      `test_engine_params.cpp` already covered its *parameter surface*, which the review missed —
+      correction noted in `REVIEW.md`.
+- [x] **P5, the CMake decision — resolved: keep both, Makefile canonical.** See P5 below and
+      [`docs/dev/cmake-gap.md`](docs/dev/cmake-gap.md#decision-2026-08-08-keep-both--makefile-canonical).
+      Conditional on arming CI.
+- [x] **Front-door restructure.** README opens with a four-step quickstart (binary → flash → card →
+      first sound) above the catalogue; `docs/manual.md` is now the **platform** manual with a
+      per-engine routing table, and granular's control reference moved into
+      [`docs/engines/granular.md`](docs/engines/granular.md) where it belongs.
+- [x] **`SynClock::_external_clock` was never initialized** — found by writing the granular audio test.
+      Same defect as `Divider::_triplets_on`, in the same subsystem: declared, absent from the
+      constructor's init list, masked on target by `.bss` zeroing. Off target it could come up believing
+      it was externally slaved, in which case `Run()` only *arms* and the internal clock never emits —
+      measured at **0 ticks in 3000 blocks**. That is why nothing clock-dependent had ever been testable
+      off-target, and why `test_engine_params`'s `transport.tick(false)` calls were doing nothing.
+
+**Still open from the review** (each needs a bench, not typing): the P2 session, which everything
+hardware-gated funnels into — and arming CI's automatic triggers, above.
 
 > **Update 2026-08-01 - the bench session is now instrumented.** This file was written as if P2 could > only be a manual listening pass. That predates the USB-C terminal channel, which was fixed and verified > on hardware 2026-07-31 (root cause: the panel jack is on OTG_HS, not OTG_FS - see > [`terminal-impl.md`](docs/dev/terminal-impl.md)). Two things landed since, both host-verified: > > - **`query cpu` / `cpumin` / `cpumax` + `reset cpu`** - the platform's `CpuLoadMeter` is now readable >   over the channel, so P2's headroom numbers are `reset cpu` -> drive the engine -> `query cpumax`, >   scripted per engine. Previously the meter needed `METER=1`, which brings up a second USB device on >   the same OTG core the terminal uses - the numbers and the channel that would collect them were >   mutually exclusive. > - **`live_params()`/`live_configs()` on every engine** - the stated blocker on `make test-hw`. The >   generic sweep no longer sets params engines ignore, so the mechanical half of P2 can run unattended. > > Neither is hardware-verified yet; both fold into the P2 session. > > **And one regression found on the way - now FIXED and hardware-verified.** `pstretch` had stopped > building entirely: not "cannot host the terminal" but no link at all, terminal or not, at either > window (`region SRAM overflowed by 80576 bytes` on the committed `v0.6.1` tree). Commit `993210f` > moved 114K from the data `SRAM` region into `SRAM_EXEC` (186K -> 300K) so the channel would fit > everywhere; pstretch's FFT working set needed 297664 B of exactly that region. > > Fixed with a per-engine linker script, `linker/alt_sram_pstretch.lds` (200K/312K instead of > 300K/212K), selected automatically on `ENGINE=pstretch` so a plain `make ENGINE=pstretch` is correct > too. Same approach and precedent as `linker/alt_qspi_chuck.lds`, and it leaves the other 20 engines on > the 300K split untouched. **All three pstretch images flashed and confirmed working on hardware > 2026-08-01** (8192 with and without the terminal, and 4096 with it) - so the moved code/data boundary > boots, which a link check could not have established. > > **P2 is therefore no longer purely pending - its first engine is measured.** `make test-hw` ran > against real hardware for the first time (`30 passed, 3 skipped`), and pstretch has CPU numbers: >
 > | | WINDOW=8192 | WINDOW=4096 |
@@ -210,7 +228,25 @@ This is good enough as-is, but it's worth experimenting with two softer variants
 
 Levers are the three lines above; re-tune and `make faust-gen` (regenerates `faust_kernel_tapefx.h`), then evaluate by ear. Purely subjective, so it's flash-gated and low priority - fold into P2 alongside the tape voicing pass. See `docs/engines/tape.md`.
 
-## P5 - Decide the CMake adoption (the spike was merged to `main` but not finished)
+## P5 - Decide the CMake adoption — **RESOLVED 2026-08-08: keep both, Makefile canonical**
+
+> **Decision and its reasoning: [`docs/dev/cmake-gap.md`](docs/dev/cmake-gap.md#decision-2026-08-08-keep-both--makefile-canonical).**
+>
+> This item framed the choice as binary — finish adoption or back it out — because three build files
+> with a hand-duplicated engine list drift silently, and had (seven divergences, two of them hard build
+> failures). CI now builds six flag-sensitive engines through CMake alongside the full Makefile matrix,
+> so the drift is caught mechanically; the liability was never having two build systems, it was having
+> no forcing function.
+>
+> **Conditional:** both workflows are `workflow_dispatch`-only for now, so nothing runs unasked. Arming
+> the push trigger is what makes this decision real — until then it rests on someone pressing a button.
+>
+> **Explicitly NOT adopted:** item 4 below, the compiler-enforced platform/engine boundary, which was
+> the original headline justification. Without it CMake rides along for its per-engine cached build dirs
+> and its correct flag tracking, not for the boundary. Items 1-3 are moot while both stay. Item 5 (a
+> hardware flash of a CMake image) is unchanged and still belongs to the P2 bench session.
+>
+> The original analysis is kept below, unedited, because it is what the decision was made against.
 
 **Status update:** the former `spike/cmake-build` branch was **merged into `main`** (`merged karp engines / cmake`, then `update cmake builds`), so `CMakeLists.txt` and `Makefile.cmake` now live on `main` **alongside the original `Makefile`** - the exact "all three build-system files straddling `main`" state the spike notes warned not to ship. The original `Makefile` is still the documented, canonical firmware build (the README's `make ENGINE=...` instructions); CMake rides along, actively maintained, but **unadopted and host-only** - no hardware flash of a CMake `.bin` has been confirmed. So this item is no longer "evaluate a spike"; it is **"finish adoption or back it out,"** and the coexistence is a small standing liability (the engine list is now duplicated across all three files).
 

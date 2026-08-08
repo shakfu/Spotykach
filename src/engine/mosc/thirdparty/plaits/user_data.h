@@ -31,7 +31,13 @@
 
 #include "stmlib/stmlib.h"
 
-#ifdef TEST
+// sk: was `#ifdef TEST`. The host harness defines -DTEST for an unrelated reason - it selects
+// stmlib's portable C paths in place of the ARM ssat/usat asm - and that flag then also selected
+// upstream's mock-flash branch below, which calls printf() without including <cstdio> and so does not
+// compile off-target. Rather than add the include and enable a mock this project never wants, let our
+// own PLAITS_USER_DATA_STUB win when both are defined: the host test then takes the SAME branch the
+// firmware does, which is what a test should be exercising anyway.
+#if defined(TEST) && !defined(PLAITS_USER_DATA_STUB)
 
 // Mock flash saving functions for debugging purposes.
 #define PAGE_SIZE 0x800

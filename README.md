@@ -2,7 +2,28 @@
 
 [![CI](https://github.com/shakfu/sk-engines/actions/workflows/ci.yml/badge.svg)](https://github.com/shakfu/sk-engines/actions/workflows/ci.yml)
 
-> New here? `make help` lists every build, test, card and release command.
+**One Spotykach, twenty-one instruments.** This firmware turns the hardware into a platform: the panel, pads, knobs, clock, CV and SD card stay exactly as they are, and the DSP engine underneath is swappable. Flash a different `.bin` and the same box is a granular looper, a dub delay, a Plaits macro-oscillator, a tape deck, a resonator, or a Csound/ChucK interpreter you write patches for.
+
+## Quickstart — from nothing to a sound
+
+**1. Get a binary.** Download a `sk-<engine>-<version>.bin` from the [releases](https://github.com/shakfu/sk-engines/releases), or build one: `make -j8 libs` once, then `make -j8 ENGINE=delay`. (Need the bootloader? It ships as `bootloader-spotykach-v2.bin`.)
+
+**2. Flash it.** Connect the **rear USB-C** port on the main PCB — not the one on the Seed — with a data-capable cable. Hold `Reset` for ~3 s until the bottom pads breathe white, then `make ENGINE=delay program-dfu`. The unit reboots into the new engine.
+
+**3. Card, if the engine needs one.** Effects and synths (`delay`, `reverb`, `reso`, `mosc`, `edrums`, …) need nothing — skip this. Players and loopers (`tape`, `radio`, `bard`, `shuttle`, `softcut`, `pstretch`) read the card, and the firmware converts nothing, so a wrong-format file plays as noise instead of being rejected. Don't hand-build it:
+
+```sh
+make sdcard SDCARD_OUT=/media/SK     # a complete, correct card
+make check-sdcard CARD=/media/SK     # or explain what's wrong with the one you have
+```
+
+A prebuilt `sk-card-<version>.zip` ships with each release, and [`web/`](web/) does all of this in a browser if you would rather not install Python.
+
+**4. Make a sound.** Turn it on and read your engine's control map in [`docs/engines/`](docs/engines/) — each page has a knob-by-knob table and a control-surface diagram. For `delay`: play something in, **SOS** sets wet/dry, **SIZE** picks the musical division, **POS** is feedback. Everything shared by all engines — clock and sync, CV/gate, routing, `config.txt`, MIDI — is in the [platform manual](docs/manual.md).
+
+`make help` lists every build, test, card and release command.
+
+---
 
 A fork of the official [Synthux Academy Spotykach](https://synthux.academy/store/spotykach) firmware, restructured as a fixed hardware/UI **platform** with a swappable DSP **engine** architecture.
 
