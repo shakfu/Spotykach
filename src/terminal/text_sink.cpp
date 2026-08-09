@@ -86,6 +86,9 @@ void TextSink::append_f32(float v, int decimals) {
     _out.write(buf, n);
 }
 
+void TextSink::ok_begin() { _out.write("ok ", 3); }
+void TextSink::ok_end()   { _out.write("\r\n", 2); }
+
 void TextSink::ok_i32(int32_t v)   { _out.write("ok ", 3); append_i32(v); _out.write("\r\n", 2); }
 void TextSink::ok_f32(float v, int d) { _out.write("ok ", 3); append_f32(v, d); _out.write("\r\n", 2); }
 void TextSink::ok_hex(uint32_t v)  { _out.write("ok ", 3); append_hex(v); _out.write("\r\n", 2); }

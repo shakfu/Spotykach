@@ -21,6 +21,7 @@ const char* config_name(ConfigId id);
 
 // describe metadata (platform-owned static tables).
 bool        param_is_global(ParamId id);            // global vs per-deck (a property of the id)
+bool        config_is_global(ConfigId id);          // Route only; the rest are per-deck
 
 // True for ParamIds the PLATFORM owns and never forwards to IEngine::set_param, so `describe` must not
 // advertise them: a host sweep would set them and read back whatever the engine happens to store,

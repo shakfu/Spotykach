@@ -29,14 +29,16 @@ BUILD  := build-cmake/$(ENGINE)
 # once and then omitting it would silently keep building a terminal image. An empty value is falsy to
 # CMake's `if()`, so passing them all unconditionally reproduces make's "absent means off" semantics.
 #
-# TERMINAL/USBDIAG/TERMPORT change TYPE LAYOUT (SPK_TERMINAL adds virtuals to IEngine and members to
-# CoreUI/AppImpl). The canonical Makefile needs stamp files and an object wipe to make a toggle safe;
+# TERMINAL/OSC/USBDIAG/TERMPORT change TYPE LAYOUT (SPK_TERMINAL adds virtuals to IEngine and members to
+# CoreUI/AppImpl; OSC makes TextSink virtual and resizes TxFifo). The canonical Makefile needs stamp
+# files and an object wipe to make a toggle safe;
 # here CMake records the definitions in flags.make, which every object depends on, so a changed toggle
 # rebuilds everything by itself. That is the one place this frontend is structurally simpler.
 CMAKE_FLAGS := \
 	-DDEBUG=$(DEBUG) \
 	-DLOFI_INT16=$(LOFI_INT16) \
 	-DTERMINAL=$(TERMINAL) \
+	-DOSC=$(OSC) \
 	-DUSBDIAG=$(USBDIAG) \
 	-DTERMPORT=$(TERMPORT) \
 	-DMETER=$(METER) \

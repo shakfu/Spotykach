@@ -178,7 +178,7 @@ The plan is a **built-in test-signal source** enabled in test mode - `stim signa
 | | line-ASCII (`SPK_TERMINAL`) | OSC + SLIP (`SPK_TERMINAL_OSC`) |
 |---|---|---|
 | Framing | `\n`-delimited | SLIP (RFC 1055) over the byte stream |
-| Wire | `set param size A 0.5\n` | `/set/param ,sf "sizeA" 0.5` + type tags, 4-byte aligned |
+| Wire | `set param size A 0.5\n` | `/sk/a/param/size ,f 0.5` - type tags, 4-byte aligned, deck in the path |
 | Flash cost | tokenizer + dispatch table (tiny) | + OSC parser + SLIP + type coercion |
 | Host tooling | pyserial, any serial terminal, `echo >` | liblo, TouchOSC, Max/Pd, `[oscparse]` |
 | Test-scriptable | trivial (text diff / assert) | worse (binary asserts) |
@@ -223,7 +223,7 @@ Everything under `#if SPK_TERMINAL`, following the `SPK_USE_STREAM` / `METER` pa
 | `USB_MIDI=1` | **incompatible** - `MidiUsbHandler` claims the same OTG_HS core; a compile error, not a silent conflict |
 | `SPK_TERMINAL_MEASURE` | *(phase 2, unbuilt)* L2 audio-property analyzer + `measure` verb |
 | `SPK_TERMINAL_STIM` | *(phase 3, unbuilt)* built-in test-signal source for through-processing engines |
-| `SPK_TERMINAL_OSC` | *(later, unbuilt)* OSC + SLIP codec behind the same dispatcher - address space specified in [`terminal-osc.md`](terminal-osc.md) |
+| `SPK_TERMINAL_OSC` | OSC + SLIP codec behind the same dispatcher (`make ... TERMINAL=1 OSC=1`). Built 2026-08-09, off-target green, unflashed. Address space in [`terminal-osc.md`](terminal-osc.md) |
 
 `SPK_TERMINAL_REFLECT` no longer exists: the descriptor tables proved cheap enough to keep unconditional, so `describe` is always present. Footprint and which engines can host the channel are in [`terminal-impl.md`](terminal-impl.md).
 
@@ -235,7 +235,7 @@ Everything under `#if SPK_TERMINAL`, following the `SPK_USE_STREAM` / `METER` pa
 
 - **Phase 3 (`SPK_TERMINAL_STIM`).** Test-signal injection, extending L2 to through-processing engines.
 
-- **Later.** `SPK_TERMINAL_OSC` (music-rig codec) - see [`terminal-osc.md`](terminal-osc.md).
+- **Built, out of phase order (`SPK_TERMINAL_OSC`).** The music-rig codec - see [`terminal-osc.md`](terminal-osc.md). It was last in this phasing because it depends on nothing the other phases add; when the decision to ship `TERMINAL=1` was taken it became buildable immediately, ahead of `measure` and `stim`, which remain unbuilt.
 
 ## Open decisions - all resolved
 

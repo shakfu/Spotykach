@@ -21,13 +21,35 @@ tools/
     protocol.py          # port discovery, line framing, log filtering, reply/error parsing
     descriptor.py        # DeviceDescriptor dataclasses + parse_describe()
     device.py            # Device: connection + command API + test_mode() context
+    osc.py               # OSC 1.0 wire format + SLIP framing (the OSC=1 codec)
+    semantic.py          # the host-side semantic address tier, generated from describe
+    oscdevice.py         # OscDevice: the same command API over the OSC codec
   skterm.py              # interactive REPL (describe-driven completion, macros)
   conftest.py            # pytest fixtures: device, descriptor, test_mode
   test_generic.py        # cross-engine parameter sweep driven by describe
   test_tape.py           # example per-engine test
   test_descriptor.py     # parser check against real firmware output - NO device needed
+  test_osc_codec.py      # OSC codec + semantic translator - NO device needed
   requirements.txt       # pyserial>=3.5
 ```
+
+### Two codecs, one API
+
+A device built `TERMINAL=1` speaks line-ASCII; one built `TERMINAL=1 OSC=1` speaks
+OSC over SLIP (see [`../docs/dev/terminal-osc.md`](../docs/dev/terminal-osc.md)).
+`OscDevice` deliberately exposes the **same method surface** as `Device`, because
+that is the acceptance criterion for the codec rather than a convenience: layer [3]
+is shared byte for byte, so `test_generic.py`'s cross-engine sweep must produce
+identical results against either, and anything that differs is a codec bug.
+
+`osc.py` and `semantic.py` are dependency-free (no pyserial), which is what lets
+`test_osc_codec.py` run in CI on a machine with neither hardware nor a serial stack.
+
+The semantic tier (`/radio/a/station` -> `/sk/a/param/speed`) is **generated** from
+the device's own `describe`, never written by hand, and is never required: every
+device function is reachable through the generic address space, and an address the
+translator does not recognise passes through untranslated. A bug in it must not be
+able to make the device unreachable.
 
 ## Install
 
@@ -68,6 +90,13 @@ cd tools && python -m pytest -q
   keeps `parse_describe` honest against real device output instead of a
   hand-written sample. It skips if the sample has never been generated, and it
   does not need pyserial - `skdev.descriptor` imports standalone.
+* `test_osc_codec.py` is the same idea for the OSC codec: it reads the describe
+  BUNDLE the firmware emits (`make -C host test-terminal-osc` writes
+  `host/build/describe_osc_sample.bin`) and checks the wire format plus the one
+  property the semantic tier rests on - semantic -> generic -> semantic is the
+  identity, and every semantic address resolves to exactly one generic address.
+* `make test-tools` from the repo root runs exactly the device-free pair above.
+  `make test-hw` runs everything, skipping what needs hardware.
 
 The device port is auto-discovered by USB VID (`0x0483`, STMicroelectronics),
 with a per-platform device-glob fallback (`/dev/ttyACM*` on Linux,

@@ -26,6 +26,35 @@ ifeq ($(TERMINAL), 1)
 C_DEFS += -DSPK_TERMINAL=1
 endif
 
+# OSC codec for the terminal channel (docs/dev/terminal-osc.md). `make ... TERMINAL=1 OSC=1` swaps
+# layer [2] from line-ASCII to OSC-over-SLIP, so the device becomes a node in a Max/Pd/TouchOSC rig
+# where a fader binds to an address once and then just sends floats. Layers [1] and [3] - transport,
+# ring, TX FIFO, verb table, IEngine binding, `mode test` - are shared byte for byte with the line
+# build; this replaces ONLY the codec.
+#
+# Line-ASCII stays the default and the floor: it is testable, works with a dumb terminal, and every OSC
+# address has a line equivalent. Pick OSC when a control surface is the client, not when a script is.
+#
+# Cost over the line build: ~4 KB flash, and ~6.5 KB SRAM (a 512 B SLIP packet buffer, the TX FIFO
+# 2 KB -> 8 KB because the `describe` bundle must fit whole, and an 8 KB static bundle scratch shared
+# with nothing). The engines already at the SRAM_EXEC edge simply do not get OSC.
+ifeq ($(OSC), 1)
+ifneq ($(TERMINAL), 1)
+$(error OSC=1 requires TERMINAL=1 - the OSC codec is layer [2] of the terminal channel. \
+Build with `make ENGINE=<e> TERMINAL=1 OSC=1`.)
+endif
+C_DEFS += -DSPK_TERMINAL_OSC=1
+# Logger coexistence is the sharpest constraint OSC adds, and it has no analogue in the line build:
+# the transport shares one CDC device with the Logger, and a `[tag]` log line interleaving with replies
+# is harmless for line-ASCII but FATAL for SLIP, where it lands inside a packet and corrupts the frame.
+# Phase 1 takes the documented shortcut (a) - force INFS_LOG off - rather than (b), wrapping log output
+# as /sk/log frames. Erroring out beats silently dropping DEBUG, which would look like a broken build.
+ifeq ($(DEBUG), 1)
+$(error OSC=1 and DEBUG=1 conflict: Logger output would land inside a SLIP frame and corrupt it. \
+Drop DEBUG=1, or implement the /sk/log framing described in docs/dev/terminal-osc.md.)
+endif
+endif
+
 # USB-C bring-up diagnostic (docs/dev/terminal-impl.md). `make ENGINE=<e> TERMINAL=1 USBDIAG=1` blinks
 # the OTG_FS bring-up verdict on the Daisy onboard LED (six groups, 1 blink = bad / 2 = good; see
 # AppImpl::usb_diag_tick). For use when the port does not enumerate and there is therefore no channel to
@@ -550,8 +579,8 @@ build/.version-stamp: FORCE | $(BUILD_DIR)
 # objects compiled WITHOUT it. The result builds, links, boots, and silently ignores device MIDI -
 # byte-for-byte the failure the CMake gap produced (see CHANGELOG), reachable from the Makefile too:
 # a clean `mosc` image is ~304 KB, the same image built over a stale reso tree ~292 KB.
-$(OBJECTS): build/.terminal-stamp build/.usbdiag-stamp build/.termport-stamp build/.grainflavor-stamp \
-            build/.usbmidi-stamp
+$(OBJECTS): build/.terminal-stamp build/.osc-stamp build/.usbdiag-stamp build/.termport-stamp \
+            build/.grainflavor-stamp build/.usbmidi-stamp
 
 build/.usbmidi-stamp: FORCE | $(BUILD_DIR)
 	@echo '$(USB_MIDI)' | cmp -s - $@ 2>/dev/null || { echo '$(USB_MIDI)' > $@; rm -f $(BUILD_DIR)/*.o; }
@@ -562,6 +591,13 @@ build/.grainflavor-stamp: FORCE | $(BUILD_DIR)
 
 build/.terminal-stamp: FORCE | $(BUILD_DIR)
 	@echo '$(TERMINAL)' | cmp -s - $@ 2>/dev/null || { echo '$(TERMINAL)' > $@; rm -f $(BUILD_DIR)/*.o; }
+
+# SPK_TERMINAL_OSC changes TYPE LAYOUT, not just behaviour: it makes TextSink virtual (adding a vtable
+# pointer), grows TxFifo's buffer 2 KB -> 8 KB, adds a member to TermState and swaps LineAssembler for
+# SlipAssembler inside Terminal. Mixing objects across the flag is exactly the silent-corruption class
+# the other stamps exist to prevent.
+build/.osc-stamp: FORCE | $(BUILD_DIR)
+	@echo '$(OSC)' | cmp -s - $@ 2>/dev/null || { echo '$(OSC)' > $@; rm -f $(BUILD_DIR)/*.o; }
 
 build/.usbdiag-stamp: FORCE | $(BUILD_DIR)
 	@echo '$(USBDIAG)' | cmp -s - $@ 2>/dev/null || { echo '$(USBDIAG)' > $@; rm -f $(BUILD_DIR)/*.o; }
@@ -601,8 +637,25 @@ PYTHON ?= $(shell if [ -x "$(CURDIR)/.venv/bin/python" ]; then echo "$(CURDIR)/.
                   elif command -v uv >/dev/null 2>&1; then echo "uv run python"; \
                   else echo python3; fi)
 
+# `make test-hw` drives a flashed device over the LINE codec; `make test-hw CODEC=osc` drives one
+# flashed `TERMINAL=1 OSC=1` over the OSC codec. Deliberately NOT spelled `OSC=1`: that variable selects
+# what to BUILD, and this selects what to TALK TO - one is a firmware flag, the other a host client, and
+# conflating them would make `make test-hw OSC=1` look like it flashes something.
+#
+# The suites are codec-agnostic - written against the client's method surface, which both clients share
+# - so running both and comparing IS the cross-codec parity check docs/dev/terminal-osc.md makes the
+# acceptance criterion. Layer [3] is shared byte for byte, so anything the two runs disagree about is a
+# codec bug by definition.
 test-hw:
-	cd tools && $(PYTHON) -m pytest -q
+	cd tools && $(PYTHON) -m pytest -q $(if $(filter osc,$(CODEC)),--osc,)
+
+# The DEVICE-FREE half of tools/: the describe parser and the OSC codec + semantic translator, both
+# checked against byte samples the off-target C++ tests emit (host/build/describe_sample.txt and
+# describe_osc_sample.bin). Needs neither hardware nor pyserial, so unlike `test-hw` it belongs in CI.
+# Run `make -C host test` first to refresh the samples; both tests skip cleanly without them.
+.PHONY: test-tools
+test-tools:
+	$(TEST_PY) -m pytest -q tools/test_descriptor.py tools/test_osc_codec.py
 
 # One-shot variant flash: clean -> build -> flash over DFU. Put the device in DFU mode first
 # (hold Reset ~3s until the bottom pad LEDs breathe white), then `make granular` / `make passthrough`.
@@ -1087,6 +1140,7 @@ help:
 	@echo 'Build toggles (append to any build):'
 	@echo '  DEBUG=1        UART logging                LOFI_INT16=1  16-bit loop buffer (2x record time)'
 	@echo '  TERMINAL=1     USB-C command channel       METER=1       CPU-load meter over CDC (excludes TERMINAL)'
+	@echo '  OSC=1          OSC+SLIP codec (needs TERMINAL=1; for a Max/Pd/TouchOSC rig, excludes DEBUG)'
 	@echo '  USBDIAG=1      USB bring-up blink codes    WINDOW=<n>    pstretch FFT window (4096/8192)'
 	@echo ''
 	@echo 'Test (off-target, no hardware needed):'

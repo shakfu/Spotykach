@@ -63,6 +63,20 @@ public:
         return static_cast<ConfigMask>((1u << static_cast<uint32_t>(ConfigId::Route))
                                      | (1u << static_cast<uint32_t>(ConfigId::Mode)));
     }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // A tempo-divided delay: none of these slots mean what granular's vocabulary calls them.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Pos:     return "feedback";
+            case ParamId::Size:    return "division";
+            case ParamId::Speed:   return "pitch";
+            case ParamId::Env:     return "tone";
+            case ParamId::ModAmp:  return "mod depth";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
 
     void  set_param(ParamId id, DeckRef::Ref deck, float value) override;

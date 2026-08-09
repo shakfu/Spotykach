@@ -2,11 +2,15 @@
 
 Deferred work, in priority order (highest first). See `docs/` for the platform/engine design and `CHANGELOG.md` for done work.
 
-- [ ] add web controls in the web frontend to control the newly implemented OSC layer / protocol.
-      (Note: as of 2026-08-08 the OSC layer is **designed, not implemented** — `docs/dev/terminal-osc.md`
-      is ~700 lines of spec and there is no `SPK_TERMINAL_OSC` anywhere in `src/` or the Makefile. This
-      item is blocked on P7, which is itself blocked on the same unresolved question as P6: whether
-      `TERMINAL=1` ships in releases at all.)
+- [ ] add web controls in the web frontend to control the OSC layer / protocol.
+      (The OSC codec itself is **built** as of 2026-08-09 — `make ENGINE=<e> TERMINAL=1 OSC=1`, see the
+      P7 section below. What this item wants is the browser end, and it is not a small addition: the web
+      front-end talks to nothing today, and a browser cannot open a USB CDC serial port without WebSerial
+      (Chromium only, requires a user gesture per connection, and no Safari). Decide that first — the
+      realistic options are WebSerial with a graceful "unsupported browser" path, or a small local bridge
+      process the page talks to over a WebSocket. The address space and the semantic tier are already
+      generated host-side by `tools/skdev/semantic.py`, so whichever transport wins, the naming work is
+      done.)
 
 ## Done 2026-08-08 — the review's host-verifiable items
 
@@ -91,7 +95,7 @@ Priority is driven less by size than by what unblocks/gates what, and by whether
 | P4 | Tape wow/flutter: try quadratic curve + lower maxima | trivial | low | **flash** (by ear) | none (optional voicing); folds into P2 |
 | P5 | Finish or back out the CMake adoption (now merged to `main`, incomplete) | high | high | flash + cleanup | strategic; three build-system files straddle `main` |
 | P6 | Web front-end: browser SD card builder + WebSerial terminal (**built**; needs a real-browser pass) | done | low | **browser + flash** | code done, and the browser pass is now a scripted checklist ([`docs/dev/web-frontend-checks.md`](docs/dev/web-frontend-checks.md)) rather than an exploratory afternoon; open decision on shipping `TERMINAL=1` releases is unchanged |
-| P7 | OSC codec for the terminal channel (`SPK_TERMINAL_OSC`) — spec written, unbuilt | med | low-med | **host** (parity sweep vs. the line codec) + flash | gated on the same unresolved decision as P6 item 2: worthless unless `TERMINAL=1` ships. Last in the terminal roadmap by its own phasing |
+| P7 | OSC codec for the terminal channel (`SPK_TERMINAL_OSC`) — **built + hardware-verified 2026-08-09** (63/63 cross-codec parity on `tape`) | done | low | — | gate resolved: `TERMINAL=1` ships. Remaining: `/sk/log` framing so `DEBUG=1` can coexist with SLIP; `param_label()` for other engines if wanted |
 
 ---
 
@@ -294,7 +298,93 @@ Drift is guarded from both sides: `make test-scripts` regenerates the export and
 
 - **A drift guard on the service-worker asset list**, which was hand-maintained with nothing checking it. The failure it invited was silent and one-sided — a forgotten entry breaks only offline, only for users who already installed the worker. Now checked against a filesystem walk in both directions, plus an import-graph walk from the entry point, with all three confirmed to fail on the drift they describe.
 
-## P7 - OSC codec for the terminal channel (`SPK_TERMINAL_OSC`) - spec written 2026-08-07, unbuilt
+## P7 - OSC codec for the terminal channel (`SPK_TERMINAL_OSC`) - BUILT 2026-08-09
+
+**Status: built, off-target green, and VERIFIED ON HARDWARE 2026-08-09.** `make ENGINE=<e> TERMINAL=1 OSC=1`.
+The gating question below - whether `TERMINAL=1` ships at all - was answered yes on 2026-08-09, which is
+what unblocked this. What shipped, against what the spec below predicted:
+
+- **Firmware.** `src/terminal/{slip.h,osc.h,osc_decode.cpp,osc_sink.h,osc_encode.cpp,osc_addr.{h,cpp}}`.
+  Layer [2] only; layers [1] and [3] are untouched, and an address resolves to a line in the existing
+  grammar which goes through the existing `dispatch_line()`, so there is no second verb table.
+- **`IEngine::param_label()`** landed as specified - one virtual, defaulting to nullptr, cosmetic to the
+  device. **`radio` and `tape` implement it** (6 and 10 labels): radio's PITCH advertises as *station*,
+  tape's `Size` as *character* and its two grit slots as the low-pass they actually drive. Every other
+  engine keeps the default, producing a semantic tier identical to the generic one minus the `param/`
+  segment - the documented degraded-not-broken path. `host/test_osc_labels.cpp` checks both tables
+  against the REAL engines, including that no two live slots on one engine share a label.
+- **The logger/SLIP conflict** took shortcut (a): `OSC=1` with `DEBUG=1` is a build error. The right
+  answer, wrapping log output as `/sk/log` frames, is still open and is what would make `DEBUG=1` usable
+  on an OSC build.
+- **Host side.** `tools/skdev/{osc,semantic,oscdevice}.py` - wire format, the generated semantic tier,
+  and an `OscDevice` with the same method surface as `Device`. The first two are dependency-free, so
+  `tools/test_osc_codec.py` (24 checks) runs in CI with no pyserial and no hardware, against a describe
+  bundle emitted by the real firmware code path.
+- **Tests.** `host/test_terminal_osc.cpp` (`make -C host test-terminal-osc`), wired into `make -C host
+  test`. Covers SLIP, the wire format, coercion, every address family against the exact `IEngine` call,
+  reply typing, ack mode, the error taxonomy, inbound bundles, and `describe`.
+- **Cost, measured:** ~9.0 KB `SRAM_EXEC` + ~12.4 KB SRAM over the line build - roughly 4x the spec's
+  estimate, mostly the 6 KB descriptor-bundle scratch the estimate omitted entirely. `delay` goes 68.9%
+  -> 72.3% of `SRAM_EXEC`. See the footprint table in the spec.
+
+**What is left:**
+
+- [x] **A hardware pass — DONE 2026-08-09, passed.** Cross-codec parity on a cased Spotykach running
+      `tape`: **63/63 identical** against both codecs (`make test-hw` vs `make test-hw CODEC=osc`).
+      Because the sweep's cases are generated from `describe`, an identical result list also proves both
+      codecs advertise the same param/config/query sets. The ~4 KB descriptor bundle arrives whole;
+      steady-state round trip is 0.18 ms. Five defects were found and fixed in the process (one
+      firmware: OSC describe dropped Enum labels; four host-client) — see the spec's bench section.
+- [ ] **`/sk/log` framing**, to lift the `DEBUG=1` restriction.
+- [x] **`param_label()` for the remaining engines — DONE 2026-08-09.** 16 engines now carry tables
+      (115 labels): radio, tape, graincloud, delay, qdelay, edrums, reso, mosc, reverb, shuttle,
+      softcut, bard, glitch, pstretch, csound, chuck. Three deliberate abstentions, each for a reason
+      worth keeping:
+      - **granular** — the shared `ParamId` vocabulary IS granular's own words (the enum "mirrors the
+        granular engine's MValue-backed set"), so layer 2 and layer 3 coincide and a table would just
+        be a second copy of `kParamNames` that could drift from it.
+      - **csound / chuck** — only `Aux` ("patch") is labelled. Every other slot is a generic
+        pass-through to the loaded `.orc`/`.ck`, whose meaning the PATCH defines; a fixed label would
+        be a confident lie that changes with every patch.
+      - **chorus / filter / gigaverb / voice** — these never narrowed `live_params()`, so `describe`
+        lists the whole `ParamId` enum. Labelling there would name slots the engine ignores. They need
+        liveness masks first; that is the real prerequisite.
+      `host/test_osc_labels.cpp` links 11 of them and enforces the invariants on all 11.
+
+- [x] **`live_params()` for chorus, filter, gigaverb, voice — ALREADY PRESENT; the earlier claim here
+      that they were missing was wrong.** All four inherit a DERIVED mask from their shared wrapper:
+      `FaustEngine`/`FaustChainEngine` compute it from the bind table the manifest generates
+      (`faust_fx.h`, `faust_chain.h`), and `GenEngine` from the wrapper's `index_of` switch
+      (`gen_engine.h`). Verified by instantiating each: chorus `masked=1` with 3 advertised params
+      (its 4th bind is ModSpeed, platform-owned and filtered out), filter and voice `masked=1` with 4.
+      Deriving is strictly better than the hand-written masks the other engines carry — these headers
+      are GENERATED, so a hand-listed mask would be a second copy of the bind table, free to drift on
+      the next `make faust-engine`.
+
+      The mistake came from grepping the per-engine headers for `live_params`, which is inherited and
+      so does not appear there. Worth remembering: on these four engines, look at the wrapper.
+
+- [x] **`param_label()` for the generated engines — DONE 2026-08-09, by derivation.** Same argument as
+      the mask: the Faust bind table already carries the slider name, and that name IS the layer-3
+      word (`filter` binds "cutoff" to `ParamId::Speed`, "drive" to `Size`). `param_label()` on both
+      Faust wrappers now reads it, so chorus/filter/voice — and every future generated Faust engine —
+      get labels with no per-engine code and no drift. Measured: chorus `size`→*delay*,
+      `modamp`→*depth*; filter `speed`→*cutoff*, `pos`→*reso*, `size`→*drive*; voice `speed`→*freq*,
+      `size`→*shape*, `mix`→*level*. A chain engine can bind one role in both stages (voice puts Speed
+      on the oscillator's "freq" AND the filter's "cutoff"); stage A wins, since it is the sound source
+      and the stage the manifest lists first.
+
+- [ ] **`param_label()` for gigaverb** needs a generator change, not a code change. `GenEngine` has no
+      slider names to derive from — `index_of` returns an index — and `gigaverb_engine.h` is GENERATED
+      by `scripts/gen_engine.py` from `gigaverb.json`, so hand-adding a table there would be
+      overwritten. The names already exist as comments the generator emits (`bandwidth`, `damping`,
+      `dry`, `revtime`, `roomsize`, `tail`, `spread`, `early`); the fix is to have it emit a `name_of`
+      alongside `index_of`, and a `param_label()` on `GenEngine` that reads it. Small, but it belongs
+      in the generator.
+
+---
+
+### The original design note (2026-08-07), kept for its reasoning
 
 The terminal channel was designed codec-agnostic from the start: [`terminal-control.md`](docs/dev/terminal-control.md) puts line-ASCII and OSC at layer [2] behind one dispatcher, so an alternate codec is a compile flag rather than a rewrite. The flag name has been reserved and listed as *"(later, unbuilt)"* since; what did not exist until now was an address space. [`docs/dev/terminal-osc.md`](docs/dev/terminal-osc.md) specifies one, along with SLIP framing, type coercion, the reply grammar, and the footprint estimate.
 

@@ -64,6 +64,23 @@ public:
     ConfigMask live_configs() const override {
         return static_cast<ConfigMask>(1u << static_cast<uint32_t>(ConfigId::Route));
     }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // Twelve lo-fi algorithms. SIZE and POS are the algorithm's own two macros, so they are
+    // named generically on purpose - their meaning changes with the selected algorithm and a
+    // fixed label would be wrong eleven times out of twelve.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Size:   return "param 1";
+            case ParamId::Pos:    return "param 2";
+            case ParamId::Speed:  return "pitch";
+            case ParamId::Env:    return "tone";
+            case ParamId::Mix:    return "volume";
+            case ParamId::Aux:    return "algorithm";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
 
     void  set_param(ParamId id, DeckRef::Ref d, float v) override;

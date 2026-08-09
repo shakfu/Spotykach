@@ -24,6 +24,14 @@ struct TermState {
     uint32_t last_cmd_ms = 0;     // System::GetNow() at the last dispatched line
 
     PresetSlots presets;          // `preset save|load` snapshots (params only; see preset.h)
+
+#if SPK_TERMINAL_OSC
+    // Per-session acknowledgement of successful WRITES, opted into with `/sk/dev/mode/ack ,T`. Off by
+    // default because a rig streaming fader moves at 100 Hz does not want an ack per message; the
+    // pytest harness turns it on so a write is assertable without a read-back. Errors are reported
+    // either way. See docs/dev/terminal-osc.md ("Errors").
+    bool osc_ack = false;
+#endif
 };
 
 }  // namespace spotykach

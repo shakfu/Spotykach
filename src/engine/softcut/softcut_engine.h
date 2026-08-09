@@ -83,6 +83,25 @@ public:
     ConfigMask live_configs() const override {
         return static_cast<ConfigMask>(1u << static_cast<uint32_t>(ConfigId::Route));
     }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // The monome softcut overdub looper. ENV is overdub feedback, not an envelope.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Speed:          return "rate";
+            case ParamId::Pos:            return "loop start";
+            case ParamId::Size:           return "loop length";
+            case ParamId::Mix:            return "volume";
+            case ParamId::Env:            return "overdub feedback";
+            case ParamId::AltPos:         return "pan";
+            case ParamId::ModAmp:         return "fade time";
+            case ParamId::Aux:            return "tape slot";
+            case ParamId::FluxIntensity:  return "filter cutoff";
+            case ParamId::FluxMix:        return "filter resonance";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
     void  set_aux_active(DeckRef::Ref d, bool held) override;            // Alt held -> show slot selector
     void  set_mod_speed(DeckRef::Ref d, float v, bool sync) override;    // MODFREQ -> rate slew time

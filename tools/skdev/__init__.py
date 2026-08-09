@@ -9,6 +9,9 @@ Modules:
     protocol   - port discovery, line framing, log filtering, reply/error parsing.
     descriptor - DeviceDescriptor dataclasses + parse_describe().
     device     - Device: connection + high-level command API + test_mode() context.
+    osc        - OSC 1.0 wire format + SLIP framing (the SPK_TERMINAL_OSC codec).
+    semantic   - the host-side semantic address tier, generated from describe.
+    oscdevice  - OscDevice: the same command API over the OSC codec.
 
 Nothing here talks to hardware at import time; construct a :class:`Device` to open
 a port. When no device is attached, port discovery raises :class:`Timeout`, which
@@ -23,6 +26,10 @@ at the point of use rather than at collection time.
 """
 
 from .descriptor import ParamDesc, ConfigDesc, DeviceDescriptor, parse_describe
+# The OSC wire format and the semantic translator are byte/text handling with no serial
+# dependency, so they import eagerly alongside descriptor - which is what lets the
+# codec and translator tests run in CI with no pyserial and no hardware.
+from . import osc, semantic
 
 _LAZY = {
     "Timeout": "protocol",
@@ -31,6 +38,7 @@ _LAZY = {
     "open_serial": "protocol",
     "is_log": "protocol",
     "Device": "device",
+    "OscDevice": "oscdevice",
 }
 
 
@@ -56,4 +64,7 @@ __all__ = [
     "DeviceDescriptor",
     "parse_describe",
     "Device",
+    "OscDevice",
+    "osc",
+    "semantic",
 ]

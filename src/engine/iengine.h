@@ -203,6 +203,16 @@ public:
 
     virtual ParamMask  live_params()  const { return ~ParamMask{0}; }
     virtual ConfigMask live_configs() const { return static_cast<ConfigMask>(~ConfigMask{0}); }
+
+    // Layer-3 name for a param slot: what this engine actually DOES with it, as opposed to the shared
+    // layer-2 slot name (`radio`: speed -> "station"; `tape`: size -> "character"). Purely cosmetic to
+    // the device - no address, reply or error derives from it - which is why it defaults to nullptr
+    // ("use the kParamNames entry") and no engine is obliged to care. It exists for `describe`, whose
+    // OSC form carries a label per row so a control surface can print the engine's word on a fader that
+    // is still bound to the stable generic address. One tier up it IS load-bearing: the host-side
+    // semantic namespace is generated from these. See docs/dev/terminal-osc.md ("Where the label comes
+    // from"). A label that rots misnames a control; it can never make the device unreachable.
+    virtual const char* param_label(ParamId) const { return nullptr; }
 #endif
 };
 

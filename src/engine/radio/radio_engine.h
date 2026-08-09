@@ -85,6 +85,27 @@ public:
     ConfigMask live_configs() const override {
         return static_cast<ConfigMask>(1u << static_cast<uint32_t>(ConfigId::Route));
     }
+
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The shared ParamId vocabulary is
+    // granular's, inherited here as generic slots, and radio reinterprets nearly all of them - PITCH is
+    // the tuning dial, not a pitch. These labels are what a generated control surface prints on the
+    // fader; the ADDRESS stays the stable layer-2 slot (`/sk/a/param/speed`), so one layout still binds
+    // to every engine. Cosmetic by construction: nothing in the protocol derives from them.
+    //
+    // Each line is the `docs/engines/radio.md` control table, which is the same mapping set_param()
+    // implements a few lines below. Crossfade is deliberately unlabelled: it is the platform crossfader
+    // and means the same thing on every engine, so a per-engine label would be pure rot risk.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Speed: return "station";     // tuning dial, quantized to the nearest station
+            case ParamId::Pos:   return "start";       // offset applied on the next switch / RESET
+            case ParamId::Size:  return "varispeed";   // 0.5x..2x; RadioMusic is fixed-rate, this is ours
+            case ParamId::Env:   return "static";      // inter-station tuning hiss
+            case ParamId::Mix:   return "volume";
+            case ParamId::Aux:   return "bank";        // Alt+PITCH held selector
+            default:             return nullptr;       // fall back to the layer-2 slot name
+        }
+    }
 #endif
 
     void  set_param(ParamId id, DeckRef::Ref d, float v) override;

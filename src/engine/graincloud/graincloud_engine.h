@@ -91,6 +91,25 @@ public:
                                      | (1u << static_cast<uint32_t>(ConfigId::StartModOn))
                                      | (1u << static_cast<uint32_t>(ConfigId::SizeModOn)));
     }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // Grainflow cloud (SPK_GRAIN_GF). The shared granular params keep granular's meaning -
+    // this engine IS granular compiled with the cloud swapped in - so only the slots the cloud
+    // reinterprets are named here.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Pos:       return "cloud centre";
+            case ParamId::Size:      return "grain size";
+            case ParamId::Speed:     return "transpose";
+            case ParamId::Env:       return "spray";
+            case ParamId::ModAmp:    return "spread";
+            case ParamId::Aux:       return "scan speed";
+            case ParamId::AltPos:    return "vibrato";
+            case ParamId::Feedback:  return "glisson";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
 
     // MIDI meaning (Phase 3c). The platform parses MIDI and clocks transport; the engine

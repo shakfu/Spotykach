@@ -90,6 +90,32 @@ public:
     ConfigMask live_configs() const override {
         return static_cast<ConfigMask>(1u << static_cast<uint32_t>(ConfigId::Route));
     }
+
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). Tape is the sharpest case for why the
+    // OSC address is the layer-2 SLOT and the meaning travels as a label: six of these slots carry a
+    // name from granular's vocabulary that says nothing about what tape does with them. `Size` is the
+    // tape FX character control, not a size; `Pos` is saturation drive, not a position; the two grit
+    // slots are the low-pass. The address stays `/sk/a/param/size`, so one control-surface layout
+    // still binds to every build, and only the printed name changes.
+    //
+    // Mirrors the `docs/engines/tape.md` control table and the FX comment in set_param(). Crossfade is
+    // deliberately unlabelled - it is the platform crossfader, identical on every engine.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Speed:  return "varispeed";          // exp2((v-0.5)*2) -> 0.5x..2x
+            case ParamId::AltPos: return "pan";                // equal-power; LEFT routing only
+            case ParamId::Mix:    return "volume";
+            case ParamId::Env:    return "loop mode";          // 4 quadrants: none/plain/faded/fripp
+            case ParamId::Aux:    return "tape slot";          // Alt+PITCH held selector
+            // The tape FX chain: wow/flutter -> hysteresis saturation -> resonant low-pass.
+            case ParamId::Pos:           return "drive";
+            case ParamId::Size:          return "character";
+            case ParamId::ModAmp:        return "wow/flutter depth";
+            case ParamId::GritIntensity: return "filter cutoff";
+            case ParamId::GritMix:       return "filter resonance";
+            default:                     return nullptr;       // fall back to the layer-2 slot name
+        }
+    }
 #endif
 
     void  set_param(ParamId id, DeckRef::Ref d, float v) override;

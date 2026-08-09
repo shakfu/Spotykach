@@ -108,6 +108,11 @@ bool param_is_global(ParamId id) {
     }
 }
 
+// Route is the channel topology for the whole instrument, not a property of either deck. The line
+// codec has to accept a deck token here and discard it; the OSC address space encodes the distinction
+// structurally instead (`/sk/cfg/route`, no deck segment), which is why it needs to ask.
+bool config_is_global(ConfigId id) { return id == ConfigId::Route; }
+
 void param_range(ParamId, float& lo, float& hi) {
     // Everything the engine surface actually carries is normalized 0..1. The two ids that were not
     // (Tempo 40..300, KeyInterval 1..64) are platform-owned and no longer advertised - and those display

@@ -1,11 +1,28 @@
 # Terminal OSC codec spec (`SPK_TERMINAL_OSC`)
 
-Status: **design draft, unbuilt (2026-08-07).** Specifies the OSC address space and the SLIP framing for
-layer [2] of the terminal channel - the opt-in alternate codec named in
-[`terminal-control.md`](terminal-control.md). It replaces *only* the codec: layer [1] (transport, SPSC
-ring, TX FIFO) and layer [3] (verb table, `IEngine` binding, `mode test`, `describe`) are unchanged and
-shared byte-for-byte with the line-ASCII build. Everything here is `#if SPK_TERMINAL_OSC`, which implies
-`SPK_TERMINAL`.
+Status: **built and VERIFIED ON HARDWARE (2026-08-09).** Specified 2026-08-07; shipped as an optional
+firmware variant, `make ENGINE=<e> TERMINAL=1 OSC=1`. Off-target: `make -C host test-terminal-osc`,
+`make -C host test-osc-labels`, `pytest tools/test_osc_codec.py`. On target: the cross-codec parity
+sweep passed on a cased Spotykach running `tape` - **63/63 identical against both codecs**, which is the
+acceptance criterion this document set for itself. See **Testing**.
+
+Specifies the OSC address space and the SLIP framing for layer [2] of the terminal channel - the opt-in
+alternate codec named in [`terminal-control.md`](terminal-control.md). It replaces *only* the codec:
+layer [1] (transport, SPSC ring, TX FIFO) and layer [3] (verb table, `IEngine` binding, `mode test`,
+`describe`) are unchanged and shared byte-for-byte with the line-ASCII build. Everything here is
+`#if SPK_TERMINAL_OSC`, which implies `SPK_TERMINAL`.
+
+**What the implementation changed about this document.** Four things the design got wrong or left open,
+corrected in place below and listed here so they are not rediscovered:
+
+1. **The footprint estimate was low by roughly 4x** - measured `~9 KB flash, ~12.4 KB SRAM`, not
+   `~3.7 KB / ~2.5 KB`. See **Flash and RAM delta**.
+2. **The descriptor bundle is bigger than projected** (5392 B unmasked, not 2-3 KB), because the
+   projection was taken from a masked engine. The TX FIFO goes to **8 KB**, not 4 KB.
+3. **`TextSink` needed two more methods than "make it virtual"** - `ok_begin()`/`ok_end()`, because the
+   `query` path types its value at a call site the sink cannot see. See **Implementation shape**.
+4. **`pad play` and `fx gritmode` reply even though they are writes**, because layer [3] returns a value
+   through them that a host has no other way to obtain. See **Errors**.
 
 Read [`terminal-dispatch.md`](terminal-dispatch.md) first - this document maps its verb catalog onto an
 address space, and where the two disagree, dispatch wins.
@@ -331,6 +348,13 @@ needs of its own: `unknown-address` (replacing `unknown-verb`, which has no mean
 `bad-packet`, `slip-overflow`. Echoing the request address is what makes an error actionable when nothing
 else correlates request to reply.
 
+**Two writes reply anyway**, decided during implementation: `/sk/<deck>/pad/play` and
+`/sk/<deck>/fx/gritmode`. Both are actions that *return a value* through layer [3] - the deck's
+emptiness, and the grit reseed pair the platform uses to re-pick its `MValue` pickup after the switch -
+and a host has no other way to obtain either from the gesture itself. Suppressing them would be the one
+place the "no new capability" rule ran backwards, removing something the line codec offers. They are
+single pad presses, not a fader stream, so the reason for silence does not apply.
+
 There is deliberately **no `/sk/ok`**. A write that succeeds sends nothing - a rig streaming fader moves
 at 100 Hz does not want an ack per message, and a harness that needs one can read the value back. This is
 the one behavioural difference from the line codec, where every command replies. Hosts that want acks
@@ -378,8 +402,15 @@ to care:
 virtual const char* param_label(ParamId id) const { return nullptr; }   // nullptr -> use kParamNames
 ```
 
-Only live slots need one, so it is ~6-12 short strings per engine (`radio`: `speed`→"station",
-`aux`→"bank"; `tape`: `size`→"character", `altpos`→"pan"). A few hundred bytes of flash per build. The
+Only live slots need one, so it is ~6-12 short strings per engine. **`radio` and `tape` implement
+this** (`radio_engine.h` / `tape_engine.h`) - 6 and 10 labels respectively, and they are the two the
+design was argued from: `radio`'s `speed`→"station" and `aux`→"bank"; `tape`'s `size`→"character",
+`pos`→"drive", `altpos`→"pan", and the two grit slots→"filter cutoff"/"filter resonance". Every other
+engine keeps the default. A few hundred bytes of flash per build.
+
+`Crossfade` is deliberately left unlabelled on both: it is the platform crossfader and means the same
+thing everywhere, so a per-engine label would be rot risk with no legibility gain. The rule that fell
+out of writing two tables is **label what the engine reinterprets, not what it merely uses**. The
 real cost is that engines currently carry zero naming burden and this adds a table that can rot - which
 is why it defaults rather than being required, and why nothing in the protocol depends on it. **The label
 is cosmetic *to the device*: no address, reply, or error ever derives from it.** One tier up it is
@@ -569,10 +600,18 @@ silently divergent.
 ```
 src/terminal/
   slip.h          SLIP encode/decode, mirrors line_assembler.h's interface
-  osc_decode.cpp  packet -> address segments + typed args -> Command{argv[]}
-  osc_encode.cpp  typed OSC reply sink
-  osc_addr.cpp    address segments -> verb/argv synthesis
+  osc.h           OSC wire format: OscMessage reader, OscWriter, OscBundleWriter
+  osc_decode.cpp  packet -> address + typed args; the coercion table; bundle walking
+  osc_sink.h      OscSink: the typed reply sink (a TextSink subclass)
+  osc_encode.cpp  the writers + OscSink
+  osc_addr.h      kOscBundleCap + the codec entry point
+  osc_addr.cpp    address -> a line in the existing grammar -> dispatch_line(); describe bundle
 ```
+
+The line the decoder synthesizes goes through `dispatch_line()` unchanged, which is why there is no
+second verb table: an address resolves to `set param speed a 0.5000` and the existing tokenizer takes it
+from there. Host side, `tools/skdev/{osc,semantic,oscdevice}.py` mirror the same split - wire format,
+semantic tier, device client - with the first two dependency-free so they test without pyserial.
 
 `osc_addr.cpp` carries **no table of addresses**. The leaf segments are already `kParamNames` /
 `kConfigNames` from `names.cpp`, so it resolves an address by reusing `param_from_token` /
@@ -602,35 +641,145 @@ control-rate messages on the main loop), the fix is a `Command` union, not a sec
 Reply encoding is the mirror problem: layer [3] writes to a `TextSink` and knows nothing about types. The
 typing information already exists at every call site, because the line codec needed it to choose
 `append_f32` over raw - `TextSink` *already has* `ok_f32` and `ok`. So the OSC sink overrides those to
-emit `,f`/`,i`/`,s`, and only the generic `str()` path degrades to a string. Making `TextSink` virtual
-(or a compile-time policy under `SPK_TERMINAL_OSC`) is the whole change. The alternative - wrapping the
+emit `,f`/`,i`/`,s`, and only the generic `str()` path degrades to a string. `TextSink` becomes a
+compile-time policy: `SPK_SINK_VIRTUAL` expands to `virtual` under `SPK_TERMINAL_OSC` and to nothing
+otherwise, so the line build keeps its original vtable-free shape.
+
+**That was not quite the whole change.** One call site does not carry its typing where the sink can see
+it: `query`. Dispatch frames a query reply as `str("ok ")`, then lets `read_platform_query()` - or the
+engine's own `read_engine_query()` - append the value, then `str("\r\n")`. The type is known (every
+query DECLARES a `ValueKind`), but it is known to the table, not to the sink, and the value arrives
+through the same `append_*` calls that free-form text uses. Typing state reads correctly therefore
+needed two more methods:
+
+```cpp
+SPK_SINK_VIRTUAL void ok_begin();   // "ok "     in the line codec; OSC: arm typed capture
+SPK_SINK_VIRTUAL void ok_end();     // "\r\n"    in the line codec; OSC: settle the type
+```
+
+Byte-for-byte identical to the `str()` calls they replace, so the line codec is unchanged. Between them
+the OSC sink watches what happens: exactly one `append_i32` and nothing else means `,i`, exactly one
+`append_f32` means `,f`, and anything else - a raw `str()`, or several values, as `query usb` does -
+falls back to `,s` carrying the text the line codec would have produced. That makes "only the generic
+`str()` path degrades to a string" mechanical rather than a convention someone has to remember.
+
+The alternative was to pass `ValueKind` down into the sink, which would have put a layer-[3] concept
+into the reply interface for the benefit of one codec. Watching the calls keeps the knowledge where it
+already was. The alternative - wrapping the
 text line as `,s "ok 0.7500"` - would make every host parse ASCII inside an OSC string, defeating the
 point of using OSC.
 
 ## Flash and RAM delta (estimated, unmeasured)
 
-| Item | Estimate |
-|------|----------|
-| SLIP encode/decode | ~0.3 KB |
-| OSC parse (address split, type tags, arg extraction) | ~1.5 KB |
-| OSC encode + typed sink | ~1 KB |
-| Address->verb synthesis (rules, not a table - reuses `names.cpp`) | ~0.4 KB |
-| Descriptor address + label composition | ~0.3 KB |
-| Per-engine `param_label` tables | ~0.2 KB per build |
-| RX packet buffer | 512 B SRAM |
-| TX FIFO growth (descriptor bundle must fit whole) | 2 KB -> 4 KB SRAM |
+**Measured 2026-08-09**, `ENGINE=delay`, `TERMINAL=1` with and without `OSC=1`. The original estimates
+are kept alongside because the gap is instructive, not because it is close.
 
-~3.7 KB flash, ~2.5 KB additional SRAM over the line build. Affordable on the engines already able to
-host `TERMINAL=1` (per [`terminal-impl.md`](terminal-impl.md)); on the ones already at the `SRAM_EXEC`
-edge it is not, and OSC is simply not a build they get.
+| Item | Estimated | Measured |
+|------|-----------|----------|
+| Codec code (SLIP + OSC parse/encode + typed sink + address synthesis) | ~3.5 KB | **~9.0 KB** (`SRAM_EXEC` 183356 -> 192396 B) |
+| RX packet buffer | 512 B | 512 B |
+| TX FIFO growth (descriptor bundle must fit whole) | 2 KB -> 4 KB | **2 KB -> 8 KB** |
+| `describe` bundle scratch (static; not in the original estimate at all) | - | **6 KB** |
+| Total SRAM | ~2.5 KB | **~12.4 KB** (98776 -> 111448 B) |
+
+Two things account for the gap. The code estimate was simply optimistic - address parsing, the coercion
+table and the reply sink are each about twice the size guessed. The data estimate missed an item
+entirely: **the descriptor has to be assembled somewhere before it can be framed**, and a bundle cannot
+be built incrementally into a ring buffer the way lines can, because each element is prefixed with its
+own length. That scratch is the single largest cost in the whole codec.
+
+The bundle is 5392 B on an engine using the DEFAULT all-live masks - 64 rows: 38 param (17 deck-scoped
+x 2 decks + 4 global), 18 state, 6 config, plus `descr` and `caps`. The original 2-3 KB projection was
+taken from a masked engine; real engines mask hard (`tape` and `shuttle` declare a handful of slots
+each) and land near 1 KB. The unmasked case is what has to fit, though, or `describe` fails on exactly
+the engines that have not narrowed yet - so `kOscBundleCap` is 6 KB and
+`host/test_terminal_osc.cpp` asserts the unmasked descriptor against it, which keeps the guard from
+rotting as params or queries are added.
+
+Affordable on most engines able to host `TERMINAL=1` (per [`terminal-impl.md`](terminal-impl.md)) -
+`delay` lands at 72.3% of `SRAM_EXEC`, up from 68.9%, and `tape` at 79.5% - but the margin is thinner
+than the spec implied.
+
+**`pstretch` cannot host OSC.** Verified 2026-08-09: `make ENGINE=pstretch TERMINAL=1 OSC=1` fails to
+link, `.bss` overflowing `SRAM` by 4352 bytes. It is not close and it is not a regression - the line
+build already sits at **97.4% of SRAM** (311168 / 319488 B) because pstretch's FFT working set needs its
+own linker split (`linker/alt_sram_pstretch.lds`, 200K/312K instead of 300K/212K). OSC's ~12.4 KB of
+data has nowhere to go. This is exactly the case this section always predicted; it now has a name.
+
+If that engine ever needs OSC, the lever is the descriptor buffer rather than the codec: `pstretch`
+masks to 9 params, so its descriptor is ~1.5 KB and `kOscBundleCap` could drop from 6 KB to 2 KB with
+the TX FIFO following it to 4 KB - about 8 KB back, comfortably more than the shortfall. That would be
+a per-build knob, and it is deliberately not implemented until something asks for it. The runtime
+already fails safe if a descriptor outgrows the buffer: `describe` answers `/sk/err ... overflow`
+rather than emitting a truncated bundle.
+
+The other engines at the `SRAM_EXEC` edge are unaffected - the cost that bit here is data, not code.
 
 ## Testing
 
-`skdev` grows an `OscDevice` with the same method surface (`set_param`, `get_param`, `query`, `describe`)
-over `python-osc` plus a SLIP wrapper, so `test_generic.py`'s cross-engine sweep runs unmodified against
-either codec. That parity is the real acceptance criterion: **the same sweep, both codecs, identical
-results.** Anything the OSC build answers differently is a codec bug by definition, since layer [3] is
-shared.
+`skdev` grew an `OscDevice` with the same method surface (`set_param`, `get_param`, `query`,
+`describe`) over a dependency-free OSC/SLIP implementation, so `test_generic.py`'s cross-engine sweep
+runs unmodified against either codec. That parity is the real acceptance criterion: **the same sweep,
+both codecs, identical results.** Anything the OSC build answers differently is a codec bug by
+definition, since layer [3] is shared.
+
+`describe()` returns the same `DeviceDescriptor` from both clients - the bundle's full addresses are
+reduced back to bare names and the two per-deck rows collapse into one entry - which is what lets the
+suite be written against the client surface and never against a codec.
+
+### The bench procedure (RUN 2026-08-09, passed)
+
+Both codecs cannot be present at once; it is a compile-time flag, so parity is a two-flash comparison.
+
+```
+make ENGINE=tape TERMINAL=1 -j8 && make ENGINE=tape TERMINAL=1 program-dfu
+make test-hw                       > /tmp/line.txt      # line codec, the reference
+make ENGINE=tape TERMINAL=1 OSC=1 -j8 && make ENGINE=tape TERMINAL=1 OSC=1 program-dfu
+make test-hw CODEC=osc             > /tmp/osc.txt       # same suites, OSC client
+diff /tmp/line.txt /tmp/osc.txt
+```
+
+`tape` is the engine to use: it has the richest label table, ten live params, and at 79.5% of
+`SRAM_EXEC` it still has headroom. Order matters - flash and pass the LINE build first, because it is
+the known-good reference and it is readable in a terminal; a failure there is a hardware or build
+problem, not a codec one. Debugging SLIP first would mean debugging a binary protocol with no baseline.
+
+#### What the bench actually answered
+
+The three questions only hardware could settle, all about the parts not shared with the line build:
+
+- **The descriptor bundle survives the 64-byte USB packet path.** ~4 KB on a masked `tape` build,
+  arriving as one intact SLIP frame, first try. This was the main risk and it is closed.
+- **Nothing else writes ASCII to the CDC.** Every reply decoded cleanly across a full sweep.
+- **The semantic tier resolves against a live device.** 46 addresses generated from the device's own
+  `describe`; semantic -> generic -> semantic is the identity on all of them; `/tape/a/character` drives
+  `/sk/a/param/size` and reads back what it wrote.
+
+Measured on the bench: **0.18 ms** steady-state round trip (the first call after connect costs ~11 ms of
+settling, which is easy to mistake for the real latency). A full 63-case sweep runs in about a second,
+most of it the one test that makes tape open a WAV.
+
+#### Four defects the parity sweep found, none of which off-target testing could have
+
+Recorded because they are all the same shape - a difference between the two clients masquerading as a
+difference between the two codecs, which is exactly what this sweep exists to separate.
+
+1. **OSC `describe` dropped Enum selector labels.** State rows were `,sss`; the line codec's describe
+   *does* send them (`query route global enum 0:stereo 1:dmono 2:genstereo`), so the two codecs
+   described the same device differently. Now `,ssss`. **The spec's own example row was wrong** and is
+   corrected above.
+2. **`OscDevice.query()` returned typed values where the line client returns text**, so every `bool` and
+   `enum` assertion failed under OSC and passed under lines.
+3. **Global params were addressed with a deck segment.** The line codec accepts and discards a deck for
+   a global; the OSC space encodes scope structurally, so `/sk/a/param/crossfade` is correctly
+   `unknown-address`. The client has to drop what the line codec throws away.
+4. **`Device.pad()` discarded its reply entirely** (returned `None`) while `OscDevice.pad()` kept the
+   `ok ` framing the line client strips - so the one action that reports a value reported two different
+   things.
+
+A fifth was found by reading rather than by the sweep: `OscDevice._recv()` returned the first frame of a
+serial chunk and **discarded the rest**, a latent desync that would only surface when timing happened to
+batch two replies together.
 
 Two checks the line codec does not need:
 

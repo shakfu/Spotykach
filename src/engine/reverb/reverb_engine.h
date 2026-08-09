@@ -68,6 +68,22 @@ public:
         return static_cast<ConfigMask>((1u << static_cast<uint32_t>(ConfigId::Route))
                                      | (1u << static_cast<uint32_t>(ConfigId::Mode)));
     }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // Three algorithms behind one surface (plate / hall / greyhole). The labels are the ROLE
+    // column of the docs table - the abstraction that is stable across all three - not any one
+    // algorithm's parameter name, which would be wrong for the other two.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Speed:   return "decay";
+            case ParamId::Env:     return "damping";
+            case ParamId::Pos:     return "tone";
+            case ParamId::Size:    return "size a";
+            case ParamId::ModAmp:  return "size b";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
 
     void  set_param(ParamId id, DeckRef::Ref deck, float value) override;

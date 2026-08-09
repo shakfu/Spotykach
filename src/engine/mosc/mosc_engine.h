@@ -66,6 +66,22 @@ public:
         return static_cast<ConfigMask>((1u << static_cast<uint32_t>(ConfigId::Route))
                                      | (1u << static_cast<uint32_t>(ConfigId::Mode)));
     }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // Mutable Instruments Plaits. The labels are Plaits' own front-panel names.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Speed:   return "pitch";
+            case ParamId::Size:    return "harmonics";
+            case ParamId::Pos:     return "timbre";
+            case ParamId::Env:     return "morph";
+            case ParamId::ModAmp:  return "decay";
+            case ParamId::Mix:     return "level";
+            case ParamId::Aux:     return "engine";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
 
     void  set_param(ParamId id, DeckRef::Ref deck, float value) override;

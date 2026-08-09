@@ -25,7 +25,9 @@ Three knobs/controls place the decks in that bus:
 | **MIX knob** (per deck) | `Mix` | per-deck **playback volume** |
 | **Mix fader** | `Crossfade` | **A/B blend** (DJ-style: centre = both full, ends = one deck only) |
 
-(Bare **POS** is reserved for a future loop-start control and currently does nothing.)
+(Bare **POS** is the tape-FX **saturation drive** — see the Controls table below and [Tape FX](#tape-fx).
+It was reserved for a future loop-start control when this section was written, which is no longer true:
+`tape_engine.cpp:127` routes it to `_fx_n[0]`.)
 
 The routing switch (mirrors the panel L/C/R, granular's int convention):
 

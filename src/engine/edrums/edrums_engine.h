@@ -65,6 +65,28 @@ public:
     ConfigMask live_configs() const override {
         return static_cast<ConfigMask>(1u << static_cast<uint32_t>(ConfigId::Route));
     }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // A drum sequencer: POS is onset density and SIZE is pattern length, so almost every slot
+    // is renamed. The four flux/grit slots are the voice macros.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Pos:            return "density";
+            case ParamId::Size:           return "pattern length";
+            case ParamId::Env:            return "rotation";
+            case ParamId::Speed:          return "pitch";
+            case ParamId::Mix:            return "level";
+            case ParamId::ModAmp:         return "probability";
+            case ParamId::Aux:            return "model";
+            case ParamId::GritMix:        return "decay";
+            case ParamId::GritIntensity:  return "drive";
+            case ParamId::FluxIntensity:  return "pitch sweep";
+            case ParamId::FluxMix:        return "body/noise";
+            case ParamId::FluxFb:         return "brightness";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
 
     void  set_param(ParamId id, DeckRef::Ref deck, float value) override;

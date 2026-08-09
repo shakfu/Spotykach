@@ -10,44 +10,24 @@ real defect, not descriptor noise. The tolerance accounts for on-device value
 quantization; tighten per-engine if a build stores exact floats.
 """
 
+import re
+
 import pytest
 
-from skdev.device import Device
-from skdev.protocol import Timeout
+import harness
 
-
-_MASKED = [True]   # filled by _params(); a list so the closure can write it at collection time
+# One describe for the whole collection phase, codec-aware and failure-tolerant - see harness.py for
+# why both of those matter here rather than in a fixture.
+_DESCR = harness.collect_descriptor()
 
 
 def _params():
-    """Collection-time: open, describe, close. Returns [] when no USABLE hardware.
-
-    Catches OSError as well as Timeout, and the difference is not cosmetic. This runs at MODULE level
-    (the parametrize decorator calls it), so anything it raises is a pytest COLLECTION error, which
-    aborts the entire session - including test_descriptor.py, which needs no device at all. Timeout
-    alone covers "nothing attached"; it does not cover a port that exists but cannot be opened:
-    permission denied (the port is root:dialout and the user is not in that group), the port already
-    held by a REPL/screen session, or the device unplugged between discovery and open. pyserial raises
-    SerialException for all of those, which subclasses OSError.
-
-    Returning [] degrades to zero parametrized cases, so the run reports skips instead of collapsing.
-    The `device` fixture in conftest.py reports the actual reason.
-    """
-    try:
-        dev = Device()
-    except (Timeout, OSError):
-        return []
-    try:
-        d = dev.describe()
-        _MASKED[0] = d.masked
-        return list(d.params.values())
-    finally:
-        dev.close()
+    return list(_DESCR.params.values()) if _DESCR else []
 
 
 @pytest.mark.parametrize("p", _params(), ids=lambda p: p.name)
 def test_param_roundtrip(test_mode, p):
-    if not _MASKED[0]:
+    if not _DESCR.masked:
         pytest.skip(
             "engine has not implemented live_params()/live_configs(), so describe lists the whole "
             "ParamId enum - a read-back mismatch here would be descriptor noise, not a defect"
@@ -85,37 +65,44 @@ def test_param_roundtrip(test_mode, p):
             "getter and setter disagree".format(p.name, d, r2, r3))
 
 
+def test_pad_play_answers(test_mode):
+    """`pad play` must answer with the deck's emptiness flag, on both codecs.
+
+    Worth its own test for a narrow reason: `pad play` is one of only TWO writes that reply at all
+    (the other is `fx gritmode`). Every other write is silent under OSC by design, so this is one of
+    the two paths where a value-returning ACTION crosses the codec boundary - and under OSC it is the
+    free-form-text path, the one case the typed reply sink deliberately degrades to a string. Nothing
+    else in the suite exercises it.
+
+    What is NOT asserted, deliberately: that playback started. There is nothing to observe it with -
+    tape's `on_play_pad` returns a constant and it declares no transport query, so any "the deck is now
+    playing" assertion would be unfalsifiable. That is exactly the trap the original test_tape.py fell
+    into (see its docstring): it asserted `pad rec A` makes a deck non-empty, had never been run, and
+    could never have passed. Assert the reply, which is real, and nothing about state, which is not.
+
+    Called twice: engines that model play as a toggle (tape) are left as they were found, and engines
+    that treat it as momentary are unaffected by the repeat. `pad stop` afterwards for the engines that
+    implement `stop_if_generating` - a no-op on those that do not.
+    """
+    dev = test_mode
+    for press in ("first", "second"):
+        out = dev.pad("play", "A")
+        assert re.fullmatch(r"empty=[01]", out or ""), (
+            "{} `pad play` answered {!r}, expected empty=<0|1>".format(press, out))
+    dev.pad("stop", "A")
+
+
 # --- L1 state queries ------------------------------------------------------------------------------
 # The param sweep above only proves values go in and come back. These exercise the *observation* half
 # of the channel, and they are likewise driven entirely by `describe` - no per-engine knowledge.
 
-_CACHE = {}
-
-
-def _describe_once():
-    """One collection-time describe, shared by the query tests. None when no hardware."""
-    if "d" not in _CACHE:
-        try:
-            dev = Device()
-        except Timeout:
-            _CACHE["d"] = None
-        else:
-            try:
-                _CACHE["d"] = dev.describe()
-            finally:
-                dev.close()
-    return _CACHE["d"]
-
-
 def _query_names():
-    d = _describe_once()
-    return sorted(d.queries) if d else []
+    return sorted(_DESCR.queries) if _DESCR else []
 
 
 def _config_query_pairs():
     """Config names that also have a same-named query - i.e. that can be round-tripped."""
-    d = _describe_once()
-    return sorted(n for n in d.configs if n in d.queries) if d else []
+    return sorted(n for n in _DESCR.configs if n in _DESCR.queries) if _DESCR else []
 
 
 @pytest.mark.parametrize("name", _query_names(), ids=lambda n: n)
@@ -126,7 +113,7 @@ def test_query_answers(test_mode, name):
     as `err unknown-verb` the first time somebody typed it by hand.
     """
     dev = test_mode
-    q = _describe_once().queries[name]
+    q = _DESCR.queries[name]
     for deck in (["A", "B"] if q.scope == "deck" else [""]):
         out = dev.query(name, deck)
         assert out != "", "query {} {} answered ok with no value".format(name, deck)
@@ -156,7 +143,7 @@ def test_config_query_round_trip(test_mode, name):
     would have caught it automatically, for any config/query pair rather than just route.
     """
     dev = test_mode
-    desc = _describe_once()
+    desc = _DESCR
     deck = "A" if desc.queries[name].scope == "deck" else ""
     for value in sorted(desc.configs[name].values):
         dev.set_config(name, "A", value)

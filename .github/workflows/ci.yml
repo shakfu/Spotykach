@@ -80,6 +80,11 @@ jobs:
       - name: Python host tooling
         run: make test-scripts TEST_PY=python3
 
+      # The device-free half of tools/: the describe parser and the OSC codec + semantic translator.
+      # Runs AFTER the host suites, which is what produces the firmware byte samples both check against.
+      - name: Host protocol tooling (device-free)
+        run: make test-tools TEST_PY=python3
+
       - name: Browser front end
         run: make test-web
 
@@ -128,6 +133,12 @@ jobs:
           # decides which engines can host it at all, so cover a lean one and a tight one.
           - ENGINE=delay TERMINAL=1
           - ENGINE=pstretch TERMINAL=1
+          # SPK_TERMINAL_OSC changes type layout again on top of that - a virtual TextSink, an 8 KB TX
+          # FIFO, SlipAssembler in place of LineAssembler - and adds ~12.4 KB of SRAM on top of the
+          # terminal's own cost, so whether an engine can host it is a separate question from whether it
+          # can host TERMINAL=1. Cover the lean one; pstretch is left on the line codec deliberately, so
+          # the matrix keeps proving the line build still links after codec changes.
+          - ENGINE=delay TERMINAL=1 OSC=1
     steps:
       - uses: actions/checkout@v4
         with:

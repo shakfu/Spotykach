@@ -303,9 +303,9 @@ void verb_query(const Command& c, Ctx& x) {
         if (strcmp(name, kPlatformQueries[i].name)) continue;
         DeckRef::Ref d;
         if (!resolve_query_deck(kPlatformQueries[i].scope, c, x, d)) return;
-        x.reply.str("ok ");
+        x.reply.ok_begin();
         read_platform_query(i, x, d);
-        x.reply.str("\r\n");
+        x.reply.ok_end();
         return;
     }
 
@@ -314,9 +314,9 @@ void verb_query(const Command& c, Ctx& x) {
         if (strcmp(name, t.items[i].name)) continue;
         DeckRef::Ref d;
         if (!resolve_query_deck(t.items[i].scope, c, x, d)) return;
-        x.reply.str("ok ");
+        x.reply.ok_begin();
         x.engine.read_engine_query(i, d, x.reply);   // engine appends the value only
-        x.reply.str("\r\n");
+        x.reply.ok_end();
         return;
     }
 
@@ -531,6 +531,11 @@ const Verb kVerbs[] = {
 };
 
 }  // namespace
+
+#if SPK_TERMINAL_OSC
+EngineQueryTable platform_queries() { return { kPlatformQueries, PQ_COUNT }; }
+const char*      value_kind_name(ValueKind k) { return kind_name(k); }
+#endif
 
 void dispatch_line(char* line, IEngine& engine, TextSink& reply, TermState& state) {
     Command cmd;

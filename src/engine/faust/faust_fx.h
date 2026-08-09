@@ -151,6 +151,22 @@ public:
     // This wrapper implements no set_config at all, so nothing is live. Not the default (all-live),
     // which would advertise switches that go nowhere.
     ConfigMask live_configs() const override { return static_cast<ConfigMask>(0); }
+
+    // Layer-3 name for `describe` (docs/dev/terminal-osc.md), DERIVED from the bind table for the same
+    // reason the mask above is: these engines are generated from their .json manifest, so a
+    // hand-written label table in the generated header would be overwritten by the next
+    // `make faust-engine`, and one kept elsewhere would be a second copy of the bind table.
+    //
+    // The Faust slider label already IS the layer-3 name - `filter` binds "cutoff" to ParamId::Speed
+    // and "drive" to ParamId::Size - so the manifest that defines the mapping also defines what to
+    // call it, and the two cannot drift. One implementation covers every generated Faust engine,
+    // present and future, with no per-engine code.
+    const char* param_label(ParamId id) const override {
+        const faustgen::Bind* b = Traits::binds();
+        for (int i = 0; i < Traits::nbinds(); i++)
+            if (b[i].role == static_cast<int>(id) && b[i].label && *b[i].label) return b[i].label;
+        return nullptr;   // unbound -> describe falls back to the layer-2 slot name
+    }
 #endif
 
     void set_param(ParamId id, DeckRef::Ref deck, float v) override {

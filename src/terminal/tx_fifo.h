@@ -41,11 +41,21 @@ class TxFifo {
     void commit(size_t n) { _tail += n; }
 
     size_t count() const { return static_cast<size_t>(_head - _tail); }
+    size_t free_space() const { return kCap - count(); }
     bool   empty() const { return _head == _tail; }
     bool   take_overflow() { bool o = _overflow; _overflow = false; return o; }
 
   private:
+    // Line codec: 2 KB holds a full describe dump, which drains over successive process() iterations.
+    // OSC: the descriptor is ONE bundle and a bundle cannot be streamed, so the whole thing has to fit
+    // at once - which turns the dispatch doc's FIFO-sizing recommendation into a requirement. 8 KB
+    // rather than the spec's projected 4 KB because that projection was taken from a MASKED engine; an
+    // engine still on the default all-live masks advertises ~6 KB of descriptor. See osc_addr.cpp.
+#if SPK_TERMINAL_OSC
+    static constexpr uint32_t kCap  = 8192;   // power of two
+#else
     static constexpr uint32_t kCap  = 2048;   // holds a full describe dump; power of two
+#endif
     static constexpr uint32_t kMask = kCap - 1;
     uint8_t  _buf[kCap];
     uint32_t _head = 0;   // write cursor (free-running, masked)

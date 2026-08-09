@@ -110,7 +110,14 @@ class Device:
         self.cmd("midi note {} {}".format(ch, note))
 
     def pad(self, action, deck, rev=False):
-        self.cmd("pad {} {}{}".format(action, deck, " rev" if rev else ""))
+        """Press a pad. Returns the reply payload.
+
+        `play` is one of only two pads that answer with a value (`empty=<0|1>` - the deck's emptiness,
+        which a host has no other way to learn from the press); the rest reply bare `ok`, i.e. "".
+        This used to discard the reply and return None, which made it impossible to assert the one
+        thing the press reports.
+        """
+        return self.cmd("pad {} {}{}".format(action, deck, " rev" if rev else ""))
 
     def fx(self, kind, deck, on):
         self.cmd("fx {} {} {}".format(kind, deck, "on" if on else "off"))

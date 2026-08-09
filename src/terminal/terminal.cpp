@@ -7,6 +7,11 @@
 #include "terminal/rx_ring.h"
 #include "terminal/dispatch.h"
 
+#if SPK_TERMINAL_OSC
+#include "terminal/osc_addr.h"
+#include "terminal/osc_sink.h"
+#endif
+
 #include "sys/system.h"   // daisy::System::GetNow - the `mode test` dead-man switch
 
 // Size-optimize the whole terminal service: it is control-plane glue (line parsing, dispatch,
@@ -85,9 +90,20 @@ void Terminal::write(const char* s, size_t n) {
     _tx.enqueue(s, n);
 }
 
+size_t Terminal::writable() const {
+    return _tx.free_space();
+}
+
 void Terminal::emit_err(const char* reason) {
+#if SPK_TERMINAL_OSC
+    // Transport-level errors have no request address of their own, so they carry the root. Framed as
+    // an ordinary /sk/err so a host needs exactly one error parser.
+    OscSink sink(*this);
+    sink.emit_error("/sk", reason);
+#else
     TextSink sink(*this);
     sink.err(reason);
+#endif
 }
 
 void Terminal::on_line(char* line, size_t len) {
@@ -95,7 +111,16 @@ void Terminal::on_line(char* line, size_t len) {
     _state.last_cmd_ms = daisy::System::GetNow();   // feed the `mode test` dead-man switch
     TextSink sink(*this);
     dispatch_line(line, *_engine, sink, _state);
+    sink.finish();
 }
+
+#if SPK_TERMINAL_OSC
+void Terminal::on_packet(const uint8_t* p, size_t n) {
+    _state.last_cmd_ms = daisy::System::GetNow();   // the dead-man switch is codec-independent
+    OscSink sink(*this);
+    osc_dispatch_packet(p, n, *_engine, sink, _state);
+}
+#endif
 
 void Terminal::process() {
     if (!_engine) return;
@@ -119,6 +144,23 @@ void Terminal::process() {
     size_t  n;
     while ((n = g_rx.pop(chunk, sizeof(chunk))) > 0) {
         for (size_t i = 0; i < n; ++i) {
+#if SPK_TERMINAL_OSC
+            switch (_asm.feed(chunk[i])) {
+                case SlipAssembler::Feed::Ready:
+                    on_packet(_asm.packet(), _asm.len());
+                    _asm.reset();
+                    break;
+                // Resynchronize rather than truncate: a truncated OSC packet is undetectable garbage,
+                // where a truncated line is merely wrong. The assembler has already discarded to the
+                // frame boundary, so the next packet parses cleanly.
+                case SlipAssembler::Feed::Overflow:
+                    emit_err("slip-overflow");
+                    _asm.reset();
+                    break;
+                case SlipAssembler::Feed::Pending:
+                    break;
+            }
+#else
             switch (_asm.feed(chunk[i])) {
                 case LineAssembler::Feed::Ready:
                     on_line(_asm.line(), _asm.len());
@@ -130,6 +172,7 @@ void Terminal::process() {
                 case LineAssembler::Feed::Pending:
                     break;
             }
+#endif
         }
     }
 

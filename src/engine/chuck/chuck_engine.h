@@ -70,6 +70,17 @@ public:
     }
     // This engine implements no set_config - the patch, not a panel switch, decides its topology.
     ConfigMask live_configs() const override { return static_cast<ConfigMask>(0); }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // As csound: the params are generic pass-throughs to the loaded .ck, so only the patch
+    // selector has a meaning the firmware can honestly name.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Aux:  return "patch";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
     void         set_param(ParamId id, DeckRef::Ref d, float v) override;
     float        param(ParamId id, DeckRef::Ref d) const override;

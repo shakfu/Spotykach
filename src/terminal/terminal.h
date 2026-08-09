@@ -18,6 +18,10 @@
 #include "terminal/line_assembler.h"
 #include "terminal/usb_diag.h"     // UsbDiag - OTG_FS bring-up probe (docs/dev/terminal-impl.md)
 
+#if SPK_TERMINAL_OSC
+#include "terminal/slip.h"         // SLIP framing replaces the line assembler (docs/dev/terminal-osc.md)
+#endif
+
 #include "hid/usb.h"               // daisy::UsbHandle
 
 // MidiUsbHandler claims the SAME peripheral as the default terminal port - Periph::EXTERNAL, i.e.
@@ -50,6 +54,9 @@ class Terminal : public ITextOut {
     // ITextOut: enqueue reply bytes on the non-blocking TX FIFO (used by TextSink / dispatch).
     void write(const char* s, size_t n) override;
 
+    // ITextOut: remaining TX FIFO space, so the OSC codec can refuse a frame it cannot write whole.
+    size_t writable() const override;
+
     // Read-only for the platform's `mode test` input isolation (app.cpp pushes it to CoreUI).
     bool test_mode() const { return _state.test_mode; }
 
@@ -69,7 +76,14 @@ class Terminal : public ITextOut {
     static void RxTrampoline(uint8_t* buf, uint32_t* len);   // USB IRQ context -> g_rx.push
 
     daisy::UsbHandle _usb;
+    // Layer [1] is shared byte for byte; only the codec that consumes it changes. See
+    // docs/dev/terminal-osc.md - "It replaces ONLY the codec".
+#if SPK_TERMINAL_OSC
+    SlipAssembler    _asm;
+    void on_packet(const uint8_t* p, size_t n);
+#else
     LineAssembler    _asm;
+#endif
     TxFifo           _tx;
     TermState        _state;
     IEngine*         _engine = nullptr;

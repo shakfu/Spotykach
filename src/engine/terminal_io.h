@@ -58,9 +58,27 @@ struct CommandView {
 class ITextOut {
   public:
     virtual void write(const char* s, size_t n) = 0;
+
+    // How many bytes can still be accepted without loss. The line codec never asks - a dropped line is
+    // reported and the host retries - but the OSC codec must, because its `describe` reply is a single
+    // SLIP frame assembled from many small writes: if the FIFO fills partway through, the frame on the
+    // wire is corrupt rather than merely missing. Default "unbounded" suits the test doubles.
+    virtual size_t writable() const { return static_cast<size_t>(-1); }
   protected:
     ~ITextOut() = default;
 };
+
+// TextSink as a COMPILE-TIME POLICY (docs/dev/terminal-osc.md, "Implementation shape"). The OSC codec
+// needs the same verb handlers to emit typed OSC arguments instead of ASCII, and the typing information
+// already exists at every call site - which is why the fix is to override these methods rather than to
+// fork dispatch. Under SPK_TERMINAL_OSC the reply interface becomes virtual so OscSink can do that;
+// in the line build the keyword expands to nothing and TextSink keeps its original non-virtual,
+// vtable-free shape. Zero cost when OSC is off.
+#if SPK_TERMINAL_OSC
+#define SPK_SINK_VIRTUAL virtual
+#else
+#define SPK_SINK_VIRTUAL
+#endif
 
 // The reply interface handed to verb handlers and to IEngine::handle_command. Formats replies in
 // the phase-1 grammar (ok / ok <value> / err <reason>, CRLF-framed). Floats are formatted by
@@ -68,21 +86,44 @@ class ITextOut {
 class TextSink {
   public:
     explicit TextSink(ITextOut& out) : _out(out) {}
+    SPK_SINK_VIRTUAL ~TextSink() = default;
 
-    void str(const char* s);                     // raw, no newline
-    void line(const char* s);                    // s + "\r\n"
-    void ok();                                   // "ok\r\n"
-    void ok_i32(int32_t v);                      // "ok <int>\r\n"
-    void ok_f32(float v, int decimals = 4);      // "ok <float>\r\n"
-    void ok_hex(uint32_t v);                     // "ok 0x<hex>\r\n"
-    void err(const char* reason);                // "err <reason>\r\n"
+    SPK_SINK_VIRTUAL void str(const char* s);                     // raw, no newline
+    SPK_SINK_VIRTUAL void line(const char* s);                    // s + "\r\n"
+    SPK_SINK_VIRTUAL void ok();                                   // "ok\r\n"
+    SPK_SINK_VIRTUAL void ok_i32(int32_t v);                      // "ok <int>\r\n"
+    SPK_SINK_VIRTUAL void ok_f32(float v, int decimals = 4);      // "ok <float>\r\n"
+    SPK_SINK_VIRTUAL void ok_hex(uint32_t v);                     // "ok 0x<hex>\r\n"
+    SPK_SINK_VIRTUAL void err(const char* reason);                // "err <reason>\r\n"
 
-    void append_i32(int32_t v);                  // append a signed integer
-    void append_hex(uint32_t v);                 // append "0x" + hex
-    void append_f32(float v, int decimals = 4);  // append a float, no %f
+    SPK_SINK_VIRTUAL void append_i32(int32_t v);                  // append a signed integer
+    SPK_SINK_VIRTUAL void append_hex(uint32_t v);                 // append "0x" + hex
+    SPK_SINK_VIRTUAL void append_f32(float v, int decimals = 4);  // append a float, no %f
+
+    // Framing for a reply whose VALUE is appended by someone else - the `query` path, where the
+    // platform writes the frame and the value comes from read_platform_query() or, for an engine's own
+    // declared query, from IEngine::read_engine_query(). In the line codec these are exactly the
+    // `str("ok ")` / `str("\r\n")` they replace, byte for byte.
+    //
+    // They exist because OSC has to type that value and cannot see the call site: between ok_begin()
+    // and ok_end() the OSC sink watches which append_* runs. Exactly one append_i32 -> `,i`, exactly one
+    // append_f32 -> `,f`, anything else (raw str(), or several values, as `query usb` does) -> `,s` with
+    // the text the line codec would have produced. That is the "only the generic str() path degrades to
+    // a string" rule in docs/dev/terminal-osc.md, made mechanical.
+    SPK_SINK_VIRTUAL void ok_begin();                             // "ok "
+    SPK_SINK_VIRTUAL void ok_end();                               // "\r\n"
+
+    // Called by the transport once per received command, after dispatch has returned. The line codec
+    // has already written every byte it is going to write, so this is a no-op; the OSC sink uses it to
+    // emit the single typed message it has been accumulating. See docs/dev/terminal-osc.md.
+    SPK_SINK_VIRTUAL void finish() {}
 
   private:
     ITextOut& _out;
+
+  protected:
+    // Subclasses reply through the same byte sink (OscSink writes SLIP frames to it).
+    ITextOut& out() { return _out; }
 };
 
 }  // namespace spotykach

@@ -429,6 +429,24 @@ if(TERMINAL)
     target_compile_definitions(${FIRMWARE_NAME} PRIVATE SPK_TERMINAL=1)
 endif()
 
+# OSC+SLIP codec for the terminal channel (docs/dev/terminal-osc.md). Swaps layer [2] only; layers [1]
+# and [3] are shared byte for byte with the line build. Mirrors the Makefile's OSC=1, including both
+# guards - CMake has no equivalent of the Makefile's object wipe, but it tracks per-target definitions
+# in flags.make, so a toggle rebuilds every object on its own.
+if(OSC)
+    if(NOT TERMINAL)
+        message(FATAL_ERROR "OSC requires TERMINAL - the OSC codec is layer [2] of the terminal channel. "
+                            "Configure with -DTERMINAL=1 -DOSC=1.")
+    endif()
+    # A `[tag]` log line interleaving on the shared CDC is harmless for line-ASCII and FATAL for SLIP,
+    # where it lands inside a packet. Phase 1 forces the logger off rather than wrapping it as /sk/log.
+    if(DEBUG)
+        message(FATAL_ERROR "OSC and DEBUG conflict: Logger output would land inside a SLIP frame. "
+                            "Drop -DDEBUG, or implement the /sk/log framing in docs/dev/terminal-osc.md.")
+    endif()
+    target_compile_definitions(${FIRMWARE_NAME} PRIVATE SPK_TERMINAL_OSC=1)
+endif()
+
 # USB-C bring-up diagnostic: blinks the OTG bring-up verdict on the Daisy onboard LED, for when the port
 # does not enumerate and there is therefore no channel to report over. Pairs with TERMINAL=1.
 if(USBDIAG)

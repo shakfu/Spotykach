@@ -94,6 +94,23 @@ public:
                                      | (1u << static_cast<uint32_t>(ConfigId::StartModOn))
                                      | (1u << static_cast<uint32_t>(ConfigId::SizeModOn)));
     }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // Real-time PaulStretch. SIZE is the stretch factor (up to 64x), not a size.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Size:    return "stretch";
+            case ParamId::Pos:     return "diffusion";
+            case ParamId::Speed:   return "pitch";
+            case ParamId::Env:     return "tone";
+            case ParamId::Mix:     return "wet";
+            case ParamId::ModAmp:  return "glow";
+            case ParamId::Aux:     return "clip";
+            case ParamId::AltPos:  return "scrub";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
 
     void  set_param(ParamId id, DeckRef::Ref d, float v) override;

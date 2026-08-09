@@ -58,6 +58,11 @@ TERMINAL_SRC = $(ROOT)/src/terminal/dispatch.cpp $(ROOT)/src/terminal/fmt.cpp \
                $(ROOT)/src/terminal/names.cpp $(ROOT)/src/terminal/text_sink.cpp \
                $(ROOT)/src/terminal/usb_diag.cpp \
                $(ROOT)/src/terminal/cpu_stat.cpp
+# The OSC codec (SPK_TERMINAL_OSC) is layer [2] only, so it is just as hardware-free as the line codec:
+# SLIP framing, the OSC wire format, address -> verb synthesis and the typed reply sink all run here.
+# slip.h / osc.h / osc_sink.h are header-only or built by these three TUs.
+TERMINAL_OSC_SRC = $(ROOT)/src/terminal/osc_decode.cpp $(ROOT)/src/terminal/osc_encode.cpp \
+                   $(ROOT)/src/terminal/osc_addr.cpp
 # qdelay flavor: its feedback diffuser is the header-only src/dsp/diffuser.h, so just the engine .cpp.
 QDELAY_SRC  = $(ROOT)/src/engine/qdelay/qdelay_engine.cpp
 EDRUMS_SRC  = $(ROOT)/src/engine/edrums/edrums_engine.cpp
@@ -125,6 +130,8 @@ TEST_FILTER = $(BUILD)/test_filter
 TEST_VOICE   = $(BUILD)/test_voice
 TEST_DELAY   = $(BUILD)/test_delay
 TEST_TERMINAL = $(BUILD)/test_terminal
+TEST_TERMINAL_OSC = $(BUILD)/test_terminal_osc
+TEST_OSC_LABELS = $(BUILD)/test_osc_labels
 TEST_QDELAY  = $(BUILD)/test_qdelay
 TEST_DIFFUSER = $(BUILD)/test_diffuser
 TEST_GRAINCLOUD_KERNEL = $(BUILD)/test_graincloud_kernel
@@ -136,7 +143,7 @@ TEST_CHUCK_PATCH = $(BUILD)/test_chuck_patch
 BENCH_REVERB     = $(BUILD)/bench_reverb
 BENCH_GRAINCLOUD = $(BUILD)/bench_graincloud
 
-.PHONY: all clean run bard-card-check test test-terminal test-granular test-granular-audio test-edrums test-reso test-mosc test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
+.PHONY: all clean run bard-card-check test test-terminal test-terminal-osc test-osc-labels test-granular test-granular-audio test-edrums test-reso test-mosc test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
 all: $(TARGET)
 
 $(TARGET): $(SRC) | $(BUILD)
@@ -236,6 +243,28 @@ $(TEST_TERMINAL): test_terminal.cpp $(TERMINAL_SRC) $(ROOT)/src/version.cpp \
                   $(ROOT)/src/engine/terminal_io.h $(ROOT)/src/engine/iengine.h | $(BUILD)
 	$(CXX) $(CXXFLAGS) -Wno-unknown-pragmas -DSPK_TERMINAL=1 test_terminal.cpp $(TERMINAL_SRC) $(ROOT)/src/version.cpp -o $@
 
+# The OSC codec, built with SPK_TERMINAL_OSC=1 - which is a different TYPE LAYOUT (virtual TextSink, an
+# 8 KB TX FIFO, SlipAssembler in place of LineAssembler), so it links its own copy of the shared
+# terminal sources rather than sharing objects with the line build.
+$(TEST_TERMINAL_OSC): test_terminal_osc.cpp $(TERMINAL_SRC) $(TERMINAL_OSC_SRC) $(ROOT)/src/version.cpp \
+                  $(ROOT)/src/engine/terminal_io.h $(ROOT)/src/engine/iengine.h | $(BUILD)
+	$(CXX) $(CXXFLAGS) -Wno-unknown-pragmas -DSPK_TERMINAL=1 -DSPK_TERMINAL_OSC=1 test_terminal_osc.cpp $(TERMINAL_SRC) $(TERMINAL_OSC_SRC) $(ROOT)/src/version.cpp -o $@
+
+# The per-engine param_label() tables, checked against the REAL radio and tape engines rather than a
+# mock - the tables are hand-maintained, which the spec names as the one part of the OSC design that can
+# rot. Links the two engines (and the granular tree they share via LIB_SRC) against the OSC codec.
+# Every engine whose param_label() table can be linked here. graincloud is absent because it shares
+# granular's classes and cannot be linked alongside it; mosc/csound/chuck are absent because they need
+# a vendored or fetched runtime, which would make this test the slowest in the suite for no extra
+# coverage of the thing under test (a table of string literals).
+OSC_LABEL_ENGINES = $(RADIO_SRC) $(TAPE_SRC) $(DELAY_SRC) $(QDELAY_SRC) $(REVERB_SRC) \
+                    $(RESO_SRC) $(RINGS_SRC) \
+                    $(EDRUMS_SRC) $(GLITCH_SRC) $(SHUTTLE_SRC) $(SOFTCUT_SRC) $(BARD_SRC)
+
+$(TEST_OSC_LABELS): test_osc_labels.cpp osc_test_util.h $(LIB_SRC) $(OSC_LABEL_ENGINES) \
+                  $(TERMINAL_SRC) $(TERMINAL_OSC_SRC) $(ROOT)/src/version.cpp | $(BUILD)
+	$(CXX) $(CXXFLAGS) -Wno-unknown-pragmas -DSPK_TERMINAL=1 -DSPK_TERMINAL_OSC=1 test_osc_labels.cpp $(LIB_SRC) $(OSC_LABEL_ENGINES) $(TERMINAL_SRC) $(TERMINAL_OSC_SRC) $(ROOT)/src/version.cpp -o $@
+
 # The diffuser is header-only (src/dsp/diffuser.h, no JUCE, no heap in the audio path), so its test
 # needs no other sources - just the include path.
 $(TEST_DIFFUSER): test_diffuser.cpp $(ROOT)/src/dsp/diffuser.h | $(BUILD)
@@ -320,7 +349,7 @@ run: $(TARGET)
 
 # `test` runs both engine harnesses. Both inject the transport via EngineContext (granular drives the
 # real platform Transport; edrums uses a small stub ITransport) - the post-transport-decoupling way.
-test: test-terminal test-granular test-granular-audio test-edrums test-reso test-mosc test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-softcut test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
+test: test-terminal test-terminal-osc test-osc-labels test-granular test-granular-audio test-edrums test-reso test-mosc test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-softcut test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
 
 test-granular: $(TEST)
 	./$(TEST)
@@ -348,6 +377,12 @@ test-reverb: $(TEST_REVERB)
 
 test-delay: $(TEST_DELAY)
 	./$(TEST_DELAY)
+
+test-terminal-osc: $(TEST_TERMINAL_OSC)
+	$(TEST_TERMINAL_OSC)
+
+test-osc-labels: $(TEST_OSC_LABELS)
+	$(TEST_OSC_LABELS)
 
 test-terminal: $(TEST_TERMINAL)
 	./$(TEST_TERMINAL)

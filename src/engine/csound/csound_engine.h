@@ -60,6 +60,18 @@ public:
     }
     // This engine implements no set_config - the patch, not a panel switch, decides its topology.
     ConfigMask live_configs() const override { return static_cast<ConfigMask>(0); }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // Only Aux is labelled, and that is the point: every other slot is a generic pass-through
+    // to the loaded .orc, whose meaning the PATCH defines and the firmware cannot know. A fixed
+    // label would be a confident lie that changes every time a different patch is selected.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Aux:  return "patch";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
     void         set_param(ParamId id, DeckRef::Ref d, float v) override;
     float        param(ParamId id, DeckRef::Ref d) const override;

@@ -89,6 +89,13 @@ public:
                                      | (1u << static_cast<uint32_t>(ConfigId::StartModOn))
                                      | (1u << static_cast<uint32_t>(ConfigId::SizeModOn)));
     }
+    // NO param_label() here, deliberately. The shared ParamId vocabulary IS granular's own: the enum
+    // header states that it "mirrors the granular engine's MValue-backed set", and every other engine
+    // inherited those words as generic slots. So on this engine alone the layer-2 name and the layer-3
+    // meaning are the same thing, and a label table would be a second copy of kParamNames that could
+    // drift from it. The `describe` fallback (nullptr -> the slot name) is already the right answer.
+    // See docs/dev/terminal-osc.md, "Where the label comes from".
+
 #endif
 
     // MIDI meaning (Phase 3c). The platform parses MIDI and clocks transport; the engine

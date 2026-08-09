@@ -61,6 +61,23 @@ public:
     ConfigMask live_configs() const override {
         return static_cast<ConfigMask>(1u << static_cast<uint32_t>(ConfigId::Mode));
     }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // Mutable Instruments Rings. The labels are Rings' own patch fields, which is what a player
+    // familiar with the module expects to see on a fader.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Speed:   return "note";
+            case ParamId::Size:    return "damping";
+            case ParamId::Pos:     return "position";
+            case ParamId::Env:     return "brightness";
+            case ParamId::ModAmp:  return "structure";
+            case ParamId::Mix:     return "dry/wet";
+            case ParamId::Aux:     return "model";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
 
     void  set_param(ParamId id, DeckRef::Ref deck, float value) override;

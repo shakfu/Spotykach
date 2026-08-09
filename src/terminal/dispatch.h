@@ -17,4 +17,13 @@ namespace spotykach {
 // tokenizer splits it in place. One reply is written to `reply` per call.
 void dispatch_line(char* line, IEngine& engine, TextSink& reply, TermState& state);
 
+#if SPK_TERMINAL_OSC
+// The platform's own query table and its kind spelling, exposed so the OSC `describe` bundle can walk
+// the SAME declarations the line codec's describe walks. Duplicating them in osc_addr.cpp is exactly
+// the drift docs/dev/terminal-osc.md sets out to avoid: the descriptor and the address space would then
+// be two places that both know how a state address is spelled.
+EngineQueryTable platform_queries();
+const char*      value_kind_name(ValueKind k);
+#endif
+
 }  // namespace spotykach

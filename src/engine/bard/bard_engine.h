@@ -99,6 +99,29 @@ public:
                                      | (1u << static_cast<uint32_t>(ConfigId::Mode))
                                      | (1u << static_cast<uint32_t>(ConfigId::ModType)));
     }
+    // Layer-3 names for `describe` (docs/dev/terminal-osc.md). The address stays the stable layer-2
+    // slot, so one control-surface layout still binds to every build; only the printed name changes.
+    // An audiobook player: PITCH browses books and POS jumps bookmarks, so the panel means
+    // something entirely different here than on any other engine.
+    const char* param_label(ParamId id) const override {
+        switch (id) {
+            case ParamId::Speed:          return "book";
+            case ParamId::Pos:            return "bookmark";
+            case ParamId::Size:           return "rate";
+            case ParamId::Env:            return "pitch keep";
+            case ParamId::Mix:            return "volume";
+            case ParamId::Aux:            return "shelf";
+            case ParamId::AltPos:         return "scrub";
+            case ParamId::Feedback:       return "seam";
+            case ParamId::ModAmp:         return "duck";
+            case ParamId::FluxIntensity:  return "voice colour";
+            case ParamId::FluxMix:        return "colour mix";
+            case ParamId::GritIntensity:  return "room size";
+            case ParamId::GritMix:        return "room mix";
+            default: return nullptr;   // fall back to the layer-2 slot name
+        }
+    }
+
 #endif
 
     void  cv_voct(DeckRef::Ref d, float value) override;      // BOOK CV

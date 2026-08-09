@@ -116,6 +116,26 @@ public:
     }
     // No set_config on this wrapper either - nothing to advertise.
     ConfigMask live_configs() const override { return static_cast<ConfigMask>(0); }
+
+    // Layer-3 name, derived from the bind tables (see the FaustEngine version for why deriving beats a
+    // hand-written table on a GENERATED header).
+    //
+    // A chain has two of them, and a role may legitimately drive a slider in BOTH stages: `voice` puts
+    // ParamId::Speed on the oscillator's "freq" and the filter's "cutoff" at once, which is the point
+    // of a chain engine. One label cannot say both, so stage A wins - it is the sound source, the
+    // stage the manifest lists first, and the name a player reaches for. Stage B answers only for the
+    // roles A does not bind (`reso`, `mix`). The address is unaffected either way; this only decides
+    // the word printed on the fader.
+    const char* param_label(ParamId id) const override {
+        const int r = static_cast<int>(id);
+        const faustgen::Bind* a = Traits::binds_a();
+        for (int i = 0; i < Traits::nbinds_a(); i++)
+            if (a[i].role == r && a[i].label && *a[i].label) return a[i].label;
+        const faustgen::Bind* b = Traits::binds_b();
+        for (int i = 0; i < Traits::nbinds_b(); i++)
+            if (b[i].role == r && b[i].label && *b[i].label) return b[i].label;
+        return nullptr;
+    }
 #endif
 
     void set_param(ParamId id, DeckRef::Ref deck, float v) override {
