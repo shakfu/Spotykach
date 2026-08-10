@@ -1016,6 +1016,23 @@ test-scripts:
 	@$(TEST_PY) -c 'import pytest' 2>/dev/null || $(TEST_PY) -m pip install -q --group dev
 	$(TEST_PY) -m pytest scripts/
 
+# Generate TouchOSC layouts for the OSC address space (docs/dev/tosc.md, docs/dev/terminal-osc.md).
+# The address space is read out of the firmware tables - names.cpp, dispatch.cpp's query table, each
+# engine's live_params() - so a layout cannot advertise an address the device would reject, and
+# regenerating after a ParamId changes is this one command. Output is dist/tosc/, which is ignored:
+# a .tosc is a build artifact, and `make test-scripts` asserts the generator's output rather than a
+# committed copy of it. Needs py2tosc, part of the `dev` dependency group.
+#   make tosc                        # universal + one per engine, into dist/tosc/
+#   make tosc TOSC_ARGS="--engine radio --xml"
+TOSC_ARGS ?=
+.PHONY: tosc
+tosc:
+	@$(TEST_PY) -c 'import py2tosc' 2>/dev/null || $(TEST_PY) -m pip install -q --group dev
+	$(TEST_PY) scripts/gen_tosc.py $(TOSC_ARGS)
+	@# The address inventory host/test_osc_addr.cpp probes against the real resolver. Committed, so
+	@# the off-target test needs no Python at build time; `make test-scripts` fails if it is stale.
+	$(TEST_PY) scripts/sk_osc.py --inventory
+
 # Regenerate the web front-end's data files and cross-language test fixtures (docs/dev/web-frontend.md).
 # The browser app in web/ consumes the SD card rules AS DATA rather than re-declaring them in
 # JavaScript, so card_layout.json is a build artifact of scripts/card_layout.py; a hand-ported copy
@@ -1165,5 +1182,6 @@ help:
 	@echo '  make faust-kernels            regenerate the Faust engine kernels'
 	@echo '  make gen-engines              regenerate the gen~ engine directories'
 	@echo '  make diagrams                 regenerate the control-surface SVGs'
+	@echo '  make tosc                     generate TouchOSC layouts into dist/tosc/'
 	@echo ''
 	@echo 'Docs: README.md - docs/architecture.md - docs/engines/ - docs/engine-types/ - TODO.md'

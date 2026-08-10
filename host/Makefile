@@ -132,6 +132,7 @@ TEST_DELAY   = $(BUILD)/test_delay
 TEST_TERMINAL = $(BUILD)/test_terminal
 TEST_TERMINAL_OSC = $(BUILD)/test_terminal_osc
 TEST_OSC_LABELS = $(BUILD)/test_osc_labels
+TEST_OSC_ADDR = $(BUILD)/test_osc_addr
 TEST_QDELAY  = $(BUILD)/test_qdelay
 TEST_DIFFUSER = $(BUILD)/test_diffuser
 TEST_GRAINCLOUD_KERNEL = $(BUILD)/test_graincloud_kernel
@@ -143,7 +144,7 @@ TEST_CHUCK_PATCH = $(BUILD)/test_chuck_patch
 BENCH_REVERB     = $(BUILD)/bench_reverb
 BENCH_GRAINCLOUD = $(BUILD)/bench_graincloud
 
-.PHONY: all clean run bard-card-check test test-terminal test-terminal-osc test-osc-labels test-granular test-granular-audio test-edrums test-reso test-mosc test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
+.PHONY: all clean run bard-card-check test test-terminal test-terminal-osc test-osc-labels test-osc-addr test-granular test-granular-audio test-edrums test-reso test-mosc test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
 all: $(TARGET)
 
 $(TARGET): $(SRC) | $(BUILD)
@@ -265,6 +266,14 @@ $(TEST_OSC_LABELS): test_osc_labels.cpp osc_test_util.h $(LIB_SRC) $(OSC_LABEL_E
                   $(TERMINAL_SRC) $(TERMINAL_OSC_SRC) $(ROOT)/src/version.cpp | $(BUILD)
 	$(CXX) $(CXXFLAGS) -Wno-unknown-pragmas -DSPK_TERMINAL=1 -DSPK_TERMINAL_OSC=1 test_osc_labels.cpp $(LIB_SRC) $(OSC_LABEL_ENGINES) $(TERMINAL_SRC) $(TERMINAL_OSC_SRC) $(ROOT)/src/version.cpp -o $@
 
+# Cross-language parity between scripts/sk_osc.py's address model and the real resolver. Needs no
+# engine at all - the bare IEngine's defaults leave every param and config live, which is what makes
+# the whole address space reachable. The inventory it reads is generated (`scripts/sk_osc.py
+# --inventory`) and committed; scripts/test_gen_tosc.py fails if that copy has gone stale.
+$(TEST_OSC_ADDR): test_osc_addr.cpp osc_test_util.h $(TERMINAL_SRC) $(TERMINAL_OSC_SRC) \
+                  $(ROOT)/src/version.cpp $(ROOT)/src/engine/iengine.h | $(BUILD)
+	$(CXX) $(CXXFLAGS) -Wno-unknown-pragmas -DSPK_TERMINAL=1 -DSPK_TERMINAL_OSC=1 test_osc_addr.cpp $(TERMINAL_SRC) $(TERMINAL_OSC_SRC) $(ROOT)/src/version.cpp -o $@
+
 # The diffuser is header-only (src/dsp/diffuser.h, no JUCE, no heap in the audio path), so its test
 # needs no other sources - just the include path.
 $(TEST_DIFFUSER): test_diffuser.cpp $(ROOT)/src/dsp/diffuser.h | $(BUILD)
@@ -349,7 +358,7 @@ run: $(TARGET)
 
 # `test` runs both engine harnesses. Both inject the transport via EngineContext (granular drives the
 # real platform Transport; edrums uses a small stub ITransport) - the post-transport-decoupling way.
-test: test-terminal test-terminal-osc test-osc-labels test-granular test-granular-audio test-edrums test-reso test-mosc test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-softcut test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
+test: test-terminal test-terminal-osc test-osc-labels test-osc-addr test-granular test-granular-audio test-edrums test-reso test-mosc test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-softcut test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch
 
 test-granular: $(TEST)
 	./$(TEST)
@@ -383,6 +392,9 @@ test-terminal-osc: $(TEST_TERMINAL_OSC)
 
 test-osc-labels: $(TEST_OSC_LABELS)
 	$(TEST_OSC_LABELS)
+
+test-osc-addr: $(TEST_OSC_ADDR)
+	$(TEST_OSC_ADDR) $(ROOT)/host/osc_addresses.txt
 
 test-terminal: $(TEST_TERMINAL)
 	./$(TEST_TERMINAL)

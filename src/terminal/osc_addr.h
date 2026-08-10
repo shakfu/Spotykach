@@ -16,9 +16,13 @@
 namespace spotykach {
 
 // Capacity of the static scratch the `describe` bundle is assembled in, and therefore the hard ceiling
-// on a descriptor. MEASURED, not estimated: an engine on the default all-live masks produces 5392 B
+// on a descriptor. MEASURED, not estimated: an engine on the default all-live masks produces 5532 B
 // (64 rows), which host/test_terminal_osc.cpp asserts against this constant so the guard cannot rot as
 // params or queries are added. Real engines mask hard and land near 1 KB.
+//
+// The figure moves whenever a row's SHAPE does, and has twice: the state row gaining its fourth string
+// (the Enum selector labels the line codec already sent) grew it, and filing the four platform reads
+// under `/sk/dev/` rather than `/sk/state/` shortened four addresses back down by 16 B.
 //
 // The TX FIFO must be at least this big too (see tx_fifo.h): a bundle cannot be streamed the way lines
 // can, so the whole descriptor has to fit at once.

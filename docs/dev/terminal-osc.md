@@ -377,10 +377,19 @@ bundle {
   /sk/reply/dev/describe/param  ,ssffs "/sk/a/param/speed" "station"   0.0 1.0 "deck"
   /sk/reply/dev/describe/param  ,ssffs "/sk/param/crossfade" "crossfade" 0.0 1.0 "global"
   /sk/reply/dev/describe/cfg    ,sss   "/sk/cfg/route" "route" "0:stereo 1:dmono 2:genstereo"
-  /sk/reply/dev/describe/state  ,sss   "/sk/a/state/empty" "empty" "int"
+  /sk/reply/dev/describe/state  ,ssss  "/sk/a/state/empty" "empty" "bool" ""
+  /sk/reply/dev/describe/state  ,ssss  "/sk/dev/cpu" "cpu" "float" ""
   /sk/reply/dev/describe/caps   ,i     0x00000133
 }
 ```
+
+A `state` row carries the address the read is answered AT, which for the four platform reads
+(`cpu`, `cpumin`, `cpumax`, `usb`) is the `/sk/dev/` one this document's **Platform** table gives
+them rather than a `state/` kind segment. `describe` and the resolver share one predicate for that
+(`is_platform_read()` in `osc_addr.cpp`) precisely because they did not at first: the descriptor
+advertised `/sk/state/cpu` for a read the resolver answers at `/sk/dev/cpu`. Both spellings
+resolve, so nothing broke and nothing noticed, which is the argument for checking the descriptor
+against the resolver address by address rather than merely for reachability - see **Testing**.
 
 Emitting the address makes the descriptor directly consumable: a host enumerates the bundle and has a
 bindable address plus a display label per row, with no need to re-implement this document's composition
@@ -505,6 +514,16 @@ slugify/compose rules and a reverse index. A Max abstraction and a TouchOSC layo
 thin consumers of the same JSON the translator builds - and the layout generator is where the semantic
 tier pays off most, because it can print `station` on a fader while binding it to `/sk/a/param/speed` and
 skip the translator at runtime entirely.
+
+**The TouchOSC generator exists** - `scripts/gen_tosc.py`, `make tosc`, documented in
+[`tosc.md`](tosc.md). It skips the translator exactly as described above: it prints the layer-3
+label on a control bound to the generic address, so nothing translates at run time. Both halves
+come from the firmware rather than from this document - `scripts/sk_osc.py` parses `names.cpp`,
+dispatch's query table, each engine's `live_params()` and each engine's `param_label()` - so the
+two cannot drift, and its test suite asserts the composed totals against the **Totals** table
+above. The generated Faust engines are covered by reading the same bind table their
+`param_label()` walks. It builds offline, from the source tree; `--describe` narrows an engine
+from a capture instead.
 
 ### What it must never do
 
@@ -786,7 +805,11 @@ Two checks the line codec does not need:
 - **Address composition parity.** Every address `describe` advertises must be writable and readable if it
   is a param, and must be exactly what this document's rules predict from the slot name and scope. This
   catches drift between `osc_addr.cpp` and the descriptor - the two places that both know how an address
-  is spelled.
+  is spelled. **Exactly, not merely reachably**: the first real instance of this drift - `/sk/state/cpu`
+  in the descriptor against `/sk/dev/cpu` in the resolver - was reachable through both spellings, so a
+  check that only asked "does it resolve" was green throughout. `host/test_terminal_osc.cpp` asserts the
+  spelling, and `host/test_osc_addr.cpp` compares the whole advertised set against the host-side model
+  in `scripts/sk_osc.py`.
 - **Cross-engine address stability.** The same layer-2 address set appears on every build for the same
   live slots, and only the labels differ. This is the property the universal-layout claim rests on, so it
   should be asserted rather than assumed.

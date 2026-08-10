@@ -633,6 +633,13 @@ bool has_row(const std::vector<Reply>& rows, const char* addr, const char* args)
     return false;
 }
 
+// Same, matching only the head of the argument list - for asserting the address a row carries without
+// restating the label, range and scope that follow it.
+bool has_row_prefix(const std::vector<Reply>& rows, const char* addr, const std::string& args) {
+    for (const auto& r : rows) if (r.addr == addr && r.args.rfind(args, 0) == 0) return true;
+    return false;
+}
+
 void test_describe() {
     std::printf("describe (bundle)\n");
     {
@@ -686,15 +693,35 @@ void test_describe() {
         // The property the universal-layout claim rests on: EVERY address describe advertises must be
         // one the codec actually accepts. This is the drift check between osc_addr.cpp and the
         // descriptor - the two places that both know how an address is spelled.
+        //
+        // State rows are checked alongside param rows, and were not always: while this loop looked at
+        // params only, describe advertised `/sk/state/cpu` for the four platform reads the resolver
+        // answers at `/sk/dev/cpu`, and nothing said so. Both spellings resolve, so a reachability
+        // check alone would still have missed it - hence the exact-address assertion below.
         for (const auto& r : rows) {
-            if (r.addr != "/sk/reply/dev/describe/param") continue;
+            const bool param = r.addr == "/sk/reply/dev/describe/param";
+            const bool state = r.addr == "/sk/reply/dev/describe/state";
+            if (!param && !state) continue;   // cfg is write-only: a bare read of one is bad-arg
             const size_t b = r.args.find(",s ") + 3, en = r.args.find(' ', b);
             const std::string addr = r.args.substr(b, en - b);
             MockEngine probe;
             probe.labels = e.labels; probe.pmask = e.pmask; probe.cmask = e.cmask;
             const std::string reply = send(probe, Msg(addr.c_str(), nullptr));
             check(reply.rfind("/sk/reply", 0) == 0,
-                  "every advertised param address is readable exactly as composed");
+                  ("advertised address " + addr + " is readable exactly as composed").c_str());
+        }
+
+        // ...and spelled where the resolver answers it. `cpu`/`cpumin`/`cpumax`/`usb` report on the
+        // channel and the board rather than on the engine's control surface, so the address space puts
+        // them under /sk/dev - which the descriptor has to agree with, not merely be reachable through.
+        for (const char* name : { "cpu", "cpumin", "cpumax", "usb" }) {
+            const std::string dev   = std::string(",s /sk/dev/") + name + " ,s " + name;
+            const std::string state = std::string(",s /sk/state/") + name + " ,s " + name;
+            check(has_row_prefix(rows, "/sk/reply/dev/describe/state", dev),
+                  (std::string("the platform read ") + name + " is advertised under /sk/dev").c_str());
+            check(!has_row_prefix(rows, "/sk/reply/dev/describe/state", state),
+                  (std::string("the platform read ") + name
+                   + " is not also advertised under /sk/state").c_str());
         }
     }
     {

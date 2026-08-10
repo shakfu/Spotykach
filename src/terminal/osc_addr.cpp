@@ -108,6 +108,22 @@ Deck deck_of(const char* s) {
     return Deck::None;
 }
 
+// --- platform reads ---------------------------------------------------------------------------------
+
+// The four entries of the platform query table that the address space files under `/sk/dev/` rather
+// than behind a `state/` kind segment: they report on the channel and the board, not on the engine's
+// control surface (docs/dev/terminal-osc.md, "Platform").
+//
+// ONE predicate, consulted by both the resolver and `describe`. Those are the two places that know how
+// an address is spelled, and while this list lived only inside do_dev() they disagreed: the descriptor
+// advertised `/sk/state/cpu` for a read the resolver answers at `/sk/dev/cpu`. Both spellings resolve,
+// so nothing broke - which is exactly why it went unnoticed until host/test_osc_addr.cpp compared the
+// descriptor against the resolver address by address.
+bool is_platform_read(const char* name) {
+    return !std::strcmp(name, "cpu")    || !std::strcmp(name, "cpumin")
+        || !std::strcmp(name, "cpumax") || !std::strcmp(name, "usb");
+}
+
 // --- one request ------------------------------------------------------------------------------------
 
 struct Req {
@@ -369,14 +385,20 @@ void describe_param_row(OscBundleWriter& bw, IEngine& e, ParamId id) {
     }
 }
 
-void describe_state_rows(OscBundleWriter& bw, const EngineQuery* q, uint8_t n) {
+// `platform` says whether this is the platform's own table. It gates the `/sk/dev/` spelling rather
+// than the name alone doing it: an engine that happened to declare a query called `cpu` owns a
+// different thing entirely, and advertising it under `/sk/dev/` would point a host at the platform's
+// read instead of at the engine's.
+void describe_state_rows(OscBundleWriter& bw, const EngineQuery* q, uint8_t n, bool platform) {
     for (uint8_t i = 0; i < n; ++i) {
         if (!q[i].safe) continue;   // the sweep can only see what is safe to call, by construction
-        const bool deck = (q[i].scope == QueryScope::Deck);
+        // Advertised where the resolver answers it - see is_platform_read().
+        const bool dev  = platform && is_platform_read(q[i].name);
+        const bool deck = !dev && (q[i].scope == QueryScope::Deck);
         const char* decks[2] = { deck ? "a" : nullptr, deck ? "b" : nullptr };
         for (int k = 0; k < (deck ? 2 : 1); ++k) {
             char addr[64];
-            compose(addr, sizeof addr, decks[k], "state", q[i].name);
+            compose(addr, sizeof addr, decks[k], dev ? "dev" : "state", q[i].name);
             OscWriter w = bw.element();
             // Four strings, not three: the selector labels an Enum query declares have to travel, or a
             // host cannot check that a reply is one of the declared values - and the line codec's
@@ -396,7 +418,7 @@ void describe_state_rows(OscBundleWriter& bw, const EngineQuery* q, uint8_t n) {
 //
 // SIZING is in osc_addr.h (kOscBundleCap) and is MEASURED rather than estimated: a row costs ~85 bytes,
 // and an engine on the DEFAULT all-live masks advertises 38 param rows (17 deck-scoped x 2 decks + 4
-// global), 18 state rows and 6 config rows - 5392 bytes, not the ~2-3 KB the spec projected from a
+// global), 18 state rows and 6 config rows - 5532 bytes, not the ~2-3 KB the spec projected from a
 // masked engine. The unmasked default has to fit, or `describe` fails on exactly the engines that have
 // not narrowed their masks yet. Overflow is an explicit error, never a truncated bundle.
 uint8_t g_bundle[kOscBundleCap];
@@ -437,9 +459,9 @@ void do_describe(Req& r) {
     }
 
     const EngineQueryTable pq = platform_queries();
-    describe_state_rows(bw, pq.items, pq.count);
+    describe_state_rows(bw, pq.items, pq.count, true);
     const EngineQueryTable eq = r.engine.engine_queries();
-    describe_state_rows(bw, eq.items, eq.count);
+    describe_state_rows(bw, eq.items, eq.count, false);
 
     {
         Capabilities caps = r.engine.capabilities();
@@ -495,8 +517,7 @@ void do_dev(Req& r, const Segments& g) {
         return;
     }
 
-    if (!std::strcmp(what, "cpu") || !std::strcmp(what, "cpumin") ||
-        !std::strcmp(what, "cpumax") || !std::strcmp(what, "usb")) {
+    if (is_platform_read(what)) {
         if (!arity(r, 0)) return;
         Line l; l.tok("query"); l.tok(what);
         r.run(l, true);
