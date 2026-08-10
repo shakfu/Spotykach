@@ -11,4 +11,6 @@ dev = [
     "cysox",
     "pytest",
     "pyserial",
+    # scripts/gen_tosc.py - TouchOSC layouts for the OSC address space (docs/dev/tosc.md).
+    "py2tosc",
 ]

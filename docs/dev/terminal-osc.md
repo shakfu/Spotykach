@@ -475,6 +475,15 @@ thin consumers of the same JSON the translator builds - and the layout generator
 tier pays off most, because it can print `station` on a fader while binding it to `/sk/a/param/speed` and
 skip the translator at runtime entirely.
 
+**The TouchOSC generator exists** - `scripts/gen_tosc.py`, `make tosc`, documented in
+[`tosc.md`](tosc.md). It skips the translator exactly as described above, and it takes the address
+space from the firmware tables (`scripts/sk_osc.py` parses `names.cpp`, dispatch's query table and
+each engine's `live_params()`) rather than from this document, so the two cannot drift; its test
+suite asserts the composed totals against the **Totals** table above. It does not yet consume the
+labels from `describe` for the reason given in **Where the label comes from** - `param_label()` is
+unimplemented - so it carries a curated `scripts/tosc_labels.json` in the meantime and falls back
+to the layer-2 name, which is translation rule 4 with the table filled in by hand.
+
 ### What it must never do
 
 - **Never be required.** Every device function is reachable generically. The translator is a convenience

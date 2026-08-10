@@ -1,0 +1,140 @@
+{
+  "note": [
+    "Layer-3 labels: what a slot MEANS on one engine, for printing on a control surface.",
+    "The address a control binds to is always the generic layer-2 one ('/sk/a/param/speed');",
+    "this file only decides what is printed on it ('station'). Cosmetic by construction - a",
+    "label that rots misnames a fader and can never make the device unreachable.",
+    "",
+    "This is a stand-in for the `param_label()` hook docs/dev/terminal-osc.md proposes on IEngine.",
+    "When that lands, `describe` carries the labels and scripts/gen_tosc.py --describe reads them",
+    "from the device instead, at which point this file is a fallback for offline generation.",
+    "",
+    "Keys are '<kind>:<slot>' with kind = param | cfg and slot the layer-2 wire name from",
+    "src/terminal/names.cpp. Sourced from the Controls table in docs/engines/<engine>.md.",
+    "An engine with no entry, or a slot with no entry, prints its layer-2 name - degraded,",
+    "never broken (document, translation rule 4). ASCII, lowercase, short enough for a caption."
+  ],
+  "engines": {
+    "radio": {
+      "param:speed": "station",
+      "param:pos": "start",
+      "param:size": "varispeed",
+      "param:env": "static",
+      "param:mix": "volume",
+      "param:aux": "bank",
+      "param:crossfade": "blend",
+      "cfg:route": "stereo image"
+    },
+    "tape": {
+      "param:speed": "varispeed",
+      "param:pos": "drive",
+      "param:size": "character",
+      "param:env": "loop mode",
+      "param:mix": "volume",
+      "param:modamp": "wow depth",
+      "param:altpos": "pan",
+      "param:aux": "slot",
+      "param:gritint": "cutoff",
+      "param:gritmix": "resonance",
+      "param:crossfade": "blend",
+      "cfg:route": "pan topology"
+    },
+    "shuttle": {
+      "param:speed": "capstan",
+      "param:pos": "loop start",
+      "param:size": "loop length",
+      "param:mix": "volume",
+      "param:modamp": "wow depth",
+      "param:altpos": "pan",
+      "param:aux": "slot",
+      "param:gritint": "drive",
+      "param:gritmix": "character",
+      "param:fluxint": "cutoff",
+      "param:fluxmix": "resonance",
+      "param:crossfade": "blend"
+    },
+    "glitch": {
+      "param:aux": "algorithm",
+      "param:size": "param 1",
+      "param:pos": "param 2",
+      "param:speed": "pitch",
+      "param:env": "tone",
+      "param:mix": "volume",
+      "param:crossfade": "blend",
+      "cfg:route": "stereo image"
+    },
+    "bard": {
+      "param:speed": "book",
+      "param:pos": "bookmark",
+      "param:size": "rate",
+      "param:env": "pitch-keep",
+      "param:mix": "volume",
+      "param:modamp": "mod depth",
+      "param:altpos": "scrub",
+      "param:aux": "shelf",
+      "param:feedback": "seam",
+      "param:crossfade": "blend"
+    },
+    "pstretch": {
+      "param:size": "stretch",
+      "param:pos": "diffusion",
+      "param:speed": "pitch shift",
+      "param:env": "tone",
+      "param:mix": "dry/wet",
+      "param:aux": "clip",
+      "param:altpos": "scrub",
+      "param:modamp": "mod depth",
+      "param:crossfade": "blend",
+      "cfg:mode": "source"
+    },
+    "edrums": {
+      "param:pos": "density",
+      "param:size": "length",
+      "param:env": "rotation",
+      "param:speed": "drum pitch",
+      "param:mix": "gain",
+      "param:modamp": "probability",
+      "param:aux": "drum model",
+      "param:gritmix": "decay",
+      "param:gritint": "drive",
+      "param:fluxint": "sweep",
+      "param:fluxmix": "body/noise",
+      "param:fluxfb": "noise tone"
+    },
+    "delay": {
+      "param:size": "division",
+      "param:pos": "feedback",
+      "param:mix": "wet/dry",
+      "param:speed": "transpose",
+      "param:env": "tone",
+      "param:modamp": "mod depth",
+      "cfg:mode": "character",
+      "cfg:route": "topology"
+    },
+    "qdelay": {
+      "param:size": "division",
+      "param:pos": "feedback",
+      "param:mix": "wet/dry",
+      "param:speed": "transpose",
+      "param:env": "tone",
+      "param:modamp": "mod depth",
+      "cfg:mode": "character",
+      "cfg:route": "topology"
+    },
+    "reverb": {
+      "param:speed": "decay",
+      "param:pos": "tone",
+      "param:mix": "wet/dry"
+    },
+    "graincloud": {
+      "param:pos": "cloud centre",
+      "param:size": "grain size",
+      "param:speed": "transpose",
+      "param:env": "spray",
+      "param:modamp": "spread",
+      "param:mix": "dry/wet",
+      "param:aux": "playhead",
+      "param:altpos": "vibrato"
+    }
+  }
+}

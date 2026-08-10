@@ -265,6 +265,8 @@ sk> query empty A            # engine state
 
 The channel and its design are documented in [`docs/dev/terminal-control.md`](docs/dev/terminal-control.md) (what and why), [`docs/dev/terminal-dispatch.md`](docs/dev/terminal-dispatch.md) (the command grammar), [`docs/dev/terminal-tools.md`](docs/dev/terminal-tools.md) (the host side) and [`docs/dev/terminal-impl.md`](docs/dev/terminal-impl.md) (what actually landed, including the hardware bring-up history).
 
+An OSC codec for the same channel is designed in [`docs/dev/terminal-osc.md`](docs/dev/terminal-osc.md) — not yet built, but its address space is engine-independent by construction, which is what lets `make tosc` generate one TouchOSC control surface that drives every engine (see [`docs/dev/tosc.md`](docs/dev/tosc.md)).
+
 ## Architecture & developer docs
 
 Firmware internals are documented under [`docs/`](docs/) — start with [`docs/architecture.md`](docs/architecture.md), which covers the hardware platform, the platform/engine seam (`IEngine`), and how to slot in a new engine. [`docs/engines/`](docs/engines/) documents each engine in detail plus the shared transport and knob-routing model, and [`docs/engine-types/`](docs/engine-types/) covers the three engine-authoring methods (native C++, Faust/cyfaust, gen~/gen-dsp). Notable changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).
