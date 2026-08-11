@@ -10,7 +10,8 @@
 // browser cannot do it.
 
 import { LineAssembler } from '../core/protocol.ts';
-import type { SerialPorts, Transport } from '../core/ports.ts';
+import { SlipDecoder, slipEncode } from '../core/osc.ts';
+import type { FrameTransport, SerialPorts, Transport } from '../core/ports.ts';
 
 export const DAISY_VID = 0x0483; // STMicroelectronics (Daisy Seed CDC); PID 0x5740 typical
 export const BAUD = 115200; // ignored by USB CDC; the API requires a value
@@ -47,7 +48,7 @@ export const supported = (): boolean =>
  * that puts a different bridge in front of the CDC endpoint - a board revision, a hub, a USB-serial
  * adapter on the panel jack - lands there with no way out, so callers can retry unfiltered.
  */
-export async function requestPort({ filtered = true } = {}): Promise<Transport> {
+async function openPort({ filtered = true } = {}): Promise<SerialPortLike> {
   if (!supported()) {
     throw new Error('This browser has no WebSerial. Use Chrome, Edge or another Chromium browser.');
   }
@@ -62,7 +63,23 @@ export async function requestPort({ filtered = true } = {}): Promise<Transport> 
   } catch {
     // Not fatal; not every platform implements setSignals.
   }
-  return new SerialTransport(port);
+  return port;
+}
+
+export async function requestPort(opts: { filtered?: boolean } = {}): Promise<Transport> {
+  return new SerialTransport(await openPort(opts));
+}
+
+/**
+ * The same port, framed for the OSC codec.
+ *
+ * A separate entry point rather than a flag, because the codec is a property of the FIRMWARE, not of
+ * the session: an `OSC=1` build never speaks lines and a line build never speaks SLIP, so choosing
+ * wrong is not a mode to toggle mid-session but a connection that will not answer. The UI picks
+ * before connecting and says which it picked.
+ */
+export async function requestFramePort(opts: { filtered?: boolean } = {}): Promise<FrameTransport> {
+  return new OscSerialTransport(await openPort(opts));
 }
 
 export class SerialTransport implements Transport {
@@ -138,11 +155,92 @@ export class SerialTransport implements Transport {
   }
 
   info(): string {
-    const i = this.port.getInfo?.() ?? {};
-    const hex = (v: number | undefined): string =>
-      (v == null ? '?' : `0x${v.toString(16).padStart(4, '0')}`);
-    return `USB ${hex(i.usbVendorId)}:${hex(i.usbProductId)}`;
+    return portInfo(this.port);
   }
 }
 
-export const webSerial: SerialPorts = { supported, request: requestPort };
+/**
+ * The OSC transport: identical port handling, different framing.
+ *
+ * The duplication against `SerialTransport` is deliberate and small. Factoring the shared pump into a
+ * base class would have to abstract over the one thing that differs - bytes in, units out - and the
+ * result reads worse than two twenty-line pumps. Note the decoder is fed RAW bytes here, with no
+ * TextDecoder anywhere: running a describe bundle through UTF-8 decoding would mangle exactly the
+ * high bytes SLIP uses as delimiters.
+ */
+export class OscSerialTransport implements FrameTransport {
+  private readonly decoder = new SlipDecoder();
+  private onFrameCb: (packet: Uint8Array) => void = () => {};
+  private onCloseCb: (reason: string) => void = () => {};
+  private closed = false;
+  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+  constructor(private readonly port: SerialPortLike) {
+    void this.pump();
+  }
+
+  onFrame(cb: (packet: Uint8Array) => void): void {
+    this.onFrameCb = cb;
+  }
+
+  onClose(cb: (reason: string) => void): void {
+    this.onCloseCb = cb;
+  }
+
+  private async pump(): Promise<void> {
+    this.reader = this.port.readable.getReader();
+    let reason = 'the port closed';
+    try {
+      for (;;) {
+        const { value, done } = await this.reader.read();
+        if (done) break;
+        for (const frame of this.decoder.feed(value)) this.onFrameCb(frame);
+      }
+    } catch (e) {
+      reason = (e as Error).message;
+    } finally {
+      try {
+        this.reader.releaseLock();
+      } catch {
+        /* already released */
+      }
+      if (!this.closed) this.onCloseCb(reason);
+    }
+  }
+
+  async send(packet: Uint8Array): Promise<void> {
+    const writer = this.port.writable.getWriter();
+    try {
+      await writer.write(slipEncode(packet));
+    } finally {
+      writer.releaseLock();
+    }
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    try {
+      await this.reader?.cancel();
+    } catch {
+      /* the pump may already have exited */
+    }
+    await this.port.close();
+  }
+
+  info(): string {
+    return portInfo(this.port);
+  }
+}
+
+function portInfo(port: SerialPortLike): string {
+  const i = port.getInfo?.() ?? {};
+  const hex = (v: number | undefined): string =>
+    (v == null ? '?' : `0x${v.toString(16).padStart(4, '0')}`);
+  return `USB ${hex(i.usbVendorId)}:${hex(i.usbProductId)}`;
+}
+
+export const webSerial: SerialPorts = {
+  supported,
+  request: requestPort,
+  requestFrames: requestFramePort,
+};

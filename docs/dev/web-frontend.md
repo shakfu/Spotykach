@@ -14,7 +14,19 @@ second front-end onto both, not new capability.
 ## What landed
 
 `web/` is a static page with no runtime dependencies: `make web-serve` to run it, `make test-web` for
-its suite, `make web-data` to regenerate its data. 206 tests, plus 34 Python tests guarding the export and the markdown converter.
+its suite, `make web-data` to regenerate its data. 284 tests, plus 34 Python tests guarding the export and the markdown converter.
+
+**Both terminal codecs, as of 2026-08-11.** The tab speaks the line codec and the OSC codec
+(`TERMINAL=1 OSC=1`), chosen before connecting and locked for the session, because the codec is a
+property of the firmware rather than of the connection. `core/osc.ts` and `core/oscdevice.ts` are ports
+of `tools/skdev/osc.py` and `oscdevice.py`, deliberately kept diffable against them; `core/client.ts`
+puts one `DeviceClient` surface over both, which is what lets the generated control surface drive named
+operations instead of composing `set param ...` strings that mean nothing to an OSC build. A
+`FrameTransport` port sits beside `Transport` in `core/ports.ts` because the two codecs differ in their
+*unit* - a newline-terminated string against a SLIP-delimited byte frame - not merely their encoding.
+The codec suites decode `host/build/describe_osc_sample.bin`, real firmware bytes rather than a
+hand-written fixture, and skip cleanly when the host suites have not been built. See
+[`terminal-osc.md`](terminal-osc.md).
 
 **It is TypeScript now, bundled by bun**, which is the one place the original design was overturned
 rather than extended: "no build step" was a real constraint and it is gone. What replaced it is

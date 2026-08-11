@@ -32,13 +32,18 @@ class OscDevice:
 
     DEFAULT_TIMEOUT = 3.0
 
-    def __init__(self, port=None, timeout=DEFAULT_TIMEOUT, ack=True):
+    def __init__(self, port=None, timeout=DEFAULT_TIMEOUT, ack=True, log_sink=None):
         self.port = find_port(port)
         self.ser = open_serial(self.port, timeout)
         self.timeout = timeout
         self._dec = osc.SlipDecoder()
         self._pending = []            # decoded frames not yet consumed; see _recv()
         self._globals = None          # lazily filled from describe(); see _scope()
+        #: Where ``/sk/log`` lines go. Default None = discarded. A DEBUG=1 OSC build wraps its log
+        #: output as ``/sk/log ,s`` in its own frames rather than writing raw ASCII (which would land
+        #: inside a SLIP packet), so those frames arrive interleaved with replies exactly as ``[tag]``
+        #: lines do on the line codec - and must be skipped the same way.
+        self.log_sink = log_sink
         if ack:
             self.send("/sk/dev/mode/ack", True)
 
@@ -67,13 +72,29 @@ class OscDevice:
                 raise Timeout("no reply")
             self._pending.extend(self._dec.feed(chunk))
 
+    def _recv_reply(self):
+        """Read one packet that is not a log line.
+
+        ``/sk/log`` frames are unsolicited and can arrive between a request and its reply, so treating
+        the next frame as the answer would return a log line as a value on a DEBUG build and pass on a
+        release one - a difference that only appears when someone turns logging on.
+        """
+        while True:
+            packet = self._recv()
+            addr, vals = osc.decode(packet)
+            if addr == "/sk/log":
+                if self.log_sink:
+                    self.log_sink(vals[0] if vals else "")
+                continue
+            return addr, vals, packet
+
     def request(self, address, *args):
         """Send, then read exactly one reply. Raises on ``/sk/err``.
 
         Used for reads and for the platform composites that answer with a count.
         """
         self.send(address, *args)
-        addr, vals = osc.decode(self._recv())
+        addr, vals, _packet = self._recv_reply()
         if addr == "/sk/err":
             # The request address is echoed, which is what makes an error actionable:
             # nothing else correlates a rejection back to what caused it.
@@ -190,7 +211,9 @@ class OscDevice:
         all, which is why the device sizes its TX FIFO to hold a whole one.
         """
         self.send("/sk/dev/describe")
-        return osc.decode_packet(self._recv())
+        # Through _recv_reply, so a log line arriving first does not get parsed as the bundle.
+        _addr, _vals, packet = self._recv_reply()
+        return osc.decode_packet(packet)
 
     def describe(self):
         """Return a :class:`skdev.DeviceDescriptor` - the SAME model the line codec produces.

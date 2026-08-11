@@ -68,10 +68,38 @@ export interface Transport {
   info(): string;
 }
 
+/**
+ * A FRAME pipe to the device, for a build made with `TERMINAL=1 OSC=1`.
+ *
+ * Separate from `Transport` rather than a mode on it, because the two differ in their unit and not
+ * just their encoding: the line codec's is a string terminated by a newline, the OSC codec's is an
+ * opaque byte frame delimited by SLIP. Collapsing them would mean a `write(text | bytes)` that every
+ * implementation has to branch on, and a scripted fake that has to satisfy both halves to test
+ * either. See `docs/dev/terminal-osc.md`.
+ */
+export interface FrameTransport {
+  /** Send one already-encoded OSC packet; the transport does the SLIP framing. */
+  send(packet: Uint8Array): Promise<void>;
+  onFrame(cb: (packet: Uint8Array) => void): void;
+  /** Called once if the port goes away by itself - unplugged, or reset into the bootloader. */
+  onClose(cb: (reason: string) => void): void;
+  close(): Promise<void>;
+  /** Human-readable identification of the open port, e.g. `USB 0x0483:0x5740`. */
+  info(): string;
+}
+
 export interface SerialPorts {
   supported(): boolean;
   /** `filtered` narrows the chooser to the Daisy's vendor id; false lists every port. */
   request(opts?: { filtered?: boolean }): Promise<Transport>;
+  /**
+   * The same port, opened for the OSC codec.
+   *
+   * Optional so that a fake implementing only the line half stays a valid `SerialPorts` - most of the
+   * suite has no interest in OSC, and requiring it would mean editing every fixture to add a method
+   * they never call. A caller that needs OSC checks for it and says so if it is absent.
+   */
+  requestFrames?(opts?: { filtered?: boolean }): Promise<FrameTransport>;
 }
 
 /** What GETSTATUS answers with: where the device is, and how long to leave it alone. */

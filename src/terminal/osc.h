@@ -124,4 +124,20 @@ bool osc_is_bundle(const uint8_t* p, size_t n);
 // `elem`/`elem_len` point at one element (itself a message, or a nested bundle).
 bool osc_bundle_next(const uint8_t* p, size_t n, size_t& cursor, const uint8_t*& elem, size_t& elem_len);
 
+// --- `/sk/log` -------------------------------------------------------------------------------------
+//
+// Log output as OSC, because on this codec it cannot be ASCII: the Logger and the terminal share one
+// CDC device, and raw bytes landing inside a SLIP frame corrupt it. See osc_log.cpp.
+
+class ITextOut;   // spotykach::ITextOut, defined in engine/terminal_io.h
+
+// Point the log path at a byte sink (the live Terminal), flushing anything stashed from before it
+// existed. Passing nullptr detaches, which is what a test wants between cases.
+void osc_log_bind(ITextOut* out);
+
+// Format one log line and emit it as `/sk/log ,s` in its own SLIP frame. Best-effort: a line is
+// dropped rather than allowed to displace a reply or half-write a frame. `common.h` routes LOG_TAGGED
+// here on an OSC build, gated on INFS_LOG exactly as the Logger path is.
+void osc_log_printf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+
 }  // namespace spotykach

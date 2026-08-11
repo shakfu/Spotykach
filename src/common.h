@@ -26,8 +26,27 @@
 #include <daisy.h>
 #include <daisysp.h>
 
+#if SPK_TERMINAL_OSC && INFS_LOG
+// On an OSC build the Logger cannot be used: it writes raw ASCII to the same CDC device the SLIP
+// framing owns, so a log line lands INSIDE a packet and corrupts it - the failure looks like a device
+// that stopped answering. Log lines go out as `/sk/log ,s` in their own frames instead. See
+// src/terminal/osc_log.cpp and docs/dev/terminal-osc.md ("Logger coexistence").
+//
+// Gated on INFS_LOG (which is what DEBUG=1 sets) exactly as the Logger path is, so the two codecs
+// agree about when logging exists at all: without DEBUG this compiles to nothing in both, and a
+// release image does not start emitting frames the line build would have suppressed.
+//
+// Declared rather than included: common.h is included by every TU, including the host build, and must
+// not drag the terminal in behind it.
+namespace spotykach {
+void osc_log_printf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+}
+#define LOG_TAGGED(TAG, FMT, ...) \
+    ::spotykach::osc_log_printf("[%s] " FMT, TAG, ##__VA_ARGS__)
+#else
 #define LOG_TAGGED(TAG, FMT, ...) \
     Log::PrintLine("[%s] " FMT, TAG, ##__VA_ARGS__)
+#endif
 
 #define INFS_MIN(in, mn) (in < mn ? in : mn)
 #define INFS_MAX(in, mx) (in > mx ? in : mx)

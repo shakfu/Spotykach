@@ -11,7 +11,8 @@
 // released firmware has no terminal, so this tab serves people who build their own images.
 
 import { TerminalModel, type ConsoleLine } from '../app/terminal_model.ts';
-import { isDestructive, vocabulary, type ParamDesc, type QueryDesc } from '../core/protocol.ts';
+import { vocabulary, type ParamDesc, type QueryDesc } from '../core/protocol.ts';
+import type { Codec } from '../core/client.ts';
 import { webSerial } from '../platform/serial.ts';
 import { browserClock } from '../platform/clock.ts';
 import { append, clear, confirmDestructive, el } from './dom.ts';
@@ -55,6 +56,18 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
     onclick: () => model.connect({ filtered: false }),
   }, 'List every serial port');
 
+  // The codec is a property of the FIRMWARE, not of the session: a `TERMINAL=1 OSC=1` build speaks
+  // only SLIP and a plain `TERMINAL=1` build only lines, so this is chosen before connecting and
+  // disabled during. Picking wrong produces a device that never answers, so the choice is visible
+  // rather than inferred - and the default stays `line`, which is what every published build is.
+  const codecSelect = el('select', {
+    class: 'codec',
+    title: 'Which codec the firmware was built with. OSC needs a TERMINAL=1 OSC=1 build.',
+    onchange: (e: Event) => model.setCodec((e.target as HTMLSelectElement).value as Codec),
+  },
+  el('option', { value: 'line' }, 'line codec'),
+  el('option', { value: 'osc' }, 'OSC codec')) as HTMLSelectElement;
+
   // --- console --------------------------------------------------------------
 
   function renderConsole(lines: readonly ConsoleLine[]): void {
@@ -81,7 +94,10 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
       historyPos = history.length;
       input.value = '';
       await model.send(line);
-      if (/^(config|set param|reset|preset)\b/.test(line)) renderSurface();
+      // A typed command can change what the surface should show. Both vocabularies are matched: the
+      // line codec's verbs and the OSC codec's kind segments.
+      if (/^(config|set param|reset|preset)\b/.test(line) || /^\/sk\/.*\/(cfg|param)\//.test(line)
+        || /^\/sk\/dev\/(reset|preset)\b/.test(line)) renderSurface();
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       if (historyPos > 0) input.value = history[--historyPos] ?? '';
@@ -135,7 +151,7 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
     });
     slider.addEventListener('change', async () => {
       out.textContent = Number(slider.value).toPrecision(4);
-      await model.send(`set param ${p.name} ${deck} ${slider.value}`, { quiet: true });
+      await model.setParam(p.name, deck, Number(slider.value), { quiet: true });
     });
     return el('div', { class: 'row' },
       el('label', {}, `${p.name}${p.scope === 'deck' ? ` ${deck}` : ''}`),
@@ -144,10 +160,10 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
       el('button', {
         class: 'link',
         onclick: async () => {
-          const v = await model.send(`get param ${p.name} ${deck}`, { quiet: true });
+          const v = await model.getParam(p.name, deck, { quiet: true });
           if (v != null) {
-            slider.value = v;
-            out.textContent = Number(v).toPrecision(4);
+            slider.value = String(v);
+            out.textContent = v.toPrecision(4);
           }
         },
       }, 'read'));
@@ -182,7 +198,7 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
     if (descriptor.configs.size) {
       const grid = el('div', { class: 'grid gap-1' });
       for (const c of descriptor.configs.values()) {
-        const sel = el('select', { onchange: () => model.send(`config ${c.name} A ${sel.value}`) },
+        const sel = el('select', { onchange: () => model.setConfig(c.name, 'A', Number(sel.value)) },
           [...c.values.entries()].map(([v, lbl]) => el('option', { value: String(v) }, `${v} - ${lbl}`)));
         grid.append(el('div', { class: 'row' }, el('label', {}, c.name), sel));
       }
@@ -191,20 +207,15 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
 
     // Actions are hand-listed rather than generated: the descriptor cannot express arity or whether a
     // verb is safe to call, which is exactly why docs/dev/terminal-target-b.md tags entries by safety
-    // rather than by category. Anything destructive is confirmed inside the model's send().
+    // rather than by category. `clear` is confirmed inside the model, in either codec.
     const actions = el('div', { class: 'actions' });
     for (const deck of decks) {
-      for (const [label, cmd] of [
-        [`gate ${deck}`, `gate ${deck}`],
-        [`play ${deck}`, `pad play ${deck}`],
-        [`rec ${deck}`, `pad rec ${deck}`],
-        [`stop ${deck}`, `pad stop ${deck}`],
-        [`clear ${deck}`, `pad clear ${deck}`],
-      ]) {
+      actions.append(el('button', { onclick: () => model.gate(deck) }, `gate ${deck}`));
+      for (const action of ['play', 'rec', 'stop', 'clear']) {
         actions.append(el('button', {
-          class: isDestructive(cmd) ? 'danger' : '',
-          onclick: () => model.send(cmd),
-        }, label));
+          class: action === 'clear' ? 'danger' : '',
+          onclick: () => model.pad(action, deck),
+        }, `${action} ${deck}`));
       }
     }
     surface.append(el('h4', {}, 'Actions'), actions);
@@ -217,8 +228,7 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
           el('label', {}, q.name),
           el('button', {
             onclick: async () => {
-              const r = await model.send(`query ${q.name} ${q.scope === 'deck' ? 'A' : ''}`.trim(),
-                { quiet: true });
+              const r = await model.queryValue(q.name, q.scope === 'deck' ? 'A' : '');
               value.textContent = r == null ? 'err' : queryLabel(q, r);
             },
           }, 'read'),
@@ -241,6 +251,11 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
     connectBtn.textContent = s.connected ? 'Disconnect' : 'Connect';
     allPortsBtn.hidden = !s.offerAllPorts;
     input.disabled = !s.connected;
+    codecSelect.value = s.codec;
+    codecSelect.disabled = s.connected;
+    // The console's vocabulary changes with the codec - `set param speed a 0.5` against
+    // `/sk/a/param/speed 0.5` - so the placeholder is the model's, not a constant.
+    input.placeholder = `type a command, e.g. ${s.example}   (Tab completes, Up recalls)`;
     renderConsole(s.lines);
 
     if (s.descriptor !== lastDescriptor) {
@@ -285,7 +300,7 @@ export function mountTerminal(root: HTMLElement, _ctx: ViewContext): void {
   // The prose and the "no terminal in releases" callout are in index.html; what is built here is the
   // console, the live panels, and the one message that depends on the BROWSER rather than being static.
   append(mountPoint(root), [
-    el('div', { class: 'controls' }, connectBtn, allPortsBtn, status),
+    el('div', { class: 'controls' }, connectBtn, codecSelect, allPortsBtn, status),
     !model.supported() && el('div', { class: 'callout' },
       el('strong', {}, 'This browser has no WebSerial. '),
       'Talking to hardware needs Chrome or Edge - and unlike the card screens there is no fallback '

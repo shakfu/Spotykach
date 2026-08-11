@@ -1,7 +1,7 @@
 # web/ - the sk-engines browser front end
 
 A static page: what sk-engines is, a browsable catalogue of its engines, SD card tools, and a WebSerial
-terminal for `TERMINAL=1` builds. TypeScript bundled by [bun](https://bun.sh) and CSS built by
+terminal for `TERMINAL=1` builds — in either codec, line-ASCII or `OSC=1`. TypeScript bundled by [bun](https://bun.sh) and CSS built by
 [Tailwind](https://tailwindcss.com); both are build-time only, and both artifacts are committed, so
 there is no server and nothing to install to *serve* the page. **Re**building it is another matter:
 `make web-build` needs the dev dependencies, so run `bun install` in this directory first — without it
@@ -133,12 +133,15 @@ src/
     zip.ts         a dependency-free ZIP writer (compression is a port)
     protocol.ts    line framing + the describe model
     device.ts      the command API, over any transport
+    osc.ts         SLIP framing + the OSC 1.0 wire format, pure
+    oscdevice.ts   the same command API over OSC, for TERMINAL=1 OSC=1 builds
+    client.ts      one device surface over either codec, so the UI need not choose
     image.ts       what a firmware .bin is, from its bytes - and what must not be flashed
     dfu.ts         the DFU 1.1 + DFuSe download sequence, with no USB API in it
   platform/   the five browser APIs, and only these files may touch them
     cardsource.ts  File System Access / drag-drop / <input webkitdirectory>
     audio.ts       decodeAudioData -> OfflineAudioContext
-    serial.ts      WebSerial
+    serial.ts      WebSerial - lines, and SLIP frames for the OSC codec
     download.ts    saving a file, and CompressionStream
     clock.ts       setInterval
     usb.ts         WebUSB, for DFU

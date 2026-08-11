@@ -5,21 +5,19 @@
 # via scripts/fetch_csound.sh / fetch_chuck.sh. That is tens of minutes per engine and would dominate
 # every push, for two engines whose sources change rarely.
 #
-# Run it manually (Actions -> this workflow -> Run workflow) before tagging a release, or after
-# touching src/engine/{csound,chuck}/, the fetch scripts, or anything in the QSPI boot path
-# (linker/alt_qspi*.lds, src/engine/csound/spotykach_qspi_vtor.cpp). The weekly schedule that would
-# catch an upstream Csound/ChucK change breaking the cross-build without anyone asking is commented
-# out for now; see `on:` below.
+# It runs on a weekly schedule - which is what notices an upstream Csound/ChucK change breaking the
+# cross-build without anyone asking - and on demand (Actions -> this workflow -> Run workflow). Dispatch
+# it by hand before tagging a release, or after touching src/engine/{csound,chuck}/, the fetch scripts,
+# or anything in the QSPI boot path (linker/alt_qspi*.lds, src/engine/csound/spotykach_qspi_vtor.cpp).
 name: QSPI engines (csound, chuck)
 
-# MANUAL ONLY for now, deliberately - see the same note in ci.yml. The weekly schedule is written out
-# and commented rather than deleted; uncomment it once a manual run has gone green, since noticing an
-# upstream Csound/ChucK change that breaks the cross-build is the reason to have a schedule at all.
+# Not on push/PR, unlike ci.yml: the cross-build is tens of minutes per engine and these two sources
+# change rarely. The schedule is the safety net; the dispatch is the deliberate pre-release check.
 on:
   workflow_dispatch:
-  # schedule:
-  #   # Mondays 04:00 UTC. Nothing here is time-sensitive; the point is to notice upstream drift.
-  #   - cron: "0 4 * * 1"
+  schedule:
+    # Mondays 04:00 UTC. Nothing here is time-sensitive; the point is to notice upstream drift.
+    - cron: "0 4 * * 1"
 
 concurrency:
   group: qspi-${{ github.ref }}

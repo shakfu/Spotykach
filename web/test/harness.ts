@@ -32,6 +32,25 @@ export function test(name: string, fn: () => unknown | Promise<unknown>): void {
 
 export class AssertionError extends Error {}
 
+/**
+ * Thrown by `skip()`. Reported separately from a pass, because a test that quietly passes when its
+ * input is missing is worse than no test - it reads as coverage that is not there.
+ */
+export class SkipTest extends Error {}
+
+/**
+ * Abandon this test because a precondition outside the suite is not met.
+ *
+ * The same arrangement as `tools/conftest.py`, which skips cleanly when no device is attached. Here
+ * the missing thing is a build artifact: the OSC suite decodes a describe bundle emitted by the real
+ * firmware code path (`host/build/describe_osc_sample.bin`), so it needs `make -C host test` to have
+ * run. CI runs the host suites before this one for exactly that reason; a developer running
+ * `bun test/run.ts` alone gets a skip and a sentence saying what to build.
+ */
+export function skip(reason: string): never {
+  throw new SkipTest(reason);
+}
+
 export function ok(cond: unknown, msg = 'expected a truthy value'): asserts cond {
   if (!cond) throw new AssertionError(msg);
 }
@@ -143,19 +162,24 @@ export function entriesFromCase(caseData: FixtureCase) {
 export async function run(): Promise<number> {
   let passed = 0;
   const failures: Array<{ t: TestCase; e: unknown }> = [];
+  const skipped: Array<{ t: TestCase; why: string }> = [];
   for (const t of tests) {
     try {
       await t.fn();
       passed++;
     } catch (e) {
-      failures.push({ t, e });
+      if (e instanceof SkipTest) skipped.push({ t, why: e.message });
+      else failures.push({ t, e });
     }
   }
+  for (const { t, why } of skipped) console.log(`SKIP  ${t.file} :: ${t.name}\n  ${why}`);
   for (const { t, e } of failures) {
     console.error(`FAIL  ${t.file} :: ${t.name}\n  ${(e as Error).message}`);
     if (!(e instanceof AssertionError)) console.error((e as Error).stack);
   }
   const total = tests.length;
-  console.log(`\n${passed}/${total} passed${failures.length ? `, ${failures.length} FAILED` : ''}`);
+  console.log(`\n${passed}/${total} passed`
+    + `${skipped.length ? `, ${skipped.length} skipped` : ''}`
+    + `${failures.length ? `, ${failures.length} FAILED` : ''}`);
   return failures.length ? 1 : 0;
 }

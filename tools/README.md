@@ -25,8 +25,11 @@ tools/
     semantic.py          # the host-side semantic address tier, generated from describe
     oscdevice.py         # OscDevice: the same command API over the OSC codec
   skterm.py              # interactive REPL (describe-driven completion, macros)
+  skbridge.py            # UDP <-> SLIP-serial relay, so TouchOSC/Max/Pd can reach the device
   conftest.py            # pytest fixtures: device, descriptor, test_mode
   test_generic.py        # cross-engine parameter sweep driven by describe
+  test_bridge.py         # the bridge: pure framing, plus the real loop against a pty
+  test_liblo_conformance.py  # our bytes vs liblo's - the only check by a foreign implementation
   test_tape.py           # example per-engine test
   test_descriptor.py     # parser check against real firmware output - NO device needed
   test_osc_codec.py      # OSC codec + semantic translator - NO device needed

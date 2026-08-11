@@ -589,6 +589,30 @@ log output as `/sk/log ,s` in its own SLIP frames. **(b)** is right - it keeps `
 a Max patch somewhere to show firmware logs - but (a) is the acceptable phase-1 shortcut. This problem
 does not exist in the line build.
 
+> **Resolved 2026-08-11: option (b) is implemented.** `OSC=1 DEBUG=1` used to be a hard Makefile error;
+> it now builds and works. Implementation is [`src/terminal/osc_log.cpp`](../../src/terminal/osc_log.cpp),
+> with the `LOG_TAGGED` reroute in `src/common.h`.
+>
+> The guarantee has two halves, and both are needed. The Makefile points the Logger at `LOGGER_NONE` on
+> an OSC build, so anything still calling `Log::Print*` directly is **discarded rather than allowed to
+> corrupt the stream**; and `LOG_TAGGED` goes to `osc_log_printf`, which emits one `/sk/log ,s` message
+> per line in its own frame. Gated on `INFS_LOG` exactly as the Logger path is, so the two codecs agree
+> about when logging exists at all and a release image does not start emitting frames the line build
+> suppressed.
+>
+> Three properties worth knowing:
+>
+> - **Logs never displace a reply.** A line is emitted only if the TX FIFO has its encoded size *plus a
+>   1 KB reserve* free, and is dropped whole otherwise - never half-written, which would corrupt the
+>   frame after it. The reserve deliberately does not also protect a `describe` bundle (~6 KB of the
+>   8 KB FIFO): reserving for that would mean never logging.
+> - **One message is held from before the terminal exists.** `LOG_TAGGED("boot", ...)` runs in `app.cpp`
+>   *before* `_terminal.init()`, and the banner is the single most useful line to see on the channel, so
+>   the first pre-init line is stashed and flushed at bind. A later flood cannot evict it.
+> - **Clients must skip `/sk/log`** exactly as they skip `[tag]` lines on the line codec, or a log frame
+>   is returned as a reply. Both clients do: `tools/skdev/oscdevice.py` (with an optional `log_sink`)
+>   and `web/src/core/oscdevice.ts`.
+
 ## Type coercion
 
 The one place OSC is more permissive than the line codec, because control surfaces are inconsistent about

@@ -2,15 +2,69 @@
 
 Deferred work, in priority order (highest first). See `docs/` for the platform/engine design and `CHANGELOG.md` for done work.
 
-- [ ] add web controls in the web frontend to control the OSC layer / protocol.
-      (The OSC codec itself is **built** as of 2026-08-09 — `make ENGINE=<e> TERMINAL=1 OSC=1`, see the
-      P7 section below. What this item wants is the browser end, and it is not a small addition: the web
-      front-end talks to nothing today, and a browser cannot open a USB CDC serial port without WebSerial
-      (Chromium only, requires a user gesture per connection, and no Safari). Decide that first — the
-      realistic options are WebSerial with a graceful "unsupported browser" path, or a small local bridge
-      process the page talks to over a WebSocket. The address space and the semantic tier are already
-      generated host-side by `tools/skdev/semantic.py`, so whichever transport wins, the naming work is
-      done.)
+- [x] **`/sk/log` framing — DONE 2026-08-11; `OSC=1 DEBUG=1` builds and works.** The last open P7 item.
+      Was a hard Makefile error (the spec's "acceptable phase-1 shortcut"); now the spec's option (b),
+      one `/sk/log ,s` message per line in its own SLIP frame. Two halves: the Logger goes to
+      `LOGGER_NONE` on an OSC build so a stray `Log::Print*` cannot corrupt the stream, and `LOG_TAGGED`
+      routes to the framed path — gated on `INFS_LOG` so both codecs agree about when logging exists.
+      Logs never displace a reply (1 KB reserve, dropped whole rather than half-written), and one line
+      is held from before the terminal exists so the boot banner survives. Costs nothing in a release
+      image (gc-sections drops it; zero `osc_log` symbols in the ELF); ~1.7 KB with `DEBUG=1`.
+      Host-verified (`make -C host test-terminal-osc`, new `test_log()`); **not flashed** — the bench
+      pass should confirm the banner arrives and that a DEBUG build's logs do not disturb a sweep.
+
+- [x] **OSC could not be reached by any OSC software — FIXED 2026-08-11 (`tools/skbridge.py`).**
+      Raised as an objection to the item below, and a correct one: TouchOSC, Max, Pd and `oscsend` all
+      speak OSC over **UDP**, the device has no network interface, and there was no bridge. `make tosc`
+      was generating TouchOSC layouts with nothing to plug them into. The relay translates framing only
+      (UDP is datagram-delimited, SLIP delimits a byte stream), so it needs no maintenance as the
+      address space grows. `docs/dev/tosc.md` now documents the connection procedure it was missing.
+
+      Also added `tools/test_liblo_conformance.py`, the only check here by an OSC implementation nobody
+      on this project wrote. liblo serialises **byte-identically** to us; liblo accepts all 24 rows of
+      the real firmware describe bundle; and liblo's own sender reaches a pty through the bridge. One
+      genuine divergence found and now pinned in `host/test_terminal_osc.cpp`: liblo cannot omit the
+      type-tag string, so a third-party read arrives as an empty `,` where ours has none at all — both
+      mean zero arguments, and that had been accidental rather than asserted.
+
+      **Still unproven: none of this has met real hardware or real TouchOSC.** The bridge is tested
+      against a pty, which is a faithful stand-in for the byte stream and says nothing about a real CDC
+      endpoint under load. Folds into the P2/P6 bench session.
+
+- [x] **add web controls in the web frontend to control the OSC layer / protocol — DONE 2026-08-11
+      (host-verified; no browser or device pass yet).**
+      The parenthetical this item used to carry was stale and made the job look bigger than it was: it
+      said the web front-end "talks to nothing today" and that the WebSerial-vs-bridge transport
+      question had to be decided first. Both were already settled — `web/src/platform/serial.ts` is a
+      working WebSerial transport with an explicit unsupported-browser path, shipped as P6. What was
+      actually missing was that the page had **zero** OSC: it spoke line-ASCII only.
+
+      Now built, in four layers, each a port of its `tools/skdev/` counterpart so the two front-ends
+      stay diffable against the same reference:
+      - `web/src/core/osc.ts` — SLIP framing + the OSC 1.0 wire format (from `skdev/osc.py`).
+      - `web/src/core/oscdevice.ts` — the client, same method surface as `Device` (from
+        `skdev/oscdevice.py`), reducing the describe bundle to the identical `Descriptor` the line
+        codec's `parseDescribe` produces.
+      - `web/src/platform/serial.ts` — `OscSerialTransport`, a SLIP frame pipe on the same port, behind
+        the new `FrameTransport` port.
+      - `web/src/core/client.ts` + `TerminalModel` — one `DeviceClient` surface over either codec, so
+        the generated control surface stops composing line-codec command strings and drives named
+        operations instead. That was the real blocker: `set param speed A 0.5` is not a different
+        spelling of an OSC request, it is not a request at all.
+
+      The codec is chosen before connecting (a dropdown beside Connect) and locked during a session,
+      because it is a property of the firmware, not the connection. The free-text console accepts OSC
+      addresses on an OSC build (`/sk/a/param/speed 0.5`) and refuses line commands with a message
+      saying so — deliberately NOT translating them, since that would be a second hand-written copy of
+      the composition rules `scripts/sk_osc.py` derives from the firmware tables.
+
+      **Verification: host only.** 284/284 under `make test-web`, including 15 codec tests and the
+      client/model suites, which decode `host/build/describe_osc_sample.bin` — real firmware bytes from
+      `host/test_terminal_osc.cpp`, not a hand-written fixture. Not yet exercised in a browser or
+      against hardware; that folds into the P6 browser pass, which now has a second codec to walk.
+
+      Still open: the **semantic tier** (`/radio/a/station`) is generated host-side by
+      `tools/skdev/semantic.py` and has no browser equivalent — the page binds generic addresses only.
 
 ## Done 2026-08-08 — the review's host-verifiable items
 
@@ -21,12 +75,17 @@ Closed out from `REVIEW.md`; see the sections below for what remains.
       `csound`/`chuck` are in `qspi-libs.yml` because each cross-builds a large runtime first. This is
       the standing answer to the `chorus`/`pstretch` class of breakage (an engine that stops linking
       and nobody notices) and to P5's CMake drift.
-      - [ ] **Arm the automatic triggers.** Both workflows are `workflow_dispatch`-only for an initial
-            period; the push/PR and weekly blocks are written out and commented in each file. Dispatch
-            each once from the Actions tab, confirm green, then uncomment. **Until this is done the
-            safety net is not actually deployed** — the whole value of CI is that it runs on a commit
-            nobody thought to check. First likely friction on a real runner: the
-            `carlosperate/arm-none-eabi-gcc-action` pin (`10-2020-q4`, matching the local 10.2.1).
+      - [x] **Arm the automatic triggers — done 2026-08-11 (armed; first real run still unobserved).**
+            `ci.yml` now fires on `push` to any branch and on `pull_request`; `qspi-libs.yml` keeps its
+            deliberate manual-only stance for push/PR but has the Monday 04:00 UTC `schedule`
+            uncommented. Both files parse and carry the intended trigger sets.
+            **Caveat — neither workflow has yet completed a run on a GitHub runner.** The original plan
+            was dispatch-then-uncomment; arming first means the next push IS the first run, so watch it.
+            First likely friction: the `carlosperate/arm-none-eabi-gcc-action` pin (`10-2020-q4`,
+            matching the local 10.2.1). Second: a PR from a same-repo branch matches both `push` and
+            `pull_request` and the `concurrency` groups differ by ref, so it costs two full matrix runs
+            — narrow the `push` branches if that bites. Note also that GitHub disables `schedule` on a
+            repo with 60 days of no activity, so a quiet period silently retires the weekly QSPI check.
 - [x] **`Divider::_triplets_on` was never initialized** — omitted from the constructor's init list and
       with no default member initializer, so it read as indeterminate. Masked on target by `.bss`
       zeroing (every Divider lives inside the file-static `AppImpl`), live UB on the host, and the
@@ -72,7 +131,8 @@ Closed out from `REVIEW.md`; see the sections below for what remains.
       off-target, and why `test_engine_params`'s `transport.tick(false)` calls were doing nothing.
 
 **Still open from the review** (each needs a bench, not typing): the P2 session, which everything
-hardware-gated funnels into — and arming CI's automatic triggers, above.
+hardware-gated funnels into. CI's automatic triggers were armed 2026-08-11, so the only thing left
+there is watching the first real run go green.
 
 > **Update 2026-08-01 - the bench session is now instrumented.** This file was written as if P2 could > only be a manual listening pass. That predates the USB-C terminal channel, which was fixed and verified > on hardware 2026-07-31 (root cause: the panel jack is on OTG_HS, not OTG_FS - see > [`terminal-impl.md`](docs/dev/terminal-impl.md)). Two things landed since, both host-verified: > > - **`query cpu` / `cpumin` / `cpumax` + `reset cpu`** - the platform's `CpuLoadMeter` is now readable >   over the channel, so P2's headroom numbers are `reset cpu` -> drive the engine -> `query cpumax`, >   scripted per engine. Previously the meter needed `METER=1`, which brings up a second USB device on >   the same OTG core the terminal uses - the numbers and the channel that would collect them were >   mutually exclusive. > - **`live_params()`/`live_configs()` on every engine** - the stated blocker on `make test-hw`. The >   generic sweep no longer sets params engines ignore, so the mechanical half of P2 can run unattended. > > Neither is hardware-verified yet; both fold into the P2 session. > > **And one regression found on the way - now FIXED and hardware-verified.** `pstretch` had stopped > building entirely: not "cannot host the terminal" but no link at all, terminal or not, at either > window (`region SRAM overflowed by 80576 bytes` on the committed `v0.6.1` tree). Commit `993210f` > moved 114K from the data `SRAM` region into `SRAM_EXEC` (186K -> 300K) so the channel would fit > everywhere; pstretch's FFT working set needed 297664 B of exactly that region. > > Fixed with a per-engine linker script, `linker/alt_sram_pstretch.lds` (200K/312K instead of > 300K/212K), selected automatically on `ENGINE=pstretch` so a plain `make ENGINE=pstretch` is correct > too. Same approach and precedent as `linker/alt_qspi_chuck.lds`, and it leaves the other 20 engines on > the 300K split untouched. **All three pstretch images flashed and confirmed working on hardware > 2026-08-01** (8192 with and without the terminal, and 4096 with it) - so the moved code/data boundary > boots, which a link check could not have established. > > **P2 is therefore no longer purely pending - its first engine is measured.** `make test-hw` ran > against real hardware for the first time (`30 passed, 3 skipped`), and pstretch has CPU numbers: >
 > | | WINDOW=8192 | WINDOW=4096 |
@@ -94,8 +154,8 @@ Priority is driven less by size than by what unblocks/gates what, and by whether
 | P3 | Refactor delay engine onto shared primitives (by ear) | med | med-high | **hardware flash** | none (primitives in `dsp/`); folds into P2 |
 | P4 | Tape wow/flutter: try quadratic curve + lower maxima | trivial | low | **flash** (by ear) | none (optional voicing); folds into P2 |
 | P5 | Finish or back out the CMake adoption (now merged to `main`, incomplete) | high | high | flash + cleanup | strategic; three build-system files straddle `main` |
-| P6 | Web front-end: browser SD card builder + WebSerial terminal (**built**; needs a real-browser pass) | done | low | **browser + flash** | code done, and the browser pass is now a scripted checklist ([`docs/dev/web-frontend-checks.md`](docs/dev/web-frontend-checks.md)) rather than an exploratory afternoon; open decision on shipping `TERMINAL=1` releases is unchanged |
-| P7 | OSC codec for the terminal channel (`SPK_TERMINAL_OSC`) — **built + hardware-verified 2026-08-09** (63/63 cross-codec parity on `tape`) | done | low | — | gate resolved: `TERMINAL=1` ships. Remaining: `/sk/log` framing so `DEBUG=1` can coexist with SLIP; `param_label()` for other engines if wanted |
+| P6 | Web front-end: browser SD card builder + WebSerial terminal, now **both codecs** (**built**; needs a real-browser pass) | done | low | **browser + flash** | code done, and the browser pass is now a scripted checklist ([`docs/dev/web-frontend-checks.md`](docs/dev/web-frontend-checks.md)) rather than an exploratory afternoon; the checklist gained an OSC walkthrough 2026-08-11, so the pass now covers two codecs; open decision on shipping `TERMINAL=1` releases is unchanged |
+| P7 | OSC codec for the terminal channel (`SPK_TERMINAL_OSC`) — **built + hardware-verified 2026-08-09** (63/63 cross-codec parity on `tape`) | done | low | — | gate resolved: `TERMINAL=1` ships. Remaining: `param_label()` for other engines if wanted; the semantic tier has no browser equivalent. **UDP reach solved 2026-08-11** by `tools/skbridge.py`, and conformance against liblo is now asserted rather than assumed |
 
 ---
 
@@ -242,8 +302,10 @@ Levers are the three lines above; re-tune and `make faust-gen` (regenerates `fau
 > so the drift is caught mechanically; the liability was never having two build systems, it was having
 > no forcing function.
 >
-> **Conditional:** both workflows are `workflow_dispatch`-only for now, so nothing runs unasked. Arming
-> the push trigger is what makes this decision real — until then it rests on someone pressing a button.
+> **Condition met 2026-08-11:** `ci.yml` now runs on push and pull request, so the CMake parity matrix
+> is a forcing function rather than a button someone has to remember. (`qspi-libs.yml` stays off
+> push/PR by design, on a weekly schedule.) One caveat: neither workflow has yet completed a run on a
+> GitHub runner, so the first push is also the first proof.
 >
 > **Explicitly NOT adopted:** item 4 below, the compiler-enforced platform/engine boundary, which was
 > the original headline justification. Without it CMake rides along for its per-engine cached build dirs

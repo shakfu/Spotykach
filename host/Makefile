@@ -62,7 +62,7 @@ TERMINAL_SRC = $(ROOT)/src/terminal/dispatch.cpp $(ROOT)/src/terminal/fmt.cpp \
 # SLIP framing, the OSC wire format, address -> verb synthesis and the typed reply sink all run here.
 # slip.h / osc.h / osc_sink.h are header-only or built by these three TUs.
 TERMINAL_OSC_SRC = $(ROOT)/src/terminal/osc_decode.cpp $(ROOT)/src/terminal/osc_encode.cpp \
-                   $(ROOT)/src/terminal/osc_addr.cpp
+                   $(ROOT)/src/terminal/osc_addr.cpp $(ROOT)/src/terminal/osc_log.cpp
 # qdelay flavor: its feedback diffuser is the header-only src/dsp/diffuser.h, so just the engine .cpp.
 QDELAY_SRC  = $(ROOT)/src/engine/qdelay/qdelay_engine.cpp
 EDRUMS_SRC  = $(ROOT)/src/engine/edrums/edrums_engine.cpp

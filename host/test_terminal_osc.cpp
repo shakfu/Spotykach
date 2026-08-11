@@ -270,6 +270,21 @@ void test_wire() {
         check(p.argc() == 0, "and carries no arguments");
     }
     {
+        // The read form as a THIRD-PARTY client spells it. liblo - and python-osc, and Max, and
+        // TouchOSC - always emit a type-tag string, so a read from any of them arrives as an EMPTY
+        // one (",") rather than as none at all. Verified against liblo 7 via ctypes: serialising a
+        // message with no arguments yields ",\0\0\0" where this codec's own encoder emits nothing.
+        //
+        // Both must mean zero arguments, or every read from every standard OSC client fails while the
+        // in-house clients pass - and it would fail as `unknown-address`-shaped silence, not as an
+        // obvious rejection. The two spellings converge here because the tag loop below simply never
+        // executes on an empty tag string; this check is what stops that becoming accidental.
+        Msg m("/sk/a/param/speed", "");
+        OscMessage p;
+        check(p.parse(m.data(), m.size()), "an EMPTY typetag string (\",\") parses - liblo's spelling");
+        check(p.argc() == 0, "and is also a read");
+    }
+    {
         Msg m("/sk/midi/msg", "iii");
         m.i(144).i(60).i(100);
         OscMessage p;
@@ -764,6 +779,88 @@ void test_describe() {
     }
 }
 
+
+// --- 11. /sk/log framing -----------------------------------------------------------------------------
+
+void test_log() {
+    std::printf("log framing (/sk/log)\n");
+    {
+        // The whole point of option (b): a log line is a PACKET, in its own SLIP frame, so it can
+        // never land inside a reply. Before this, `OSC=1 DEBUG=1` was a build error.
+        StringOut out;
+        osc_log_bind(&out);
+        osc_log_printf("[%s] %s", "boot", "spotykach 0.6.1");
+        osc_log_bind(nullptr);
+
+        auto frames = slip_frames(out.s);
+        check(frames.size() == 1, "one log line is one frame");
+        if (frames.size() == 1) {
+            OscMessage m;
+            check(m.parse(reinterpret_cast<const uint8_t*>(frames[0].data()), frames[0].size()),
+                  "the log frame is a valid OSC message");
+            check_eq(m.address(), "/sk/log", "log address");
+            check(m.argc() == 1, "one argument");
+            const char* text = m.as_str(0);
+            check_eq(text ? text : "", "[boot] spotykach 0.6.1", "the line is carried verbatim");
+        }
+    }
+    {
+        // Interleaving is the failure this replaces. Two logs around a reply must come out as three
+        // separate frames, in order - not as bytes spliced into the middle of the reply.
+        StringOut out;
+        osc_log_bind(&out);
+        osc_log_printf("before");
+        OscSink sink(out);
+        sink.begin_request("/sk/a/param/speed", false);
+        sink.expect_reply(true);
+        sink.ok_f32(0.5f);
+        sink.finish();
+        osc_log_printf("after");
+        osc_log_bind(nullptr);
+
+        auto frames = slip_frames(out.s);
+        check(frames.size() == 3, "log, reply and log are three distinct frames");
+        if (frames.size() == 3) {
+            OscMessage a, b, c;
+            a.parse(reinterpret_cast<const uint8_t*>(frames[0].data()), frames[0].size());
+            b.parse(reinterpret_cast<const uint8_t*>(frames[1].data()), frames[1].size());
+            c.parse(reinterpret_cast<const uint8_t*>(frames[2].data()), frames[2].size());
+            check_eq(a.address(), "/sk/log", "first frame is the log");
+            check_eq(b.address(), "/sk/reply/a/param/speed", "the reply is intact between them");
+            check_eq(c.address(), "/sk/log", "third frame is the log");
+        }
+    }
+    {
+        // A log must never displace a reply. With the FIFO nearly full the line is dropped whole -
+        // never half-written, which would corrupt the frame that follows it.
+        BoundedOut tiny(64);
+        osc_log_bind(&tiny);
+        osc_log_printf("this line has nowhere to go");
+        osc_log_bind(nullptr);
+        check(tiny.s.empty(), "a log with no room is dropped whole, not truncated");
+    }
+    {
+        // The boot banner is logged before the terminal exists (app.cpp logs it, then calls
+        // _terminal.init()), so one message is held and flushed at bind. Without this the single most
+        // useful line never reaches the channel.
+        osc_log_bind(nullptr);
+        osc_log_printf("[boot] early");
+        osc_log_printf("[boot] later");
+        StringOut out;
+        osc_log_bind(&out);
+        osc_log_bind(nullptr);
+        auto frames = slip_frames(out.s);
+        check(frames.size() == 1, "exactly the one stashed line is flushed at bind");
+        if (frames.size() == 1) {
+            OscMessage m;
+            m.parse(reinterpret_cast<const uint8_t*>(frames[0].data()), frames[0].size());
+            const char* text = m.as_str(0);
+            // The FIRST line is kept, not the last: a later flood must not evict the banner.
+            check_eq(text ? text : "", "[boot] early", "the first pre-init line is the one kept");
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -778,6 +875,7 @@ int main() {
     test_errors();
     test_bundles();
     test_describe();
+    test_log();
 
     if (g_failures == 0) { std::printf("OK: all OSC checks passed\n"); return 0; }
     std::printf("FAILED: %d check(s)\n", g_failures);

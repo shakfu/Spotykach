@@ -223,7 +223,7 @@ There are two independent suites: one that runs on your machine, and one that dr
 
 Both, plus a build of every engine, run in [CI](.github/workflows/ci.yml): 22 firmware builds through the canonical `make` path (20 engines, and `TERMINAL=1` on two of them because that flag changes type layout), the four off-target suites, and a CMake build of the six engines whose flags are not vanilla — the only thing keeping the opt-in CMake path from drifting away from the Makefile. `csound` and `chuck` each have to cross-build a large runtime first, so they sit in a separate workflow ([`qspi-libs.yml`](.github/workflows/qspi-libs.yml)).
 
-Both workflows are currently **`workflow_dispatch` only** — run them from the repository's Actions tab. The push/PR and weekly triggers are written out and commented in each file, to be enabled once a manual run has gone green on a real runner. Until then the automatic safety net is off, so `make test` locally is still the thing standing between a change and a broken engine.
+`ci.yml` runs on **every push and pull request** (and on demand from the Actions tab). `qspi-libs.yml` stays off push/PR deliberately — a run cross-builds two large runtimes — and instead runs **weekly**, on Mondays at 04:00 UTC, plus on demand; dispatch it by hand before tagging a release or after touching the QSPI boot path. Running `make test` locally is still worth it as the fast first check, but it is no longer the only thing standing between a change and a broken engine.
 
 ### Off-target (no hardware)
 

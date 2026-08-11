@@ -20,10 +20,12 @@ forcing function, and that is the part that was missing.
 So: **both stay.** The Makefile is canonical — it is what `make`, the README, the release script and
 every hardware-verified image use. CMake is *supported*, at parity, and CI keeps it there.
 
-**This decision is conditional, and the condition is not yet met.** Both workflows currently ship
-`workflow_dispatch`-only (see the note in `ci.yml`), so nothing runs unasked. Until the push trigger is
-armed, this decision rests on someone remembering to press a button — which is the state it was
-supposed to replace. **Arm CI, or revisit this.**
+**This decision was conditional on CI running unasked, and that condition was met 2026-08-11.**
+`ci.yml` now fires on push and pull request, so the CMake parity matrix catches divergence
+mechanically rather than resting on someone remembering to press a button. (`qspi-libs.yml` is still
+dispatch-plus-weekly by design; it builds no CMake target.) Caveat: neither workflow has yet completed
+a run on a GitHub runner, so the first push is also the first proof — if it turns out misconfigured,
+this decision is back to resting on a button until it is fixed.
 
 **What is being given up.** TODO P5's headline justification for adopting CMake was item 4: per-target
 `target_include_directories(... PRIVATE)` making a platform→engine include a *compile error* instead of

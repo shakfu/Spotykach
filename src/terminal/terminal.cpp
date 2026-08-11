@@ -8,6 +8,7 @@
 #include "terminal/dispatch.h"
 
 #if SPK_TERMINAL_OSC
+#include "terminal/osc.h"        // osc_log_bind - the /sk/log path (osc_log.cpp)
 #include "terminal/osc_addr.h"
 #include "terminal/osc_sink.h"
 #endif
@@ -66,6 +67,18 @@ void Terminal::RxTrampoline(uint8_t* buf, uint32_t* len) {   // USB IRQ context
 
 void Terminal::init(IEngine& engine) {
     _engine = &engine;
+
+#if SPK_TERMINAL_OSC && INFS_LOG
+    // Give the log path somewhere to write. Done FIRST, before the USB bring-up below, so a line
+    // logged during init is framed rather than lost - and so the one message stashed from before the
+    // terminal existed (the boot banner, logged in app.cpp just above `_terminal.init()`) flushes at
+    // the earliest possible point. See osc_log.cpp.
+    //
+    // Gated on INFS_LOG as well, matching the LOG_TAGGED macro: without it nothing can ever call
+    // osc_log_printf, and leaving this call in would anchor the whole log path (buffers included)
+    // against --gc-sections for no reason. A release image pays nothing for a feature it cannot use.
+    osc_log_bind(this);
+#endif
 
     // Probe the clock/supply preconditions BEFORE the device is brought up, while they still reflect
     // what the boot path left behind. See usb_diag.h for why this is not answerable from source alone.

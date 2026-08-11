@@ -17,22 +17,22 @@
 # so they live in the separate `qspi-libs.yml` workflow. `mosc` IS built here - it is a QSPI engine
 # but vendors its DSP in-tree and needs no fetch.
 #
-# Note the matrix numbers in the comments below describe what a full run does; while the workflow is
-# manual-only (see `on:`) that is per dispatch rather than per push.
 name: CI
 
-# MANUAL ONLY for now, deliberately. Run it from Actions -> CI -> "Run workflow".
+# Runs automatically on every push and pull request, plus on demand from Actions -> CI -> "Run
+# workflow". The automatic triggers are the whole point of the file: the failures it exists to catch
+# (an engine that silently stops linking) arrive with a commit, not with someone remembering to press
+# a button.
 #
-# The automatic triggers are written out below and commented, not deleted: this workflow has never run
-# on a GitHub runner, and a 28-job matrix that turns out to be misconfigured is a poor thing to
-# discover on every push. Uncomment the two blocks once a manual run has gone green - that is the
-# whole point of the file, since the failures it exists to catch (an engine that silently stops
-# linking) arrive with a commit, not with someone remembering to press a button.
+# Note that a PR from a branch in this repo matches BOTH triggers and the `concurrency` group below
+# does not dedupe them - the push ref (`refs/heads/x`) and the PR ref (`refs/pull/N/merge`) are
+# different groups, so such a PR costs two full matrix runs. Left as-is deliberately; narrow the
+# `push` branches if that becomes expensive.
 on:
   workflow_dispatch:
-  # push:
-  #   branches: ["**"]
-  # pull_request:
+  push:
+    branches: ["**"]
+  pull_request:
 
 # A new run on the same ref supersedes the old one: these matrices are wide and there is no value in
 # finishing a build of code that has already been replaced (or of a dispatch you have just re-issued).
@@ -59,10 +59,21 @@ jobs:
           submodules: recursive
 
       - name: Install Python test deps
-        # Only pytest is actually needed: the suites skip cleanly without sox, and cyfaust/gen-dsp/
-        # cysox are code GENERATORS used by `make faust-gen`, not by the tests. Installing pytest here
-        # also stops `make test-scripts` from pulling the whole `dev` group itself.
-        run: python3 -m pip install --upgrade pytest
+        # pytest and pyserial: the suites skip cleanly without sox, and cyfaust/gen-dsp/cysox are code
+        # GENERATORS used by `make faust-gen`, not by the tests. Installing pytest here also stops
+        # `make test-scripts` from pulling the whole `dev` group itself. pyserial is what lets
+        # `tools/test_bridge.py` drive the real bridge loop against a pty - without it those cases
+        # skip, and the bridge's I/O half goes untested rather than failing visibly.
+        run: python3 -m pip install --upgrade pytest pyserial
+
+      - name: Install liblo
+        # The ONLY check in this repo performed by an OSC implementation nobody here wrote. Everything
+        # else validating the codec - the C++ firmware encoder, the Python client, the TypeScript
+        # client - is in-house, and three implementations by one author agreeing proves they share an
+        # understanding, not that the understanding matches OSC. `tools/test_liblo_conformance.py`
+        # dlopens this and skips cleanly without it, so leaving it uninstalled would quietly delete
+        # the conformance evidence rather than fail.
+        run: sudo apt-get update && sudo apt-get install -y liblo7
 
       - uses: oven-sh/setup-bun@v2
         with:

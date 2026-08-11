@@ -44,15 +44,12 @@ $(error OSC=1 requires TERMINAL=1 - the OSC codec is layer [2] of the terminal c
 Build with `make ENGINE=<e> TERMINAL=1 OSC=1`.)
 endif
 C_DEFS += -DSPK_TERMINAL_OSC=1
-# Logger coexistence is the sharpest constraint OSC adds, and it has no analogue in the line build:
-# the transport shares one CDC device with the Logger, and a `[tag]` log line interleaving with replies
-# is harmless for line-ASCII but FATAL for SLIP, where it lands inside a packet and corrupts the frame.
-# Phase 1 takes the documented shortcut (a) - force INFS_LOG off - rather than (b), wrapping log output
-# as /sk/log frames. Erroring out beats silently dropping DEBUG, which would look like a broken build.
-ifeq ($(DEBUG), 1)
-$(error OSC=1 and DEBUG=1 conflict: Logger output would land inside a SLIP frame and corrupt it. \
-Drop DEBUG=1, or implement the /sk/log framing described in docs/dev/terminal-osc.md.)
-endif
+# Logger coexistence is the sharpest constraint OSC adds, and it has no analogue in the line build: the
+# transport shares one CDC device with the Logger, and a `[tag]` log line interleaving with replies is
+# harmless for line-ASCII but FATAL for SLIP, where it lands inside a packet and corrupts the frame.
+# Resolved 2026-08-11 by the spec's option (b) - log output goes out as `/sk/log ,s` in its own frames
+# (src/terminal/osc_log.cpp) - so `OSC=1 DEBUG=1` now builds and works. It used to be a hard error.
+# The Logger itself is pointed at LOGGER_NONE further down, which is the other half of the guarantee.
 endif
 
 # USB-C bring-up diagnostic (docs/dev/terminal-impl.md). `make ENGINE=<e> TERMINAL=1 USBDIAG=1` blinks
@@ -473,7 +470,18 @@ C_INCLUDES = -Isrc/ -Ilib/ $(RESO_INC) $(MOSC_INC) $(GRAINCLOUD_INC) $(SOFTCUT_I
 # budget without them, so do NOT just rename the var: -ffast-math changes FP semantics (implies
 # -ffinite-math-only, dropping isnan/isinf guards) and -funroll-loops inflates .text (SRAM_EXEC is
 # ~94% full). Enabling fast-math/FTZ is a deliberate, measured, hardware-flashed change - batch with P2.
+ifeq ($(OSC), 1)
+# On an OSC build the Logger must not reach the CDC at all. It writes raw ASCII to the same device the
+# SLIP framing owns, so a log line lands INSIDE a packet - the packet is then neither valid OSC nor
+# recoverable, and it reads as a device that stopped answering rather than one that logged something.
+# LOG_TAGGED is rerouted to `/sk/log` frames (src/terminal/osc_log.cpp, and the macro in src/common.h);
+# pointing the Logger at LOGGER_NONE is the other half, so anything still calling Log::Print* directly
+# is discarded instead of corrupting the stream. That is what makes `OSC=1 DEBUG=1` buildable, which it
+# was not before 2026-08-11.
+C_DEFS += -DINFS_LOG_TARGET=daisy::LOGGER_NONE
+else
 C_DEFS += -DINFS_LOG_TARGET=daisy::LOGGER_EXTERNAL
+endif
 
 CPP_SOURCES = \
 	main.cpp \
@@ -649,13 +657,21 @@ PYTHON ?= $(shell if [ -x "$(CURDIR)/.venv/bin/python" ]; then echo "$(CURDIR)/.
 test-hw:
 	cd tools && $(PYTHON) -m pytest -q $(if $(filter osc,$(CODEC)),--osc,)
 
-# The DEVICE-FREE half of tools/: the describe parser and the OSC codec + semantic translator, both
-# checked against byte samples the off-target C++ tests emit (host/build/describe_sample.txt and
-# describe_osc_sample.bin). Needs neither hardware nor pyserial, so unlike `test-hw` it belongs in CI.
-# Run `make -C host test` first to refresh the samples; both tests skip cleanly without them.
+# The DEVICE-FREE half of tools/: the describe parser, the OSC codec + semantic translator, the
+# UDP<->SLIP bridge, and conformance against liblo. The first two are checked against byte samples the
+# off-target C++ tests emit (host/build/describe_sample.txt and describe_osc_sample.bin); run
+# `make -C host test` first to refresh them, and they skip cleanly without them.
+#
+# None of this needs hardware, so unlike `test-hw` it belongs in CI. Two notes on what it DOES need:
+# test_bridge drives the real bridge loop against a pty, so it wants pyserial and a POSIX pty (it is
+# the one entry here that will not run on Windows); test_liblo_conformance dlopens liblo through
+# ctypes and skips cleanly when it is absent, which is the normal case on a bare runner. liblo is the
+# only check here by an implementation nobody on this project wrote - worth installing (`apt install
+# liblo7` / `brew install liblo`) before trusting a codec change.
 .PHONY: test-tools
 test-tools:
-	$(TEST_PY) -m pytest -q tools/test_descriptor.py tools/test_osc_codec.py
+	$(TEST_PY) -m pytest -q tools/test_descriptor.py tools/test_osc_codec.py \
+	    tools/test_bridge.py tools/test_liblo_conformance.py
 
 # One-shot variant flash: clean -> build -> flash over DFU. Put the device in DFU mode first
 # (hold Reset ~3s until the bottom pad LEDs breathe white), then `make granular` / `make passthrough`.
@@ -1157,7 +1173,7 @@ help:
 	@echo 'Build toggles (append to any build):'
 	@echo '  DEBUG=1        UART logging                LOFI_INT16=1  16-bit loop buffer (2x record time)'
 	@echo '  TERMINAL=1     USB-C command channel       METER=1       CPU-load meter over CDC (excludes TERMINAL)'
-	@echo '  OSC=1          OSC+SLIP codec (needs TERMINAL=1; for a Max/Pd/TouchOSC rig, excludes DEBUG)'
+	@echo '  OSC=1          OSC+SLIP codec (needs TERMINAL=1; for a Max/Pd/TouchOSC rig via tools/skbridge.py)'
 	@echo '  USBDIAG=1      USB bring-up blink codes    WINDOW=<n>    pstretch FFT window (4096/8192)'
 	@echo ''
 	@echo 'Test (off-target, no hardware needed):'

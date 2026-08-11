@@ -5,6 +5,36 @@ layouts generate, validate, round-trip and load. The firmware codec they target 
 hardware-verified ([`terminal-osc.md`](terminal-osc.md)), so the remaining step is a bench session
 rather than a firmware one.
 
+## How a layout reaches the device: run the bridge
+
+**TouchOSC speaks OSC over UDP. The device has no network interface** - it is OSC over SLIP over USB
+CDC, because a Daisy has neither Ethernet nor WiFi. So a layout cannot address the hardware directly,
+and until 2026-08-11 this document generated surfaces with nothing to plug them into.
+
+[`tools/skbridge.py`](../../tools/skbridge.py) is that missing piece - a UDP <-> SLIP-serial relay, the
+same arrangement and for the same reason as monome's `serialosc`. On the machine the device is plugged
+into:
+
+```
+python3 tools/skbridge.py -v            # auto-discovers the port; listens on 8000, replies to 9000
+```
+
+Then in TouchOSC's connection settings: **host** = that machine's address, **send port** = 8000,
+**receive port** = 9000. The bridge learns where to answer from the first packet it receives, so send
+something before expecting a reply; `--reply-host` pins it when the surface and the sender are not the
+same machine.
+
+The relay translates framing only - it never parses or rewrites OSC - so a layout bound to an address
+this document has not heard of works without a bridge change. Confirm the link with liblo before
+opening TouchOSC, which isolates a layout problem from a transport one:
+
+```
+oscsend osc.udp://127.0.0.1:8000 /sk/a/param/speed f 0.5
+```
+
+`tools/test_liblo_conformance.py` runs exactly that path end to end (liblo -> UDP -> bridge -> SLIP)
+against a pty, so the transport is tested even where the layouts are not.
+
 `make tosc` writes a TouchOSC layout per engine, plus one universal layout, into `dist/tosc/`. The
 layouts are built by [`scripts/gen_tosc.py`](../../scripts/gen_tosc.py) from the address model in
 [`scripts/sk_osc.py`](../../scripts/sk_osc.py), using [py2tosc](https://github.com/shakfu/py2tosc)

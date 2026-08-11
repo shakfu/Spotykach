@@ -1899,6 +1899,543 @@ function fmt(v) {
   return String(Number(n.toPrecision(6)));
 }
 
+// src/core/osc.ts
+var END = 192;
+var ESC = 219;
+var ESC_END = 220;
+var ESC_ESC = 221;
+function slipEncode(payload) {
+  const out = new Uint8Array(payload.length * 2 + 2);
+  let n = 0;
+  out[n++] = END;
+  for (const b of payload) {
+    if (b === END) {
+      out[n++] = ESC;
+      out[n++] = ESC_END;
+    } else if (b === ESC) {
+      out[n++] = ESC;
+      out[n++] = ESC_ESC;
+    } else {
+      out[n++] = b;
+    }
+  }
+  out[n++] = END;
+  return out.subarray(0, n);
+}
+
+class SlipDecoder {
+  buf = [];
+  escaped = false;
+  feed(data) {
+    const frames = [];
+    for (const b of data) {
+      if (b === END) {
+        if (this.buf.length)
+          frames.push(Uint8Array.from(this.buf));
+        this.buf = [];
+        this.escaped = false;
+      } else if (this.escaped) {
+        this.buf.push(b === ESC_END ? END : b === ESC_ESC ? ESC : b);
+        this.escaped = false;
+      } else if (b === ESC) {
+        this.escaped = true;
+      } else {
+        this.buf.push(b);
+      }
+    }
+    return frames;
+  }
+  get pending() {
+    return this.buf.length;
+  }
+}
+var oscInt = (n) => ({ __osc: "i", value: Math.trunc(n) });
+var isOscInt = (a) => typeof a === "object" && a !== null && a.__osc === "i";
+var padded = (n) => n + 3 & ~3;
+function encodeString(s) {
+  const bytes = new Uint8Array(padded(s.length + 1));
+  for (let i = 0;i < s.length; i++)
+    bytes[i] = s.charCodeAt(i) & 127;
+  return bytes;
+}
+function encode(address, ...args) {
+  const addr = encodeString(address);
+  if (!args.length)
+    return addr;
+  let tags = ",";
+  let bodyLen = 0;
+  for (const a of args) {
+    if (typeof a === "boolean")
+      tags += a ? "T" : "F";
+    else if (isOscInt(a)) {
+      tags += "i";
+      bodyLen += 4;
+    } else if (typeof a === "number") {
+      tags += "f";
+      bodyLen += 4;
+    } else if (typeof a === "string") {
+      tags += "s";
+      bodyLen += padded(a.length + 1);
+    } else
+      throw new TypeError(`unsupported OSC argument: ${JSON.stringify(a)}`);
+  }
+  const tagBytes = encodeString(tags);
+  const out = new Uint8Array(addr.length + tagBytes.length + bodyLen);
+  out.set(addr, 0);
+  out.set(tagBytes, addr.length);
+  const view = new DataView(out.buffer, out.byteOffset);
+  let off = addr.length + tagBytes.length;
+  for (const a of args) {
+    if (typeof a === "boolean")
+      continue;
+    if (isOscInt(a)) {
+      view.setInt32(off, a.value, false);
+      off += 4;
+    } else if (typeof a === "number") {
+      view.setFloat32(off, a, false);
+      off += 4;
+    } else {
+      const s = encodeString(a);
+      out.set(s, off);
+      off += s.length;
+    }
+  }
+  return out;
+}
+function readString(packet, off) {
+  let end = off;
+  while (end < packet.length && packet[end] !== 0)
+    end++;
+  if (end >= packet.length)
+    throw new Error("malformed OSC packet: unterminated string");
+  let s = "";
+  for (let i = off;i < end; i++)
+    s += String.fromCharCode(packet[i]);
+  return [s, off + padded(end - off + 1)];
+}
+function decode(packet) {
+  const [address, start] = readString(packet, 0);
+  if (start >= packet.length)
+    return { address, args: [] };
+  const [tags, tagEnd] = readString(packet, start);
+  const view = new DataView(packet.buffer, packet.byteOffset, packet.byteLength);
+  const args = [];
+  let off = tagEnd;
+  for (const t of tags.slice(1)) {
+    switch (t) {
+      case "i":
+        args.push(view.getInt32(off, false));
+        off += 4;
+        break;
+      case "f":
+        args.push(view.getFloat32(off, false));
+        off += 4;
+        break;
+      case "d":
+        args.push(view.getFloat64(off, false));
+        off += 8;
+        break;
+      case "s":
+      case "S": {
+        const [s, next] = readString(packet, off);
+        args.push(s);
+        off = next;
+        break;
+      }
+      case "T":
+        args.push(true);
+        break;
+      case "F":
+        args.push(false);
+        break;
+      default:
+        throw new Error(`unsupported OSC type tag ${JSON.stringify(t)}`);
+    }
+  }
+  return { address, args };
+}
+var BUNDLE = "#bundle\x00";
+function isBundle(packet) {
+  if (packet.length < 8)
+    return false;
+  for (let i = 0;i < 8; i++)
+    if (packet[i] !== BUNDLE.charCodeAt(i))
+      return false;
+  return true;
+}
+function decodePacket(packet) {
+  if (!isBundle(packet))
+    return [decode(packet)];
+  const view = new DataView(packet.buffer, packet.byteOffset, packet.byteLength);
+  const out = [];
+  let off = 16;
+  while (off + 4 <= packet.length) {
+    const size = view.getInt32(off, false);
+    off += 4;
+    if (size < 0 || off + size > packet.length)
+      break;
+    out.push(...decodePacket(packet.subarray(off, off + size)));
+    off += size;
+  }
+  return out;
+}
+
+// src/core/oscdevice.ts
+var DEV_QUERIES = new Set(["cpu", "cpumin", "cpumax", "usb"]);
+
+class OscDevice {
+  transport;
+  timeout;
+  logSink;
+  frames = [];
+  waiters = [];
+  busy = null;
+  globals = null;
+  constructor(transport, opts = {}) {
+    this.transport = transport;
+    this.timeout = opts.timeout ?? DEFAULT_TIMEOUT_MS;
+    this.logSink = opts.logSink ?? null;
+    transport.onFrame((f) => this.push(f));
+    if (opts.ack ?? true)
+      this.send("/sk/dev/mode/ack", true);
+  }
+  push(frame) {
+    const w = this.waiters.shift();
+    if (w) {
+      if (w.timer)
+        clearTimeout(w.timer);
+      w.resolve(frame);
+    } else {
+      this.frames.push(frame);
+    }
+  }
+  readFrame() {
+    const buffered = this.frames.shift();
+    if (buffered !== undefined)
+      return Promise.resolve(buffered);
+    return new Promise((resolve, reject) => {
+      const waiter = { resolve, reject, timer: null };
+      waiter.timer = setTimeout(() => {
+        const i = this.waiters.indexOf(waiter);
+        if (i >= 0)
+          this.waiters.splice(i, 1);
+        reject(new Timeout("no reply"));
+      }, this.timeout);
+      this.waiters.push(waiter);
+    });
+  }
+  drainStale() {
+    if (!this.frames.length)
+      return;
+    if (this.logSink) {
+      for (const f of this.frames) {
+        const { address } = decode(f);
+        this.logSink(`[stale] ${address}`);
+      }
+    }
+    this.frames = [];
+  }
+  async exclusive(fn) {
+    const prev = this.busy ?? Promise.resolve();
+    let release;
+    this.busy = new Promise((r) => {
+      release = r;
+    });
+    await prev.catch(() => {});
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+  send(address, ...args) {
+    return this.transport.send(encode(address, ...args));
+  }
+  async readReply() {
+    for (;; ) {
+      const msg = decode(await this.readFrame());
+      if (msg.address === "/sk/log") {
+        if (this.logSink)
+          this.logSink(String(msg.args[0] ?? ""));
+        continue;
+      }
+      if (msg.address === "/sk/err") {
+        throw new CommandError(String(msg.args.length > 1 ? msg.args[1] : "unknown"));
+      }
+      return msg;
+    }
+  }
+  request(address, ...args) {
+    return this.exclusive(async () => {
+      this.drainStale();
+      await this.send(address, ...args);
+      const { args: vals } = await this.readReply();
+      return vals.length === 1 ? vals[0] : vals;
+    });
+  }
+  write(address, ...args) {
+    return this.request(address, ...args);
+  }
+  async scope() {
+    if (!this.globals) {
+      const d = await this.describe();
+      this.globals = {
+        params: new Set([...d.params.values()].filter((p) => p.scope === "global").map((p) => p.name)),
+        queries: new Set([...d.queries.values()].filter((q) => q.scope === "global").map((q) => q.name))
+      };
+    }
+    return this.globals;
+  }
+  async prefix(deck, name, kind = "param") {
+    if (name !== undefined) {
+      const { params, queries } = await this.scope();
+      const global = kind === "cfg" ? name === "route" : kind === "param" ? params.has(name) : queries.has(name);
+      if (global)
+        return "/sk";
+    }
+    return deck ? `/sk/${deck.toLowerCase()}` : "/sk";
+  }
+  async setParam(name, deck, value) {
+    await this.write(`${await this.prefix(deck, name)}/param/${name}`, Number(value));
+    return "";
+  }
+  async getParam(name, deck) {
+    return Number(await this.request(`${await this.prefix(deck, name)}/param/${name}`));
+  }
+  async setConfig(name, deck, v) {
+    await this.write(`${await this.prefix(deck, name, "cfg")}/cfg/${name}`, oscInt(Number(v)));
+    return true;
+  }
+  async cv(kind, deck, value) {
+    await this.write(`${await this.prefix(deck)}/cv/${kind}`, Number(value));
+    return "";
+  }
+  async gate(deck) {
+    await this.write(`${await this.prefix(deck)}/gate`);
+    return "";
+  }
+  async midiNote(ch, note) {
+    await this.write("/sk/midi/note", oscInt(ch), oscInt(note));
+    return "";
+  }
+  async pad(action, deck, rev = false) {
+    const addr = `${await this.prefix(deck)}/pad/${action}`;
+    if (action === "play") {
+      const r = await this.request(addr, rev);
+      return typeof r === "string" && r.startsWith("ok ") ? r.slice(3) : String(r);
+    }
+    if (rev)
+      await this.write(addr, true);
+    else
+      await this.write(addr);
+    return "";
+  }
+  async fx(kind, deck, on) {
+    await this.write(`${await this.prefix(deck)}/fx/${kind}`, on);
+    return "";
+  }
+  async query(name, deck = "") {
+    const v = DEV_QUERIES.has(name) ? await this.request(`/sk/dev/${name}`) : await this.request(`${await this.prefix(deck, name, "state")}/state/${name}`);
+    if (typeof v === "boolean")
+      return v ? "1" : "0";
+    if (typeof v === "number") {
+      return Number.isInteger(v) ? String(v) : v.toFixed(4);
+    }
+    return String(v);
+  }
+  async caps() {
+    return Number(await this.request("/sk/dev/caps"));
+  }
+  async resetCpu() {
+    await this.request("/sk/dev/reset/cpu");
+    return "";
+  }
+  async cpu() {
+    return {
+      avg: Number(await this.query("cpu")),
+      min: Number(await this.query("cpumin")),
+      max: Number(await this.query("cpumax"))
+    };
+  }
+  describeRows() {
+    return this.exclusive(async () => {
+      this.drainStale();
+      await this.send("/sk/dev/describe");
+      return decodePacket(await this.readFrame());
+    });
+  }
+  async describe() {
+    return describeFromRows(await this.describeRows());
+  }
+  async testMode(on) {
+    await this.write(`/sk/dev/mode/${on ? "test" : "run"}`);
+    return "";
+  }
+  close() {
+    for (const w of this.waiters) {
+      if (w.timer)
+        clearTimeout(w.timer);
+      w.reject(new Timeout("closed"));
+    }
+    this.waiters = [];
+    return this.transport.close();
+  }
+}
+function labelMap(s) {
+  const out = new Map;
+  for (const t of String(s).split(/\s+/).filter((x) => x.includes(":"))) {
+    const i = t.indexOf(":");
+    const k = Number(t.slice(0, i));
+    if (Number.isInteger(k))
+      out.set(k, t.slice(i + 1));
+  }
+  return out;
+}
+function describeFromRows(rows) {
+  const d = {
+    engine: "",
+    version: "",
+    masked: false,
+    params: new Map,
+    configs: new Map,
+    queries: new Map,
+    caps: 0
+  };
+  const leaf = (addr) => String(addr).split("/").pop() ?? "";
+  for (const { address, args } of rows) {
+    switch (address) {
+      case "/sk/reply/dev/describe":
+        if (args.length >= 3) {
+          d.engine = String(args[0]);
+          d.version = String(args[1]);
+          d.masked = args[2] === "masked=1";
+        }
+        break;
+      case "/sk/reply/dev/describe/param": {
+        if (args.length < 5)
+          break;
+        const name = leaf(args[0]);
+        d.params.set(name, { name, scope: String(args[4]), lo: Number(args[2]), hi: Number(args[3]) });
+        break;
+      }
+      case "/sk/reply/dev/describe/cfg": {
+        if (args.length < 3)
+          break;
+        const name = leaf(args[0]);
+        d.configs.set(name, { name, values: labelMap(String(args[2])) });
+        break;
+      }
+      case "/sk/reply/dev/describe/state": {
+        if (args.length < 3)
+          break;
+        const name = leaf(args[0]);
+        const scope = ["a", "b"].includes(String(args[0]).split("/")[2]) ? "deck" : "global";
+        d.queries.set(name, {
+          name,
+          scope,
+          kind: String(args[2]),
+          values: labelMap(args.length >= 4 ? String(args[3]) : "")
+        });
+        break;
+      }
+      case "/sk/reply/dev/describe/caps":
+        if (args.length)
+          d.caps = Number(args[0]);
+        break;
+      default:
+        break;
+    }
+  }
+  return d;
+}
+
+// src/core/client.ts
+function lineClient(device) {
+  return {
+    codec: "line",
+    exec: (input) => device.cmd(input),
+    destructive: isDestructive,
+    describe: async () => parseDescribe(await device.describeLines()),
+    query: (name, deck = "") => device.query(name, deck),
+    cpu: () => device.cpu(),
+    resetCpu: async () => {
+      await device.resetCpu();
+    },
+    close: () => device.close(),
+    example: "set param speed a 0.5",
+    setParam: async (name, deck, value) => {
+      await device.setParam(name, deck, value);
+    },
+    getParam: (name, deck) => device.getParam(name, deck),
+    setConfig: async (name, deck, value) => {
+      await device.setConfig(name, deck, value);
+    },
+    gate: async (deck) => {
+      await device.gate(deck);
+    },
+    pad: (action, deck) => device.pad(action, deck)
+  };
+}
+function oscClient(device) {
+  return {
+    codec: "osc",
+    exec: (input) => execOsc(device, input),
+    destructive: isDestructiveAddress,
+    describe: () => device.describe(),
+    query: (name, deck = "") => device.query(name, deck),
+    cpu: () => device.cpu(),
+    resetCpu: async () => {
+      await device.resetCpu();
+    },
+    close: () => device.close(),
+    example: "/sk/a/param/speed 0.5",
+    setParam: async (name, deck, value) => {
+      await device.setParam(name, deck, value);
+    },
+    getParam: (name, deck) => device.getParam(name, deck),
+    setConfig: async (name, deck, value) => {
+      await device.setConfig(name, deck, value);
+    },
+    gate: async (deck) => {
+      await device.gate(deck);
+    },
+    pad: (action, deck) => device.pad(action, deck)
+  };
+}
+async function execOsc(device, input) {
+  const [address, ...rest] = input.trim().split(/\s+/).filter(Boolean);
+  if (!address)
+    return "";
+  if (!address.startsWith("/")) {
+    throw new Error(`not an OSC address: ${JSON.stringify(address)}. ` + "This build speaks OSC - try /sk/dev/describe, or use the controls above.");
+  }
+  const reply = await device.request(address, ...rest.map(parseArg));
+  const vals = Array.isArray(reply) ? reply : [reply];
+  return vals.map(String).join(" ");
+}
+function parseArg(tok) {
+  if (tok === "true")
+    return true;
+  if (tok === "false")
+    return false;
+  if (/^-?\d+$/.test(tok))
+    return oscInt(Number(tok));
+  if (/^-?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(tok))
+    return Number(tok);
+  return tok;
+}
+var DESTRUCTIVE_ADDRESSES = [
+  /^\/sk(\/[ab])?\/pad\/clear\b/,
+  /^\/sk(\/[ab])?\/seq\/clear\b/,
+  /^\/sk(\/[ab])?\/clear\b/,
+  /^\/sk\/dev\/preset\/save\b/,
+  /^\/sk\/dev\/reset(?!\/cpu)/
+];
+function isDestructiveAddress(input) {
+  const addr = input.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  return DESTRUCTIVE_ADDRESSES.some((re) => re.test(addr));
+}
+
 // src/app/terminal_model.ts
 var CPU_HISTORY = 240;
 var CONSOLE_LIMIT = 500;
@@ -1916,7 +2453,9 @@ var INITIAL3 = {
   usb: [],
   usbAvailable: true,
   offerAllPorts: false,
-  error: null
+  error: null,
+  codec: "line",
+  example: "set param speed a 0.5"
 };
 
 class TerminalModel {
@@ -1930,23 +2469,44 @@ class TerminalModel {
   supported() {
     return this.deps.serial.supported();
   }
+  oscSupported() {
+    return this.deps.serial.requestFrames != null;
+  }
+  setCodec(codec) {
+    if (this.store.get().connected)
+      return;
+    this.store.set({ codec, example: codec === "osc" ? "/sk/a/param/speed 0.5" : "set param speed a 0.5" });
+  }
   write(text, kind = "meta") {
     const lines = [...this.store.get().lines, { text, kind }];
     this.store.set({ lines: lines.slice(-CONSOLE_LIMIT) });
   }
   async connect({ filtered = true } = {}) {
+    const codec = this.store.get().codec;
     try {
-      const transport = await this.deps.serial.request({ filtered });
-      transport.onClose((why) => this.lost(why));
-      this.device = new Device(transport, { logSink: (l) => this.write(l, "log") });
+      const log = (l) => this.write(l, "log");
+      let transport;
+      if (codec === "osc") {
+        const requestFrames = this.deps.serial.requestFrames;
+        if (!requestFrames)
+          throw new Error("this page cannot open an OSC session");
+        transport = await requestFrames({ filtered });
+        transport.onClose((why) => this.lost(why));
+        this.device = oscClient(new OscDevice(transport, { logSink: log }));
+      } else {
+        transport = await this.deps.serial.request({ filtered });
+        transport.onClose((why) => this.lost(why));
+        this.device = lineClient(new Device(transport, { logSink: log }));
+      }
       this.store.set({
         connected: true,
         port: transport.info(),
-        status: `connected (${transport.info()})`,
+        status: `connected (${transport.info()}, ${codec === "osc" ? "OSC" : "line"} codec)`,
+        example: this.device.example,
         offerAllPorts: false,
         error: null
       });
-      this.write("connected", "meta");
+      this.write(`connected using the ${codec === "osc" ? "OSC" : "line"} codec`, "meta");
       await this.refreshDescribe();
       await this.refreshUsb();
       this.startPolling();
@@ -1992,14 +2552,14 @@ class TerminalModel {
   async send(line, { quiet = false } = {}) {
     if (!this.device)
       return null;
-    if (isDestructive(line) && !this.deps.confirm(`Send "${line}"?`)) {
+    if (this.device.destructive(line) && !this.deps.confirm(`Send "${line}"?`)) {
       this.write(`cancelled: ${line}`, "meta");
       return null;
     }
     if (!quiet)
       this.write(`> ${line}`, "sent");
     try {
-      const reply = await this.device.cmd(line);
+      const reply = await this.device.exec(line);
       if (!quiet)
         this.write(reply === "" ? "ok" : `ok ${reply}`, "ok");
       return reply;
@@ -2010,22 +2570,63 @@ class TerminalModel {
       return null;
     }
   }
+  async perform(label, fn, { quiet = false, confirmAs = "" } = {}) {
+    const device = this.device;
+    if (!device)
+      return null;
+    if (confirmAs && !this.deps.confirm(`Send "${confirmAs}"?`)) {
+      this.write(`cancelled: ${label}`, "meta");
+      return null;
+    }
+    if (!quiet)
+      this.write(`> ${label}`, "sent");
+    try {
+      const out = await fn(device);
+      if (!quiet)
+        this.write(out === "" || out === undefined ? "ok" : `ok ${out}`, "ok");
+      return out;
+    } catch (e) {
+      if (!quiet) {
+        this.write(e instanceof CommandError ? `err ${e.reason}` : e instanceof Timeout ? "timeout - no reply" : String(e), "err");
+      }
+      return null;
+    }
+  }
+  setParam(name, deck, value, { quiet = false } = {}) {
+    return this.perform(`${name} ${deck} = ${value}`, (d) => d.setParam(name, deck, value), { quiet });
+  }
+  getParam(name, deck, { quiet = false } = {}) {
+    return this.perform(`read ${name} ${deck}`, (d) => d.getParam(name, deck), { quiet });
+  }
+  setConfig(name, deck, value) {
+    return this.perform(`${name} ${deck} = ${value}`, (d) => d.setConfig(name, deck, value));
+  }
+  gate(deck) {
+    return this.perform(`gate ${deck}`, (d) => d.gate(deck));
+  }
+  pad(action, deck) {
+    return this.perform(`pad ${action} ${deck}`, (d) => d.pad(action, deck), { confirmAs: action === "clear" ? `pad clear ${deck}` : "" });
+  }
+  queryValue(name, deck) {
+    return this.perform(`query ${name} ${deck}`.trimEnd(), (d) => d.query(name, deck), { quiet: true });
+  }
   async refreshDescribe() {
     if (!this.device)
       return;
     try {
-      this.store.set({ descriptor: parseDescribe(await this.device.describeLines()) });
+      this.store.set({ descriptor: await this.device.describe() });
     } catch {
       this.store.set({ descriptor: null });
     }
   }
   async refreshUsb() {
-    const reply = await this.send("query usb", { quiet: true });
-    if (reply == null) {
-      this.store.set({ usb: [], usbAvailable: false });
+    if (!this.device)
       return;
+    try {
+      this.store.set({ usb: parseUsbDiag(await this.device.query("usb")), usbAvailable: true });
+    } catch {
+      this.store.set({ usb: [], usbAvailable: false });
     }
-    this.store.set({ usb: parseUsbDiag(reply), usbAvailable: true });
   }
   startPolling() {
     this.stopPolling();
@@ -2057,7 +2658,16 @@ class TerminalModel {
     }
   }
   async resetCpu() {
-    await this.send("reset cpu");
+    if (!this.device)
+      return;
+    this.write("> reset cpu", "sent");
+    try {
+      await this.device.resetCpu();
+      this.write("ok", "ok");
+    } catch (e) {
+      this.write(e instanceof CommandError ? `err ${e.reason}` : String(e), "err");
+      return;
+    }
     this.store.set({ cpuHistory: [] });
   }
 }
@@ -2066,7 +2676,7 @@ class TerminalModel {
 var DAISY_VID = 1155;
 var BAUD = 115200;
 var supported = () => typeof navigator !== "undefined" && navigator.serial != null;
-async function requestPort({ filtered = true } = {}) {
+async function openPort({ filtered = true } = {}) {
   if (!supported()) {
     throw new Error("This browser has no WebSerial. Use Chrome, Edge or another Chromium browser.");
   }
@@ -2076,7 +2686,13 @@ async function requestPort({ filtered = true } = {}) {
   try {
     await port.setSignals?.({ dataTerminalReady: true });
   } catch {}
-  return new SerialTransport(port);
+  return port;
+}
+async function requestPort(opts = {}) {
+  return new SerialTransport(await openPort(opts));
+}
+async function requestFramePort(opts = {}) {
+  return new OscSerialTransport(await openPort(opts));
 }
 
 class SerialTransport {
@@ -2137,12 +2753,77 @@ class SerialTransport {
     await this.port.close();
   }
   info() {
-    const i = this.port.getInfo?.() ?? {};
-    const hex = (v) => v == null ? "?" : `0x${v.toString(16).padStart(4, "0")}`;
-    return `USB ${hex(i.usbVendorId)}:${hex(i.usbProductId)}`;
+    return portInfo(this.port);
   }
 }
-var webSerial = { supported, request: requestPort };
+
+class OscSerialTransport {
+  port;
+  decoder = new SlipDecoder;
+  onFrameCb = () => {};
+  onCloseCb = () => {};
+  closed = false;
+  reader = null;
+  constructor(port) {
+    this.port = port;
+    this.pump();
+  }
+  onFrame(cb) {
+    this.onFrameCb = cb;
+  }
+  onClose(cb) {
+    this.onCloseCb = cb;
+  }
+  async pump() {
+    this.reader = this.port.readable.getReader();
+    let reason = "the port closed";
+    try {
+      for (;; ) {
+        const { value, done } = await this.reader.read();
+        if (done)
+          break;
+        for (const frame of this.decoder.feed(value))
+          this.onFrameCb(frame);
+      }
+    } catch (e) {
+      reason = e.message;
+    } finally {
+      try {
+        this.reader.releaseLock();
+      } catch {}
+      if (!this.closed)
+        this.onCloseCb(reason);
+    }
+  }
+  async send(packet) {
+    const writer = this.port.writable.getWriter();
+    try {
+      await writer.write(slipEncode(packet));
+    } finally {
+      writer.releaseLock();
+    }
+  }
+  async close() {
+    this.closed = true;
+    try {
+      await this.reader?.cancel();
+    } catch {}
+    await this.port.close();
+  }
+  info() {
+    return portInfo(this.port);
+  }
+}
+function portInfo(port) {
+  const i = port.getInfo?.() ?? {};
+  const hex = (v) => v == null ? "?" : `0x${v.toString(16).padStart(4, "0")}`;
+  return `USB ${hex(i.usbVendorId)}:${hex(i.usbProductId)}`;
+}
+var webSerial = {
+  supported,
+  request: requestPort,
+  requestFrames: requestFramePort
+};
 
 // src/platform/clock.ts
 var browserClock = {
@@ -2232,6 +2913,11 @@ function mountTerminal(root, _ctx) {
     hidden: true,
     onclick: () => model.connect({ filtered: false })
   }, "List every serial port");
+  const codecSelect = el("select", {
+    class: "codec",
+    title: "Which codec the firmware was built with. OSC needs a TERMINAL=1 OSC=1 build.",
+    onchange: (e) => model.setCodec(e.target.value)
+  }, el("option", { value: "line" }, "line codec"), el("option", { value: "osc" }, "OSC codec"));
   function renderConsole(lines) {
     if (lines.length < renderedLines) {
       clear(log);
@@ -2256,7 +2942,7 @@ function mountTerminal(root, _ctx) {
       historyPos = history2.length;
       input.value = "";
       await model.send(line);
-      if (/^(config|set param|reset|preset)\b/.test(line))
+      if (/^(config|set param|reset|preset)\b/.test(line) || /^\/sk\/.*\/(cfg|param)\//.test(line) || /^\/sk\/dev\/(reset|preset)\b/.test(line))
         renderSurface();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
@@ -2311,15 +2997,15 @@ function mountTerminal(root, _ctx) {
     });
     slider.addEventListener("change", async () => {
       out.textContent = Number(slider.value).toPrecision(4);
-      await model.send(`set param ${p.name} ${deck} ${slider.value}`, { quiet: true });
+      await model.setParam(p.name, deck, Number(slider.value), { quiet: true });
     });
     return el("div", { class: "row" }, el("label", {}, `${p.name}${p.scope === "deck" ? ` ${deck}` : ""}`), slider, out, el("button", {
       class: "link",
       onclick: async () => {
-        const v = await model.send(`get param ${p.name} ${deck}`, { quiet: true });
+        const v = await model.getParam(p.name, deck, { quiet: true });
         if (v != null) {
-          slider.value = v;
-          out.textContent = Number(v).toPrecision(4);
+          slider.value = String(v);
+          out.textContent = v.toPrecision(4);
         }
       }
     }, "read"));
@@ -2345,24 +3031,19 @@ function mountTerminal(root, _ctx) {
     if (descriptor.configs.size) {
       const grid = el("div", { class: "grid gap-1" });
       for (const c of descriptor.configs.values()) {
-        const sel = el("select", { onchange: () => model.send(`config ${c.name} A ${sel.value}`) }, [...c.values.entries()].map(([v, lbl]) => el("option", { value: String(v) }, `${v} - ${lbl}`)));
+        const sel = el("select", { onchange: () => model.setConfig(c.name, "A", Number(sel.value)) }, [...c.values.entries()].map(([v, lbl]) => el("option", { value: String(v) }, `${v} - ${lbl}`)));
         grid.append(el("div", { class: "row" }, el("label", {}, c.name), sel));
       }
       surface.append(el("h4", {}, "Configs"), grid);
     }
     const actions = el("div", { class: "actions" });
     for (const deck of decks) {
-      for (const [label, cmd] of [
-        [`gate ${deck}`, `gate ${deck}`],
-        [`play ${deck}`, `pad play ${deck}`],
-        [`rec ${deck}`, `pad rec ${deck}`],
-        [`stop ${deck}`, `pad stop ${deck}`],
-        [`clear ${deck}`, `pad clear ${deck}`]
-      ]) {
+      actions.append(el("button", { onclick: () => model.gate(deck) }, `gate ${deck}`));
+      for (const action of ["play", "rec", "stop", "clear"]) {
         actions.append(el("button", {
-          class: isDestructive(cmd) ? "danger" : "",
-          onclick: () => model.send(cmd)
-        }, label));
+          class: action === "clear" ? "danger" : "",
+          onclick: () => model.pad(action, deck)
+        }, `${action} ${deck}`));
       }
     }
     surface.append(el("h4", {}, "Actions"), actions);
@@ -2372,7 +3053,7 @@ function mountTerminal(root, _ctx) {
         const value = el("span", { class: "mono value" }, "-");
         list.append(el("div", { class: "row" }, el("label", {}, q.name), el("button", {
           onclick: async () => {
-            const r = await model.send(`query ${q.name} ${q.scope === "deck" ? "A" : ""}`.trim(), { quiet: true });
+            const r = await model.queryValue(q.name, q.scope === "deck" ? "A" : "");
             value.textContent = r == null ? "err" : queryLabel(q, r);
           }
         }, "read"), value));
@@ -2386,6 +3067,9 @@ function mountTerminal(root, _ctx) {
     connectBtn.textContent = s.connected ? "Disconnect" : "Connect";
     allPortsBtn.hidden = !s.offerAllPorts;
     input.disabled = !s.connected;
+    codecSelect.value = s.codec;
+    codecSelect.disabled = s.connected;
+    input.placeholder = `type a command, e.g. ${s.example}   (Tab completes, Up recalls)`;
     renderConsole(s.lines);
     if (s.descriptor !== lastDescriptor) {
       lastDescriptor = s.descriptor;
@@ -2404,7 +3088,7 @@ function mountTerminal(root, _ctx) {
     onclick: () => model.resetCpu()
   }, "reset cpu"), el("button", { onclick: () => model.togglePolling() }, "start / stop polling")), canvas, el("p", { class: "muted note" }, "min and max are extremes since the last reset, not a rolling window. The sequence a measurement " + "wants is: reset, drive the engine, then watch whether max stops climbing."));
   append(mountPoint(root), [
-    el("div", { class: "controls" }, connectBtn, allPortsBtn, status),
+    el("div", { class: "controls" }, connectBtn, codecSelect, allPortsBtn, status),
     !model.supported() && el("div", { class: "callout" }, el("strong", {}, "This browser has no WebSerial. "), "Talking to hardware needs Chrome or Edge - and unlike the card screens there is no fallback " + "here, because there is no zip-shaped substitute for a serial port."),
     el("h3", {}, "Console"),
     log,
@@ -3439,5 +4123,5 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 }
 main();
 
-//# debugId=F5739F08F605F60364756E2164756E21
+//# debugId=A2E004CD0719F76664756E2164756E21
 //# sourceMappingURL=app.js.map

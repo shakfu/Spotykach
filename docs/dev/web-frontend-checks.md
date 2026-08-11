@@ -2,8 +2,9 @@
 
 The `web/` suite runs in bun and covers the logic. It cannot cover the four browser APIs the app is
 built on — File System Access, `decodeAudioData`, WebSerial, service workers — because a DOM shim can
-only assert that the code *calls* them. This is the mechanical run that closes that gap: about 30
-minutes with a card, a Daisy and both browsers.
+only assert that the code *calls* them. This is the mechanical run that closes that gap: about 40
+minutes with a card, a Daisy and both browsers. Budget the extra ten for C8b, which needs its own
+flash: the terminal now speaks two codecs and they share only the port handling.
 
 Work top to bottom and record the result. A check that is skipped is not a check that passed, so write
 `skipped` and why. Everything here corresponds to "Remaining verification" in
@@ -29,7 +30,10 @@ You need:
 - A **FAT32 SD card**, ideally one that has been in a Mac (so it has `System Volume Information` and
   `.DS_Store` on it — that is the interesting case, not a clean one).
 - One **mp3** and one **flac**, ideally a few minutes long and known-good.
-- Optional, for C8 only: a Daisy flashed with `make ENGINE=<engine> TERMINAL=1`.
+- Optional, for C8: a Daisy flashed with `make ENGINE=<engine> TERMINAL=1`.
+- Optional, for C8b: the **same engine** flashed again with `make ENGINE=<engine> TERMINAL=1 OSC=1`.
+  Same engine, because C8b's central assertion is that the generated control surface is identical
+  across the two codecs — a different engine makes that comparison meaningless.
 
 `file://` does not work and is not a bug: ES modules will not load over it and the browser APIs are
 offered only over HTTPS or localhost.
@@ -186,6 +190,44 @@ The transport is the unverified part: the client is tested against a scripted fa
 really checking is chunk boundaries from a real CDC endpoint. Paste a long command and watch for a
 line split across two reads being mangled.
 
+### C8b — the same terminal over the OSC codec (Chrome only)
+
+Needs a **second flash**: `make ENGINE=<engine> TERMINAL=1 OSC=1`. Added 2026-08-11, when the browser
+client gained the OSC codec; never yet run.
+
+Why a separate check rather than a variant of C8: the codec changes the *unit* of the transport, from
+a newline-terminated string to a SLIP-delimited byte frame. The two paths share the port handling and
+nothing else, and the host suite covers everything except a real CDC endpoint — which is exactly where
+the interesting failures are.
+
+1. Before connecting, set the dropdown beside Connect to **OSC codec**. Connect.
+   - The status line must say `OSC codec`, and the dropdown must go **disabled** for the session. The
+     codec is a property of the firmware, not the connection.
+2. **Connect with the wrong codec selected, deliberately, both ways round.** A line build addressed as
+   OSC and an OSC build addressed as lines both produce a device that never answers. Confirm this
+   surfaces as a timeout and an empty descriptor rather than a hang or a blank tab — this is the
+   mistake a user will actually make, and the only signal is silence.
+3. The generated control surface must be **identical** to C8's on the same engine: same sliders, same
+   ranges, same buttons. It is built from a `Descriptor` that both codecs reduce to the same shape, so
+   any visible difference here is a codec bug, and this is the browser equivalent of the 63/63 parity
+   sweep. Compare side by side against `python3 tools/skterm.py` if in doubt.
+4. Move a slider; confirm the audio changes exactly as it did over lines.
+5. The console now takes **addresses**, not commands. Confirm:
+   - `/sk/a/param/speed 0.5` writes, and is acknowledged.
+   - `/sk/a/param/speed` alone reads it back (a read is a message with no type-tag string at all).
+   - `set param speed a 0.5` is refused with a message saying the build speaks OSC. It is deliberately
+     not translated.
+   - `/sk/cfg/route 2` writes an int and `/sk/cfg/route 2.0` a float — the console types an argument
+     from how it was *spelled*, which is the one place that ambiguity has a good answer.
+6. `query cpu` equivalents: the CPU plot must track as it does over lines, and `reset cpu` must collapse
+   min/max. These go to `/sk/dev/cpu` and `/sk/dev/reset/cpu` rather than through the console.
+7. Confirm a destructive address (`/sk/a/pad/clear`) prompts first, and that `/sk/dev/reset/cpu` does
+   **not** — it only clears the meter extremes.
+8. **The describe bundle is the payload worth watching.** It is ~2 KB in ONE SLIP frame, so it crosses
+   many CDC reads. If the control surface renders at all, reassembly worked; if it renders partially,
+   it did not. This is the browser-side version of the risk the spec called out as the main one.
+9. Unplug while connected, as in C8 step 8. Teardown must behave identically.
+
 ### C9 — offline
 
 **Known limitation before you start:** `js/ui/main.js` registers the service worker only when
@@ -278,7 +320,8 @@ WebUSB is unavailable and show the `dfu-util` command, with no enabled buttons.
 | C5 convert real audio | | | |
 | C6 write in place | | n/a | |
 | C7 reference | | | |
-| C8 terminal | | n/a | |
+| C8 terminal (line codec) | | n/a | |
+| C8b terminal (OSC codec) | | n/a | needs a second flash, `TERMINAL=1 OSC=1`; added 2026-08-11 |
 | C9 offline | | | |
 | C10a refusals | PASS 2026-08-03 | | bootloader image and a non-firmware file both refused |
 | C10b real write | PASS 2026-08-03 | n/a | bard 0.6.1-11-g8871468; *unverified* by design, boots and runs |
