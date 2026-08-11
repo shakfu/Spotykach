@@ -1073,7 +1073,7 @@ web-build:
 	@# and fails here with a bare `tailwindcss: command not found`. Install on demand instead. The same
 	@# guard is in test-web below, but that one only fires when node_modules is missing entirely - a
 	@# partial tree (typescript present, tailwind not) got past it.
-	@cd web && test -x node_modules/.bin/tailwindcss || $(BUN) install
+	@cd web && { test -x node_modules/.bin/tailwindcss || $(BUN) install; }
 	cd web && $(BUN) run build
 
 # Run the web front-end's test suite: the WAV writers asserted byte-identical to card_audio.py, the
@@ -1086,7 +1086,11 @@ web-build:
 #   make test-web
 test-web:
 	@test -n "$(BUN)" || { echo "bun not found - install it (https://bun.sh) or set BUN=/path/to/bun"; exit 1; }
-	@cd web && test -d node_modules || (cd web && $(BUN) install)
+	@# Braced, not `... || (cd web && $(BUN) install)`: the leading `cd` has already moved the shell
+	@# into web/, so a second `cd web` in the fallback looks for web/web and fails. That is exactly
+	@# what CI hit - a fresh checkout has no node_modules, so the fallback was the only path ever
+	@# taken there, and it died with "can't cd to web" on a tree where web/ was plainly present.
+	@cd web && { test -d node_modules || $(BUN) install; }
 	cd web && $(BUN) run typecheck
 	cd web && $(BUN) test/run.ts
 

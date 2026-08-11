@@ -26,7 +26,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <functional>
+#include <new>
 
 #include "engine/granular/granular_engine.h"
 #include "engine/granular/buffer.h"
@@ -36,6 +38,40 @@
 using namespace spotykach;
 
 namespace {
+
+// Storage that mirrors how the platform allocates: zeroed before the constructor runs.
+//
+// This is NOT a style preference, it is what keeps this test measuring the DSP. The platform holds
+// the engine and the transport in `static AppImpl impl;` (app.cpp) - file scope, hence zeroed
+// storage, hence every member the constructor does not assign is a defined zero. The granular tree
+// depends on that and never had to state it: SoftSwitch::_kof/_iterator/_on, Buffer::_did_cut and
+// several of Transport's tick counters are declared without initialisers and are not written by any
+// constructor.
+//
+// Build those objects as plain stack locals and the same members are INDETERMINATE, so reading one
+// is undefined behaviour. clang at -O2 acts on that and this test rendered `inf` from the first
+// block on macOS, while gcc on Linux (and CI) stayed green - the classic split, since UB permits the
+// failure rather than compelling it. Zeroing the bytes of a `char` array and placement-newing into
+// it is what removes the indeterminacy: pre-filling the *stack* does not, because the compiler
+// reasons about whether a member was written, not about what the memory happens to hold.
+//
+// UBSan (`-fsanitize=bool`) reports the three cases where the leftover byte was outside {0,1}; the
+// float members it cannot see are the ones that produced the `inf`. Fixing this here rather than in
+// the engine keeps the stock spotykach tree untouched; the members are still uninitialised, they are
+// simply no longer read from indeterminate storage.
+template <typename T>
+class ZeroInit {
+public:
+    ZeroInit() { std::memset(_storage, 0, sizeof(_storage)); _obj = new (_storage) T(); }
+    ~ZeroInit() { _obj->~T(); }
+    ZeroInit(const ZeroInit&) = delete;
+    ZeroInit& operator=(const ZeroInit&) = delete;
+    T& get() { return *_obj; }
+
+private:
+    alignas(T) unsigned char _storage[sizeof(T)];
+    T* _obj;
+};
 
 int g_failures = 0;
 void check(bool c, const char* m) { if (!c) { std::printf("  FAIL: %s\n", m); g_failures++; } }
@@ -111,11 +147,13 @@ int main() {
     EngineContext ctx = host::make_context(arena, time);
 
     // A real platform Transport, injected BEFORE init() so granular Core can subscribe to its ticks.
-    Transport transport;
+    ZeroInit<Transport> transport_store;
+    Transport& transport = transport_store.get();
     transport.init(host::kSampleRate, static_cast<float>(host::kBlock), &time);
     ctx.transport = &transport;
 
-    GranularEngine e;
+    ZeroInit<GranularEngine> engine_store;
+    GranularEngine& e = engine_store.get();
     e.init(ctx);
     setup_wet(e);
 
@@ -163,10 +201,12 @@ int main() {
     // --- record captures the input --------------------------------------------------------------
     // Recording is level-triggered (~-40 dB), so the arm is followed by real signal, not silence.
     {
-        GranularEngine r;
+        ZeroInit<GranularEngine> r_store;
+        GranularEngine& r = r_store.get();
         host::HostArena arena2; host::TimeSource time2;
         EngineContext ctx2 = host::make_context(arena2, time2);
-        Transport transport2;
+        ZeroInit<Transport> transport2_store;
+        Transport& transport2 = transport2_store.get();
         transport2.init(host::kSampleRate, static_cast<float>(host::kBlock), &time2);
         ctx2.transport = &transport2;
         r.init(ctx2);
