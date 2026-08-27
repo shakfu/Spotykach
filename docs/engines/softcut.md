@@ -62,7 +62,7 @@ Each voice's buffer is **~10.9 s** (2^19 frames @ 48 kHz, 2 MB), so a single tak
 
 ## Build / flash
 
-```
+```text
 make ENGINE=softcut            # normal SRAM build (-O2, ~89% SRAM_EXEC)
 make ENGINE=softcut METER=1    # + on-device CPU load meter over USB serial / ring A
 make program-dfu               # flash (enter DFU first)

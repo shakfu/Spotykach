@@ -72,7 +72,7 @@ press a button.
 
 ## Running it
 
-```
+```text
 make web-serve          # builds, then http://localhost:8000
 make web-build          # rebuild dist/app.js and dist/app.css after editing src/
 make test-web           # typecheck (src strict, tests relaxed) + the suite
@@ -113,7 +113,7 @@ from `scripts/`; `make test-web` fails if this side disagrees with the Python.
 
 ## Layout
 
-```
+```text
 index.html  sw.js                  the page and its offline caching
 card_layout.json  patches.json     GENERATED - do not edit, run `make web-data`
 engines.json                       GENERATED from docs/engines/*.md - the Engines menu + Reference
@@ -211,7 +211,7 @@ bricks a unit, it is a once-per-device procedure, and `dfu-util` does it.
 
 WebUSB is Chromium-only, like the Terminal tab. The command-line path works everywhere:
 
-```
+```text
 dfu-util -a 0 -s 0x90040000:leave -D sk-<engine>-<version>.bin -d ,0483:df11
 ```
 

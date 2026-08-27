@@ -14,7 +14,7 @@ Its signature is the **free-running virtual playhead**: every station sounds as 
 
 ![Radio control surface](../media/radio-controls.svg)
 
-_Generated from [`docs/diagrams/controls/radio.json`](../diagrams/controls/radio.json) via `make diagrams`._
+*Generated from [`docs/diagrams/controls/radio.json`](../diagrams/controls/radio.json) via `make diagrams`.*
 
 | Control | `ParamId` / config | Effect |
 |---|---|---|

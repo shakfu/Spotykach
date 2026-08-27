@@ -7,7 +7,7 @@ program that compiles on the Daisy build and reads the panel knobs.
 
 Copy the files into a `chuck/` folder at the **root of the SD card**, keeping the numbered names:
 
-```
+```text
 <card>/chuck/0.ck
 <card>/chuck/1.ck
 <card>/chuck/2.ck
@@ -38,6 +38,7 @@ declares; the rest are ignored. The convention across these patches is PITCH = p
 brightness, MIX = level - keep to it so the knobs feel consistent when you switch patches.
 
 What is and isn't available (this is a bare-metal, core-only ChucK build):
+
 - **Available:** the oscillators (`SinOsc`/`SawOsc`/`SqrOsc`/`TriOsc`/`PulseOsc`/`Noise`), filters
   (`LPF`/`HPF`/`BPF`/`ResonZ`/...), envelopes (`ADSR`/`Envelope`), `Gain`, delays, the reverbs
   (`JCRev`/`NRev`/`PRCRev`), the FFT/analysis UANAs, and the **STK instruments** (`Rhodey`, `Wurley`,

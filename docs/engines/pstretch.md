@@ -14,7 +14,7 @@ Each deck (A/B) runs an independent stretcher over its input channel (A = left, 
 
 ![Pstretch control surface](../media/pstretch-controls.svg)
 
-_Generated from [`docs/diagrams/controls/pstretch.json`](../diagrams/controls/pstretch.json) via `make diagrams`._
+*Generated from [`docs/diagrams/controls/pstretch.json`](../diagrams/controls/pstretch.json) via `make diagrams`.*
 
 | Control | `ParamId` / config | Effect |
 |---|---|---|

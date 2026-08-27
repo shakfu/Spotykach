@@ -24,8 +24,8 @@ A working, hardware-verified looper on monome's [softcut-lib](https://github.com
 |---|---|
 | PITCH | rate, bipolar (noon=stop, CW +2x, CCW reverse -2x); snaps to unity on engage (pickup) |
 | POS / SIZE | loop window start / length (over the recorded take) |
-| MIX | voice volume; ENV | overdub feedback (softcut `preLevel`) |
-| Alt+POS | pan; Alt+PITCH | SD slot select |
+| MIX | voice volume; ENV |
+| Alt+POS | pan; Alt+PITCH |
 | MOD_AMT / MODFREQ | loop crossfade time / rate-slew time |
 | FLUX pad | post SVF: +PITCH cutoff, +MIX resonance |
 | Play / Alt+Play | roll-stop / record-overdub (record-defines-loop on an empty voice) |
@@ -67,11 +67,11 @@ All marked `sk-engines PORT NOTE`; re-apply if re-vendoring from upstream:
 
 See [`softcut-spike.md`](softcut-spike.md) for the on-device METER measurements (2 → ~32%, 4 → ~62%/79%, 6 → ~92%/108%, worst case). Code is tiny (the softcut DSP is ~11 KB SRAM_EXEC); the full firmware links at ~89% SRAM_EXEC at `-O2`. Buffers (8 MB) and the engine arena are in SDRAM.
 
-The host bench under-predicts because softcut is SDRAM-buffer-bound like the reverb — the on-device pass was load-bearing, not a formality.
+The host bench under-predicts because softcut is SDRAM-buffer-bound like the reverb — the on-device pass was structural, not a formality.
 
 ## Build / flash / test
 
-```
+```text
 make ENGINE=softcut            # normal SRAM build (-O2)
 make ENGINE=softcut METER=1    # + on-device CPU meter (serial + ring A)
 make program-dfu               # flash (enter DFU first)
@@ -103,6 +103,7 @@ The *panel* is densely mapped (both mod knobs, every pad, the Alt layers, SD sav
 | **Mod CV out** (`process_cv`) | → the loop **phase** as a ramp/phasor locked to the loop (`Voice::getActivePosition()` already exists) |
 
 **B. Free panel controls.**
+
 - **Mode switch** (per-deck 3-way, currently `-`): a natural **record-mode** selector — Overdub (current) / Replace / **One-shot** (softcut has `setRecOnceFlag`). (NB: `set_config(Mode)` must stay gated per-deck — the clobber noted in the bring-up history.)
 
 - **Grit pad** (currently `-`): *reserved for the TapeFx port* (see the deferred-features TODO). An **alternative** use, if TapeFx is dropped, is softcut's **pre-filter** (`setPreFilterFc/Rq/Lp/...`) — Grit shapes what gets *recorded* (lo-fi record chain) while FLUX shapes *playback*. Both are near-free (the pre-filter is already compiled into the vendored `Voice`); pick one.
@@ -141,7 +142,7 @@ Build: `make engine-softcut` (clean → build → DFU); `make ENGINE=softcut MET
 
 ### Features (deferred, by user decision)
 
-- [ ] **Additional FX, degree-blendable, _preserving_ softcut's built-ins.** Do NOT remove any built-in softcut DSP (the user is explicit). Only ADD opt-in FX if there's CPU/space headroom. The shuttle `TapeFx` (wow/flutter + Jiles-Atherton saturation + resonant LP) port is scoped; the **GRIT pad is reserved** for it (grit+PITCH/grit+MIX), since FLUX already drives softcut's own filter. Gate: a `METER=1` headroom check with FX engaged on all 4 voices (softcut alone is ~62%/79%); bypass when neutral like shuttle.
+- [ ] **Additional FX, degree-blendable, *preserving* softcut's built-ins.** Do NOT remove any built-in softcut DSP (the user is explicit). Only ADD opt-in FX if there's CPU/space headroom. The shuttle `TapeFx` (wow/flutter + Jiles-Atherton saturation + resonant LP) port is scoped; the **GRIT pad is reserved** for it (grit+PITCH/grit+MIX), since FLUX already drives softcut's own filter. Gate: a `METER=1` headroom check with FX engaged on all 4 voices (softcut alone is ~62%/79%); bypass when neutral like shuttle.
 
 - [ ] **6 voices.** Gated on removing the `std::function`-per-sample dispatch in `vendor/src/Voice.cpp::processBlockMono` (templated/switch dispatch, ~15-30% on M7). Then bump `kTracks` 2→3 and re-run METER.
 

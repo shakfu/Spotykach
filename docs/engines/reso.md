@@ -22,7 +22,7 @@ Slice and Drift use Rings' internal exciter only - they feed **silence** into th
 
 ![Reso control surface](../media/reso-controls.svg)
 
-_Generated from [`docs/diagrams/controls/reso.json`](../diagrams/controls/reso.json) via `make diagrams`._
+*Generated from [`docs/diagrams/controls/reso.json`](../diagrams/controls/reso.json) via `make diagrams`.*
 
 | Knob | `ParamId` | Rings target |
 |---|---|---|

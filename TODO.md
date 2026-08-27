@@ -2,23 +2,9 @@
 
 Deferred work, in priority order (highest first). See `docs/` for the platform/engine design and `CHANGELOG.md` for done work.
 
-- [x] **`/sk/log` framing — DONE 2026-08-11; `OSC=1 DEBUG=1` builds and works.** The last open P7 item.
-      Was a hard Makefile error (the spec's "acceptable phase-1 shortcut"); now the spec's option (b),
-      one `/sk/log ,s` message per line in its own SLIP frame. Two halves: the Logger goes to
-      `LOGGER_NONE` on an OSC build so a stray `Log::Print*` cannot corrupt the stream, and `LOG_TAGGED`
-      routes to the framed path — gated on `INFS_LOG` so both codecs agree about when logging exists.
-      Logs never displace a reply (1 KB reserve, dropped whole rather than half-written), and one line
-      is held from before the terminal exists so the boot banner survives. Costs nothing in a release
-      image (gc-sections drops it; zero `osc_log` symbols in the ELF); ~1.7 KB with `DEBUG=1`.
-      Host-verified (`make -C host test-terminal-osc`, new `test_log()`); **not flashed** — the bench
-      pass should confirm the banner arrives and that a DEBUG build's logs do not disturb a sweep.
+- [x] **`/sk/log` framing — DONE 2026-08-11; `OSC=1 DEBUG=1` builds and works.** The last open P7 item. Was a hard Makefile error (the spec's "acceptable phase-1 shortcut"); now the spec's option (b), one `/sk/log ,s` message per line in its own SLIP frame. Two halves: the Logger goes to `LOGGER_NONE` on an OSC build so a stray `Log::Print*` cannot corrupt the stream, and `LOG_TAGGED` routes to the framed path — gated on `INFS_LOG` so both codecs agree about when logging exists. Logs never displace a reply (1 KB reserve, dropped whole rather than half-written), and one line is held from before the terminal exists so the boot banner survives. Costs nothing in a release image (gc-sections drops it; zero `osc_log` symbols in the ELF); ~1.7 KB with `DEBUG=1`. Host-verified (`make -C host test-terminal-osc`, new `test_log()`); **not flashed** — the bench pass should confirm the banner arrives and that a DEBUG build's logs do not disturb a sweep.
 
-- [x] **OSC could not be reached by any OSC software — FIXED 2026-08-11 (`tools/skbridge.py`).**
-      Raised as an objection to the item below, and a correct one: TouchOSC, Max, Pd and `oscsend` all
-      speak OSC over **UDP**, the device has no network interface, and there was no bridge. `make tosc`
-      was generating TouchOSC layouts with nothing to plug them into. The relay translates framing only
-      (UDP is datagram-delimited, SLIP delimits a byte stream), so it needs no maintenance as the
-      address space grows. `docs/dev/tosc.md` now documents the connection procedure it was missing.
+- [x] **OSC could not be reached by any OSC software — FIXED 2026-08-11 (`tools/skbridge.py`).** Raised as an objection to the item below, and a correct one: TouchOSC, Max, Pd and `oscsend` all speak OSC over **UDP**, the device has no network interface, and there was no bridge. `make tosc` was generating TouchOSC layouts with nothing to plug them into. The relay translates framing only (UDP is datagram-delimited, SLIP delimits a byte stream), so it needs no maintenance as the address space grows. `docs/dev/tosc.md` now documents the connection procedure it was missing.
 
       Also added `tools/test_liblo_conformance.py`, the only check here by an OSC implementation nobody
       on this project wrote. liblo serialises **byte-identically** to us; liblo accepts all 24 rows of
@@ -31,26 +17,17 @@ Deferred work, in priority order (highest first). See `docs/` for the platform/e
       against a pty, which is a faithful stand-in for the byte stream and says nothing about a real CDC
       endpoint under load. Folds into the P2/P6 bench session.
 
-- [x] **add web controls in the web frontend to control the OSC layer / protocol — DONE 2026-08-11
-      (host-verified; no browser or device pass yet).**
-      The parenthetical this item used to carry was stale and made the job look bigger than it was: it
-      said the web front-end "talks to nothing today" and that the WebSerial-vs-bridge transport
-      question had to be decided first. Both were already settled — `web/src/platform/serial.ts` is a
-      working WebSerial transport with an explicit unsupported-browser path, shipped as P6. What was
-      actually missing was that the page had **zero** OSC: it spoke line-ASCII only.
+- [x] **add web controls in the web frontend to control the OSC layer / protocol — DONE 2026-08-11 (host-verified; no browser or device pass yet).** The parenthetical this item used to carry was stale and made the job look bigger than it was: it said the web front-end "talks to nothing today" and that the WebSerial-vs-bridge transport question had to be decided first. Both were already settled — `web/src/platform/serial.ts` is a working WebSerial transport with an explicit unsupported-browser path, shipped as P6. What was actually missing was that the page had **zero** OSC: it spoke line-ASCII only.
 
       Now built, in four layers, each a port of its `tools/skdev/` counterpart so the two front-ends
       stay diffable against the same reference:
       - `web/src/core/osc.ts` — SLIP framing + the OSC 1.0 wire format (from `skdev/osc.py`).
-      - `web/src/core/oscdevice.ts` — the client, same method surface as `Device` (from
-        `skdev/oscdevice.py`), reducing the describe bundle to the identical `Descriptor` the line
-        codec's `parseDescribe` produces.
-      - `web/src/platform/serial.ts` — `OscSerialTransport`, a SLIP frame pipe on the same port, behind
-        the new `FrameTransport` port.
-      - `web/src/core/client.ts` + `TerminalModel` — one `DeviceClient` surface over either codec, so
-        the generated control surface stops composing line-codec command strings and drives named
-        operations instead. That was the real blocker: `set param speed A 0.5` is not a different
-        spelling of an OSC request, it is not a request at all.
+
+      - `web/src/core/oscdevice.ts` — the client, same method surface as `Device` (from `skdev/oscdevice.py`), reducing the describe bundle to the identical `Descriptor` the line codec's `parseDescribe` produces.
+
+      - `web/src/platform/serial.ts` — `OscSerialTransport`, a SLIP frame pipe on the same port, behind the new `FrameTransport` port.
+
+      - `web/src/core/client.ts` + `TerminalModel` — one `DeviceClient` surface over either codec, so the generated control surface stops composing line-codec command strings and drives named operations instead. That was the real blocker: `set param speed A 0.5` is not a different spelling of an OSC request, it is not a request at all.
 
       The codec is chosen before connecting (a dropdown beside Connect) and locked during a session,
       because it is a property of the firmware, not the connection. The free-text console accepts OSC
@@ -70,75 +47,37 @@ Deferred work, in priority order (highest first). See `docs/` for the platform/e
 
 Closed out from `REVIEW.md`; see the sections below for what remains.
 
-- [x] **CI** (`.github/workflows/ci.yml`) — 22 firmware builds (20 engines + `TERMINAL=1` on two), the
-      four off-target suites + `check-boundary`, and a CMake build of the six flag-sensitive engines.
-      `csound`/`chuck` are in `qspi-libs.yml` because each cross-builds a large runtime first. This is
-      the standing answer to the `chorus`/`pstretch` class of breakage (an engine that stops linking
-      and nobody notices) and to P5's CMake drift.
-      - [x] **Arm the automatic triggers — done 2026-08-11 (armed; first real run still unobserved).**
-            `ci.yml` now fires on `push` to any branch and on `pull_request`; `qspi-libs.yml` keeps its
-            deliberate manual-only stance for push/PR but has the Monday 04:00 UTC `schedule`
-            uncommented. Both files parse and carry the intended trigger sets.
-            **Caveat — neither workflow has yet completed a run on a GitHub runner.** The original plan
-            was dispatch-then-uncomment; arming first means the next push IS the first run, so watch it.
-            First likely friction: the `carlosperate/arm-none-eabi-gcc-action` pin (`10-2020-q4`,
-            matching the local 10.2.1). Second: a PR from a same-repo branch matches both `push` and
-            `pull_request` and the `concurrency` groups differ by ref, so it costs two full matrix runs
-            — narrow the `push` branches if that bites. Note also that GitHub disables `schedule` on a
-            repo with 60 days of no activity, so a quiet period silently retires the weekly QSPI check.
-- [x] **`Divider::_triplets_on` was never initialized** — omitted from the constructor's init list and
-      with no default member initializer, so it read as indeterminate. Masked on target by `.bss`
-      zeroing (every Divider lives inside the file-static `AppImpl`), live UB on the host, and the
-      reason 7 checks in `test/test_divider.cpp` failed. `test/` is now 116/116. Note that
-      `set_triplets_on()`/`set_swing()` are still **reached from nowhere in the firmware** — implemented,
-      integrated into `tick()`, tested, and unreachable by any gesture. Kept deliberately (see the note
-      in `src/dsp/divider.h`); wiring them to a gesture is open work.
-- [x] **The `web/` export was order-dependent** — `sk_card.verify_card` walked with an unsorted
-      `os.walk`, so the finding ORDER varied by filesystem while the committed fixture is compared
-      byte-for-byte. It could fail on another machine with identical code. Sorted at the walk and again
-      in the exporter.
-- [x] **graincloud/granular duplication removed** — `src/engine/graincloud/` was a byte-for-byte copy of
-      the granular tree (35 of 42 files identical, ~3,400 lines) that had begun to drift, with the
-      *published* engine being the copy that received fewer fixes. Restored to the `SPK_GRAIN_GF`
-      design its own impl doc already described. `src/engine/granular/` did **not** move — see
-      `docs/dev/graincloud-impl.md` for why (upstream diffability).
-- [x] **`host/test_graincloud` was broken and excluded from `make -C host test`** — a missing `<cstdint>`
-      in the vendored GrainflowLib headers. Fixed and wired into the suite; it now covers the whole
-      assembled engine, not just the kernel.
-- [x] **Doc sweep** — 7 broken links fixed, a stale `CLAUDE.md` reference dropped, a stray tool-call
-      artifact removed from `chuck-midi-in-porting.md`, the stale "186 KB SRAM_EXEC" figure in
-      `architecture.md` corrected, plus `make help` and a real `.PHONY: test`.
+- [x] **CI** (`.github/workflows/ci.yml`) — 22 firmware builds (20 engines + `TERMINAL=1` on two), the four off-target suites + `check-boundary`, and a CMake build of the six flag-sensitive engines. `csound`/`chuck` are in `qspi-libs.yml` because each cross-builds a large runtime first. This is the standing answer to the `chorus`/`pstretch` class of breakage (an engine that stops linking and nobody notices) and to P5's CMake drift.
 
-- [x] **Host tests for `granular` and `mosc`.** `host/test_mosc.cpp` instantiates and renders **all 24
-      Plaits engines**, plus Gate-vs-Drone, level, and the `live_params` round-trip — mosc was the
-      largest engine in the tree with no off-target coverage, and being a QSPI build it is not even
-      exercised by the normal `ENGINE=` sweep. `host/test_granular_audio.cpp` covers granular's **audio
-      path** (load → play → level scaling, record → playback, all three modes); the pre-existing
-      `test_engine_params.cpp` already covered its *parameter surface*, which the review missed —
-      correction noted in `REVIEW.md`.
-- [x] **P5, the CMake decision — resolved: keep both, Makefile canonical.** See P5 below and
-      [`docs/dev/cmake-gap.md`](docs/dev/cmake-gap.md#decision-2026-08-08-keep-both--makefile-canonical).
-      Conditional on arming CI.
-- [x] **Front-door restructure.** README opens with a four-step quickstart (binary → flash → card →
-      first sound) above the catalogue; `docs/manual.md` is now the **platform** manual with a
-      per-engine routing table, and granular's control reference moved into
-      [`docs/engines/granular.md`](docs/engines/granular.md) where it belongs.
-- [x] **`SynClock::_external_clock` was never initialized** — found by writing the granular audio test.
-      Same defect as `Divider::_triplets_on`, in the same subsystem: declared, absent from the
-      constructor's init list, masked on target by `.bss` zeroing. Off target it could come up believing
-      it was externally slaved, in which case `Run()` only *arms* and the internal clock never emits —
-      measured at **0 ticks in 3000 blocks**. That is why nothing clock-dependent had ever been testable
-      off-target, and why `test_engine_params`'s `transport.tick(false)` calls were doing nothing.
+      - [x] **Arm the automatic triggers — done 2026-08-11 (armed; first real run still unobserved).** `ci.yml` now fires on `push` to any branch and on `pull_request`; `qspi-libs.yml` keeps its deliberate manual-only stance for push/PR but has the Monday 04:00 UTC `schedule` uncommented. Both files parse and carry the intended trigger sets. **Caveat — neither workflow has yet completed a run on a GitHub runner.** The original plan was dispatch-then-uncomment; arming first means the next push IS the first run, so watch it. First likely friction: the `carlosperate/arm-none-eabi-gcc-action` pin (`10-2020-q4`, matching the local 10.2.1). Second: a PR from a same-repo branch matches both `push` and `pull_request` and the `concurrency` groups differ by ref, so it costs two full matrix runs — narrow the `push` branches if that bites. Note also that GitHub disables `schedule` on a repo with 60 days of no activity, so a quiet period silently retires the weekly QSPI check.
 
-**Still open from the review** (each needs a bench, not typing): the P2 session, which everything
-hardware-gated funnels into. CI's automatic triggers were armed 2026-08-11, so the only thing left
-there is watching the first real run go green.
+- [x] **`Divider::_triplets_on` was never initialized** — omitted from the constructor's init list and with no default member initializer, so it read as indeterminate. Masked on target by `.bss` zeroing (every Divider lives inside the file-static `AppImpl`), live UB on the host, and the reason 7 checks in `test/test_divider.cpp` failed. `test/` is now 116/116. Note that `set_triplets_on()`/`set_swing()` are still **reached from nowhere in the firmware** — implemented, integrated into `tick()`, tested, and unreachable by any gesture. Kept deliberately (see the note in `src/dsp/divider.h`); wiring them to a gesture is open work.
 
-> **Update 2026-08-01 - the bench session is now instrumented.** This file was written as if P2 could > only be a manual listening pass. That predates the USB-C terminal channel, which was fixed and verified > on hardware 2026-07-31 (root cause: the panel jack is on OTG_HS, not OTG_FS - see > [`terminal-impl.md`](docs/dev/terminal-impl.md)). Two things landed since, both host-verified: > > - **`query cpu` / `cpumin` / `cpumax` + `reset cpu`** - the platform's `CpuLoadMeter` is now readable >   over the channel, so P2's headroom numbers are `reset cpu` -> drive the engine -> `query cpumax`, >   scripted per engine. Previously the meter needed `METER=1`, which brings up a second USB device on >   the same OTG core the terminal uses - the numbers and the channel that would collect them were >   mutually exclusive. > - **`live_params()`/`live_configs()` on every engine** - the stated blocker on `make test-hw`. The >   generic sweep no longer sets params engines ignore, so the mechanical half of P2 can run unattended. > > Neither is hardware-verified yet; both fold into the P2 session. > > **And one regression found on the way - now FIXED and hardware-verified.** `pstretch` had stopped > building entirely: not "cannot host the terminal" but no link at all, terminal or not, at either > window (`region SRAM overflowed by 80576 bytes` on the committed `v0.6.1` tree). Commit `993210f` > moved 114K from the data `SRAM` region into `SRAM_EXEC` (186K -> 300K) so the channel would fit > everywhere; pstretch's FFT working set needed 297664 B of exactly that region. > > Fixed with a per-engine linker script, `linker/alt_sram_pstretch.lds` (200K/312K instead of > 300K/212K), selected automatically on `ENGINE=pstretch` so a plain `make ENGINE=pstretch` is correct > too. Same approach and precedent as `linker/alt_qspi_chuck.lds`, and it leaves the other 20 engines on > the 300K split untouched. **All three pstretch images flashed and confirmed working on hardware > 2026-08-01** (8192 with and without the terminal, and 4096 with it) - so the moved code/data boundary > boots, which a link check could not have established. > > **P2 is therefore no longer purely pending - its first engine is measured.** `make test-hw` ran > against real hardware for the first time (`30 passed, 3 skipped`), and pstretch has CPU numbers: >
+- [x] **The `web/` export was order-dependent** — `sk_card.verify_card` walked with an unsorted `os.walk`, so the finding ORDER varied by filesystem while the committed fixture is compared byte-for-byte. It could fail on another machine with identical code. Sorted at the walk and again in the exporter.
+
+- [x] **graincloud/granular duplication removed** — `src/engine/graincloud/` was a byte-for-byte copy of the granular tree (35 of 42 files identical, ~3,400 lines) that had begun to drift, with the *published* engine being the copy that received fewer fixes. Restored to the `SPK_GRAIN_GF` design its own impl doc already described. `src/engine/granular/` did **not** move — see `docs/dev/graincloud-impl.md` for why (upstream diffability).
+
+- [x] **`host/test_graincloud` was broken and excluded from `make -C host test`** — a missing `<cstdint>` in the vendored GrainflowLib headers. Fixed and wired into the suite; it now covers the whole assembled engine, not just the kernel.
+
+- [x] **Doc sweep** — 7 broken links fixed, a stale `CLAUDE.md` reference dropped, a stray tool-call artifact removed from `chuck-midi-in-porting.md`, the stale "186 KB SRAM_EXEC" figure in `architecture.md` corrected, plus `make help` and a real `.PHONY: test`.
+
+- [x] **Host tests for `granular` and `mosc`.** `host/test_mosc.cpp` instantiates and renders **all 24 Plaits engines**, plus Gate-vs-Drone, level, and the `live_params` round-trip — mosc was the largest engine in the tree with no off-target coverage, and being a QSPI build it is not even exercised by the normal `ENGINE=` sweep. `host/test_granular_audio.cpp` covers granular's **audio path** (load → play → level scaling, record → playback, all three modes); the pre-existing `test_engine_params.cpp` already covered its *parameter surface*, which the review missed — correction noted in `REVIEW.md`.
+
+- [x] **P5, the CMake decision — resolved: keep both, Makefile canonical.** See P5 below and [`docs/dev/cmake-gap.md`](docs/dev/cmake-gap.md#decision-2026-08-08-keep-both--makefile-canonical). Conditional on arming CI.
+
+- [x] **Front-door restructure.** README opens with a four-step quickstart (binary → flash → card → first sound) above the catalogue; `docs/manual.md` is now the **platform** manual with a per-engine routing table, and granular's control reference moved into [`docs/engines/granular.md`](docs/engines/granular.md) where it belongs.
+
+- [x] **`SynClock::_external_clock` was never initialized** — found by writing the granular audio test. Same defect as `Divider::_triplets_on`, in the same subsystem: declared, absent from the constructor's init list, masked on target by `.bss` zeroing. Off target it could come up believing it was externally slaved, in which case `Run()` only *arms* and the internal clock never emits — measured at **0 ticks in 3000 blocks**. That is why nothing clock-dependent had ever been testable off-target, and why `test_engine_params`'s `transport.tick(false)` calls were doing nothing.
+
+**Still open from the review** (each needs a bench, not typing): the P2 session, which everything hardware-gated funnels into. CI's automatic triggers were armed 2026-08-11, so the only thing left there is watching the first real run go green.
+
+> **Update 2026-08-01 - the bench session is now instrumented.** This file was written as if P2 could > only be a manual listening pass. That predates the USB-C terminal channel, which was fixed and verified > on hardware 2026-07-31 (root cause: the panel jack is on OTG_HS, not OTG_FS - see > [`terminal-impl.md`](docs/dev/terminal-impl.md)). Two things landed since, both host-verified: > > - **`query cpu` / `cpumin` / `cpumax` + `reset cpu`** - the platform's `CpuLoadMeter` is now readable > over the channel, so P2's headroom numbers are `reset cpu` -> drive the engine -> `query cpumax`, > scripted per engine. Previously the meter needed `METER=1`, which brings up a second USB device on > the same OTG core the terminal uses - the numbers and the channel that would collect them were > mutually exclusive. > - **`live_params()`/`live_configs()` on every engine** - the stated blocker on `make test-hw`. The > generic sweep no longer sets params engines ignore, so the mechanical half of P2 can run unattended. > > Neither is hardware-verified yet; both fold into the P2 session. > > **And one regression found on the way - now FIXED and hardware-verified.** `pstretch` had stopped > building entirely: not "cannot host the terminal" but no link at all, terminal or not, at either > window (`region SRAM overflowed by 80576 bytes` on the committed `v0.6.1` tree). Commit `993210f` > moved 114K from the data `SRAM` region into `SRAM_EXEC` (186K -> 300K) so the channel would fit > everywhere; pstretch's FFT working set needed 297664 B of exactly that region. > > Fixed with a per-engine linker script, `linker/alt_sram_pstretch.lds` (200K/312K instead of > 300K/212K), selected automatically on `ENGINE=pstretch` so a plain `make ENGINE=pstretch` is correct > too. Same approach and precedent as `linker/alt_qspi_chuck.lds`, and it leaves the other 20 engines on > the 300K split untouched. **All three pstretch images flashed and confirmed working on hardware > 2026-08-01** (8192 with and without the terminal, and 4096 with it) - so the moved code/data boundary > boots, which a link check could not have established. > > **P2 is therefore no longer purely pending - its first engine is measured.** `make test-hw` ran > against real hardware for the first time (`30 passed, 3 skipped`), and pstretch has CPU numbers: >
+>
 > | | WINDOW=8192 | WINDOW=4096 |
 > |---|---|---|
 > | CPU avg / max | 41.5% / **87.6 -> 91.3% (still climbing)** | 33.3% / **63.6% (converged)** |
 > | `SRAM` (312K) | 97.40% | 82.01% |
+>
 > > **Open decision - pstretch's default window is now a voicing call with evidence attached.** 4096 is > the only config with real margin on both axes at once (~36% CPU, ~50 KB data, vs ~9% and ~8 KB), and > its peak has converged where 8192's had not - so 8192's true worst case is unknown and worse than > 91%. But 4096 is a shorter smear (~85 ms vs ~171 ms) and the long wash may be the point of the > engine. **Default stays 8192 until someone listens to both.** Numbers in > [`docs/engines/pstretch.md`](docs/engines/pstretch.md).
 
 Priority is driven less by size than by what unblocks/gates what, and by whether an item is **build-verifiable on the host** vs. **hardware-gated** (needs a flash to verify). Most of the open work is now hardware-gated and has piled up: several engines have been *flashed and heard informally but not rigorously measured/voiced* - they sound alive, but CPU headroom (`Meter::cpu`) and the full voicing range haven't been pinned down. The dominant move is therefore a single bench session (P2) that does that measured pass; the remaining items are a deliberate code refactor (P3), an optional voicing tweak (P4), and a strategic build-system decision (P5). Ahead of all of them sits **P0**: the desk/host audit of whether every engine uses the full UI/indicator grammar is **done** (see `indicator-comparison.md` §7), leaving the ranked toolkit migration as the top actionable item (its apply step is hardware-gated and folds into P2).
@@ -278,11 +217,9 @@ So do it deliberately with a hardware flash test (judge by ear, not by bit-ident
 
 Optional voicing tweak, not a defect. The MODFREQ ("cycle") knob -> wow/flutter rate map in `src/engine/tape/tapefx.dsp:36-38` is a **cubic** curve with a low floor:
 
-```c
-rc    = rate * rate * rate; // favor very low frequencies, increase slowly
-wowHz = 0.1 + rc * 2.4;     // 0.1 .. 2.5 Hz
-fltHz = 0.5 + rc * 11.5;    // 0.5 .. 12 Hz
-```
+    rc    = rate * rate * rate; // favor very low frequencies, increase slowly
+    wowHz = 0.1 + rc * 2.4;     // 0.1 .. 2.5 Hz
+    fltHz = 0.5 + rc * 11.5;    // 0.5 .. 12 Hz
 
 This is good enough as-is, but it's worth experimenting with two softer variants:
 
@@ -294,25 +231,7 @@ Levers are the three lines above; re-tune and `make faust-gen` (regenerates `fau
 
 ## P5 - Decide the CMake adoption — **RESOLVED 2026-08-08: keep both, Makefile canonical**
 
-> **Decision and its reasoning: [`docs/dev/cmake-gap.md`](docs/dev/cmake-gap.md#decision-2026-08-08-keep-both--makefile-canonical).**
->
-> This item framed the choice as binary — finish adoption or back it out — because three build files
-> with a hand-duplicated engine list drift silently, and had (seven divergences, two of them hard build
-> failures). CI now builds six flag-sensitive engines through CMake alongside the full Makefile matrix,
-> so the drift is caught mechanically; the liability was never having two build systems, it was having
-> no forcing function.
->
-> **Condition met 2026-08-11:** `ci.yml` now runs on push and pull request, so the CMake parity matrix
-> is a forcing function rather than a button someone has to remember. (`qspi-libs.yml` stays off
-> push/PR by design, on a weekly schedule.) One caveat: neither workflow has yet completed a run on a
-> GitHub runner, so the first push is also the first proof.
->
-> **Explicitly NOT adopted:** item 4 below, the compiler-enforced platform/engine boundary, which was
-> the original headline justification. Without it CMake rides along for its per-engine cached build dirs
-> and its correct flag tracking, not for the boundary. Items 1-3 are moot while both stay. Item 5 (a
-> hardware flash of a CMake image) is unchanged and still belongs to the P2 bench session.
->
-> The original analysis is kept below, unedited, because it is what the decision was made against.
+> **Decision and its reasoning: [`docs/dev/cmake-gap.md`](docs/dev/cmake-gap.md#decision-2026-08-08-keep-both--makefile-canonical).** > > This item framed the choice as binary — finish adoption or back it out — because three build files > with a hand-duplicated engine list drift silently, and had (seven divergences, two of them hard build > failures). CI now builds six flag-sensitive engines through CMake alongside the full Makefile matrix, > so the drift is caught mechanically; the liability was never having two build systems, it was having > no forcing function. > > **Condition met 2026-08-11:** `ci.yml` now runs on push and pull request, so the CMake parity matrix > is a forcing function rather than a button someone has to remember. (`qspi-libs.yml` stays off > push/PR by design, on a weekly schedule.) One caveat: neither workflow has yet completed a run on a > GitHub runner, so the first push is also the first proof. > > **Explicitly NOT adopted:** item 4 below, the compiler-enforced platform/engine boundary, which was > the original headline justification. Without it CMake rides along for its per-engine cached build dirs > and its correct flag tracking, not for the boundary. Items 1-3 are moot while both stay. Item 5 (a > hardware flash of a CMake image) is unchanged and still belongs to the P2 bench session. > > The original analysis is kept below, unedited, because it is what the decision was made against.
 
 **Status update:** the former `spike/cmake-build` branch was **merged into `main`** (`merged karp engines / cmake`, then `update cmake builds`), so `CMakeLists.txt` and `Makefile.cmake` now live on `main` **alongside the original `Makefile`** - the exact "all three build-system files straddling `main`" state the spike notes warned not to ship. The original `Makefile` is still the documented, canonical firmware build (the README's `make ENGINE=...` instructions); CMake rides along, actively maintained, but **unadopted and host-only** - no hardware flash of a CMake `.bin` has been confirmed. So this item is no longer "evaluate a spike"; it is **"finish adoption or back it out,"** and the coexistence is a small standing liability (the engine list is now duplicated across all three files).
 
@@ -362,87 +281,42 @@ Drift is guarded from both sides: `make test-scripts` regenerates the export and
 
 ## P7 - OSC codec for the terminal channel (`SPK_TERMINAL_OSC`) - BUILT 2026-08-09
 
-**Status: built, off-target green, and VERIFIED ON HARDWARE 2026-08-09.** `make ENGINE=<e> TERMINAL=1 OSC=1`.
-The gating question below - whether `TERMINAL=1` ships at all - was answered yes on 2026-08-09, which is
-what unblocked this. What shipped, against what the spec below predicted:
+**Status: built, off-target green, and VERIFIED ON HARDWARE 2026-08-09.** `make ENGINE=<e> TERMINAL=1 OSC=1`. The gating question below - whether `TERMINAL=1` ships at all - was answered yes on 2026-08-09, which is what unblocked this. What shipped, against what the spec below predicted:
 
-- **Firmware.** `src/terminal/{slip.h,osc.h,osc_decode.cpp,osc_sink.h,osc_encode.cpp,osc_addr.{h,cpp}}`.
-  Layer [2] only; layers [1] and [3] are untouched, and an address resolves to a line in the existing
-  grammar which goes through the existing `dispatch_line()`, so there is no second verb table.
-- **`IEngine::param_label()`** landed as specified - one virtual, defaulting to nullptr, cosmetic to the
-  device. **`radio` and `tape` implement it** (6 and 10 labels): radio's PITCH advertises as *station*,
-  tape's `Size` as *character* and its two grit slots as the low-pass they actually drive. Every other
-  engine keeps the default, producing a semantic tier identical to the generic one minus the `param/`
-  segment - the documented degraded-not-broken path. `host/test_osc_labels.cpp` checks both tables
-  against the REAL engines, including that no two live slots on one engine share a label.
-- **The logger/SLIP conflict** took shortcut (a): `OSC=1` with `DEBUG=1` is a build error. The right
-  answer, wrapping log output as `/sk/log` frames, is still open and is what would make `DEBUG=1` usable
-  on an OSC build.
-- **Host side.** `tools/skdev/{osc,semantic,oscdevice}.py` - wire format, the generated semantic tier,
-  and an `OscDevice` with the same method surface as `Device`. The first two are dependency-free, so
-  `tools/test_osc_codec.py` (24 checks) runs in CI with no pyserial and no hardware, against a describe
-  bundle emitted by the real firmware code path.
-- **Tests.** `host/test_terminal_osc.cpp` (`make -C host test-terminal-osc`), wired into `make -C host
-  test`. Covers SLIP, the wire format, coercion, every address family against the exact `IEngine` call,
-  reply typing, ack mode, the error taxonomy, inbound bundles, and `describe`.
-- **Cost, measured:** ~9.0 KB `SRAM_EXEC` + ~12.4 KB SRAM over the line build - roughly 4x the spec's
-  estimate, mostly the 6 KB descriptor-bundle scratch the estimate omitted entirely. `delay` goes 68.9%
-  -> 72.3% of `SRAM_EXEC`. See the footprint table in the spec.
+- **Firmware.** `src/terminal/{slip.h,osc.h,osc_decode.cpp,osc_sink.h,osc_encode.cpp,osc_addr.{h,cpp}}`. Layer [2] only; layers [1] and [3] are untouched, and an address resolves to a line in the existing grammar which goes through the existing `dispatch_line()`, so there is no second verb table.
+
+- **`IEngine::param_label()`** landed as specified - one virtual, defaulting to nullptr, cosmetic to the device. **`radio` and `tape` implement it** (6 and 10 labels): radio's PITCH advertises as *station*, tape's `Size` as *character* and its two grit slots as the low-pass they actually drive. Every other engine keeps the default, producing a semantic tier identical to the generic one minus the `param/` segment - the documented degraded-not-broken path. `host/test_osc_labels.cpp` checks both tables against the REAL engines, including that no two live slots on one engine share a label.
+
+- **The logger/SLIP conflict** took shortcut (a): `OSC=1` with `DEBUG=1` is a build error. The right answer, wrapping log output as `/sk/log` frames, is still open and is what would make `DEBUG=1` usable on an OSC build.
+
+- **Host side.** `tools/skdev/{osc,semantic,oscdevice}.py` - wire format, the generated semantic tier, and an `OscDevice` with the same method surface as `Device`. The first two are dependency-free, so `tools/test_osc_codec.py` (24 checks) runs in CI with no pyserial and no hardware, against a describe bundle emitted by the real firmware code path.
+
+- **Tests.** `host/test_terminal_osc.cpp` (`make -C host test-terminal-osc`), wired into `make -C host test`. Covers SLIP, the wire format, coercion, every address family against the exact `IEngine` call, reply typing, ack mode, the error taxonomy, inbound bundles, and `describe`.
+
+- **Cost, measured:** ~9.0 KB `SRAM_EXEC` + ~12.4 KB SRAM over the line build - roughly 4x the spec's estimate, mostly the 6 KB descriptor-bundle scratch the estimate omitted entirely. `delay` goes 68.9% -> 72.3% of `SRAM_EXEC`. See the footprint table in the spec.
 
 **What is left:**
 
-- [x] **A hardware pass — DONE 2026-08-09, passed.** Cross-codec parity on a cased Spotykach running
-      `tape`: **63/63 identical** against both codecs (`make test-hw` vs `make test-hw CODEC=osc`).
-      Because the sweep's cases are generated from `describe`, an identical result list also proves both
-      codecs advertise the same param/config/query sets. The ~4 KB descriptor bundle arrives whole;
-      steady-state round trip is 0.18 ms. Five defects were found and fixed in the process (one
-      firmware: OSC describe dropped Enum labels; four host-client) — see the spec's bench section.
-- [ ] **`/sk/log` framing**, to lift the `DEBUG=1` restriction.
-- [x] **`param_label()` for the remaining engines — DONE 2026-08-09.** 16 engines now carry tables
-      (115 labels): radio, tape, graincloud, delay, qdelay, edrums, reso, mosc, reverb, shuttle,
-      softcut, bard, glitch, pstretch, csound, chuck. Three deliberate abstentions, each for a reason
-      worth keeping:
-      - **granular** — the shared `ParamId` vocabulary IS granular's own words (the enum "mirrors the
-        granular engine's MValue-backed set"), so layer 2 and layer 3 coincide and a table would just
-        be a second copy of `kParamNames` that could drift from it.
-      - **csound / chuck** — only `Aux` ("patch") is labelled. Every other slot is a generic
-        pass-through to the loaded `.orc`/`.ck`, whose meaning the PATCH defines; a fixed label would
-        be a confident lie that changes with every patch.
-      - **chorus / filter / gigaverb / voice** — these never narrowed `live_params()`, so `describe`
-        lists the whole `ParamId` enum. Labelling there would name slots the engine ignores. They need
-        liveness masks first; that is the real prerequisite.
-      `host/test_osc_labels.cpp` links 11 of them and enforces the invariants on all 11.
+- [x] **A hardware pass — DONE 2026-08-09, passed.** Cross-codec parity on a cased Spotykach running `tape`: **63/63 identical** against both codecs (`make test-hw` vs `make test-hw CODEC=osc`). Because the sweep's cases are generated from `describe`, an identical result list also proves both codecs advertise the same param/config/query sets. The ~4 KB descriptor bundle arrives whole; steady-state round trip is 0.18 ms. Five defects were found and fixed in the process (one firmware: OSC describe dropped Enum labels; four host-client) — see the spec's bench section.
 
-- [x] **`live_params()` for chorus, filter, gigaverb, voice — ALREADY PRESENT; the earlier claim here
-      that they were missing was wrong.** All four inherit a DERIVED mask from their shared wrapper:
-      `FaustEngine`/`FaustChainEngine` compute it from the bind table the manifest generates
-      (`faust_fx.h`, `faust_chain.h`), and `GenEngine` from the wrapper's `index_of` switch
-      (`gen_engine.h`). Verified by instantiating each: chorus `masked=1` with 3 advertised params
-      (its 4th bind is ModSpeed, platform-owned and filtered out), filter and voice `masked=1` with 4.
-      Deriving is strictly better than the hand-written masks the other engines carry — these headers
-      are GENERATED, so a hand-listed mask would be a second copy of the bind table, free to drift on
-      the next `make faust-engine`.
+- [ ] **`/sk/log` framing**, to lift the `DEBUG=1` restriction.
+
+- [x] **`param_label()` for the remaining engines — DONE 2026-08-09.** 16 engines now carry tables (115 labels): radio, tape, graincloud, delay, qdelay, edrums, reso, mosc, reverb, shuttle, softcut, bard, glitch, pstretch, csound, chuck. Three deliberate abstentions, each for a reason worth keeping:
+
+      - **granular** — the shared `ParamId` vocabulary IS granular's own words (the enum "mirrors the granular engine's MValue-backed set"), so layer 2 and layer 3 coincide and a table would just be a second copy of `kParamNames` that could drift from it.
+
+      - **csound / chuck** — only `Aux` ("patch") is labelled. Every other slot is a generic pass-through to the loaded `.orc`/`.ck`, whose meaning the PATCH defines; a fixed label would be a confident lie that changes with every patch.
+
+      - **chorus / filter / gigaverb / voice** — these never narrowed `live_params()`, so `describe` lists the whole `ParamId` enum. Labelling there would name slots the engine ignores. They need liveness masks first; that is the real prerequisite. `host/test_osc_labels.cpp` links 11 of them and enforces the invariants on all 11.
+
+- [x] **`live_params()` for chorus, filter, gigaverb, voice — ALREADY PRESENT; the earlier claim here that they were missing was wrong.** All four inherit a DERIVED mask from their shared wrapper: `FaustEngine`/`FaustChainEngine` compute it from the bind table the manifest generates (`faust_fx.h`, `faust_chain.h`), and `GenEngine` from the wrapper's `index_of` switch (`gen_engine.h`). Verified by instantiating each: chorus `masked=1` with 3 advertised params (its 4th bind is ModSpeed, platform-owned and filtered out), filter and voice `masked=1` with 4. Deriving is strictly better than the hand-written masks the other engines carry — these headers are GENERATED, so a hand-listed mask would be a second copy of the bind table, free to drift on the next `make faust-engine`.
 
       The mistake came from grepping the per-engine headers for `live_params`, which is inherited and
       so does not appear there. Worth remembering: on these four engines, look at the wrapper.
 
-- [x] **`param_label()` for the generated engines — DONE 2026-08-09, by derivation.** Same argument as
-      the mask: the Faust bind table already carries the slider name, and that name IS the layer-3
-      word (`filter` binds "cutoff" to `ParamId::Speed`, "drive" to `Size`). `param_label()` on both
-      Faust wrappers now reads it, so chorus/filter/voice — and every future generated Faust engine —
-      get labels with no per-engine code and no drift. Measured: chorus `size`→*delay*,
-      `modamp`→*depth*; filter `speed`→*cutoff*, `pos`→*reso*, `size`→*drive*; voice `speed`→*freq*,
-      `size`→*shape*, `mix`→*level*. A chain engine can bind one role in both stages (voice puts Speed
-      on the oscillator's "freq" AND the filter's "cutoff"); stage A wins, since it is the sound source
-      and the stage the manifest lists first.
+- [x] **`param_label()` for the generated engines — DONE 2026-08-09, by derivation.** Same argument as the mask: the Faust bind table already carries the slider name, and that name IS the layer-3 word (`filter` binds "cutoff" to `ParamId::Speed`, "drive" to `Size`). `param_label()` on both Faust wrappers now reads it, so chorus/filter/voice — and every future generated Faust engine — get labels with no per-engine code and no drift. Measured: chorus `size`→*delay*, `modamp`→*depth*; filter `speed`→*cutoff*, `pos`→*reso*, `size`→*drive*; voice `speed`→*freq*, `size`→*shape*, `mix`→*level*. A chain engine can bind one role in both stages (voice puts Speed on the oscillator's "freq" AND the filter's "cutoff"); stage A wins, since it is the sound source and the stage the manifest lists first.
 
-- [ ] **`param_label()` for gigaverb** needs a generator change, not a code change. `GenEngine` has no
-      slider names to derive from — `index_of` returns an index — and `gigaverb_engine.h` is GENERATED
-      by `scripts/gen_engine.py` from `gigaverb.json`, so hand-adding a table there would be
-      overwritten. The names already exist as comments the generator emits (`bandwidth`, `damping`,
-      `dry`, `revtime`, `roomsize`, `tail`, `spread`, `early`); the fix is to have it emit a `name_of`
-      alongside `index_of`, and a `param_label()` on `GenEngine` that reads it. Small, but it belongs
-      in the generator.
+- [ ] **`param_label()` for gigaverb** needs a generator change, not a code change. `GenEngine` has no slider names to derive from — `index_of` returns an index — and `gigaverb_engine.h` is GENERATED by `scripts/gen_engine.py` from `gigaverb.json`, so hand-adding a table there would be overwritten. The names already exist as comments the generator emits (`bandwidth`, `damping`, `dry`, `revtime`, `roomsize`, `tail`, `spread`, `early`); the fix is to have it emit a `name_of` alongside `index_of`, and a `param_label()` on `GenEngine` that reads it. Small, but it belongs in the generator.
 
 ---
 
@@ -456,14 +330,16 @@ The terminal channel was designed codec-agnostic from the start: [`terminal-cont
 
 The address is the **slot** - `/sk/a/param/speed`, all lowercase - and the engine's meaning travels as a **cosmetic label in `describe`**, never in the path. That split is what lets *one control-surface layout drive every build*: the wire never changes, and a layout generated from `describe` prints "station" on that fader against radio and "character" on the SIZE fader against tape. Putting the meaning in the path would have forced a per-engine layout and, with it, an engine-name segment - which the spec records as rejected, along with value-in-address, verb-first paths, numeric slots, and silkscreen naming (layer 1 -> layer 2 is one-to-many: PITCH also reaches `Aux` on the Alt layer).
 
-**Two tiers, and only one of them is firmware.** The device speaks a generic, engine-independent address space; a host-side translator generated from `describe` offers the engine-specific, human-readable namespace on top (`/radio/a/station` -> `/sk/a/param/speed`). That keeps the per-engine vocabulary - the part that is hand-maintained and can rot - out of the wire format, where drift would be a protocol bug rather than a display bug. It also gives the engine-name segment the one place it is load-bearing: the semantic namespace *is* engine-specific by definition, which is exactly why it must not be in the generic one. Host cost only; firmware needs nothing beyond `param_label()`.
+**Two tiers, and only one of them is firmware.** The device speaks a generic, engine-independent address space; a host-side translator generated from `describe` offers the engine-specific, human-readable namespace on top (`/radio/a/station` -> `/sk/a/param/speed`). That keeps the per-engine vocabulary - the part that is hand-maintained and can rot - out of the wire format, where drift would be a protocol bug rather than a display bug. It also gives the engine-name segment the one place it is structural: the semantic namespace *is* engine-specific by definition, which is exactly why it must not be in the generic one. Host cost only; firmware needs nothing beyond `param_label()`.
 
 Layer-1 (silkscreen) addressing was considered for the generic tier - the panel is the true cross-engine invariant - and rejected on evidence: `core.ui.cpp:466-524` routes a knob through a `DeckLayout` branch *and* `MValue` soft-takeover pickup, which deliberately swallows a write that does not match the stored knob position. Correct for a pot, catastrophic for a control message; and `alt+size` resolves to `Win` or `PolySlice` depending on mode, so one address would hit different params by config. Reaching it would mean duplicating the UI branch in the terminal (crossing the `check-boundary` line) or pushing messages through the pot-apply pass `mode test` exists to disable.
 
 **What it needs that does not exist yet:**
 
 - **`IEngine::param_label()`** - a third engine-owned virtual beside `live_params()`/`live_configs()`, defaulting to the `kParamNames` entry so no engine is forced to care. ~6-12 short strings for the engines that want them. Deliberately cosmetic: no address, reply or error derives from it, because it is a hand-maintained table that can rot.
+
 - **A resolution to the logger/SLIP conflict.** This is the sharpest constraint OSC adds and it has no analogue in the line build: `[tag]` log lines interleaving on the shared CDC are harmless for line-ASCII and *fatal* for SLIP, where a log line lands inside a packet. Either force `INFS_LOG=0` (the acceptable shortcut) or wrap log output as `/sk/log` frames (the right answer).
+
 - **A host-side translator** in `tools/`, as a component of `skdev` rather than a separate program - `OscDevice` already reads `describe` to build its param map, so the translator is that map plus slugify/compose rules and a reverse index. Testable with no device against the descriptor fixtures that already exist (`web/test/model.test.ts`, ported from `tools/skdev/descriptor.py`): semantic -> generic -> semantic must be the identity.
 
 - **A bigger TX FIFO.** `describe` becomes one OSC bundle carrying full addresses plus labels, ~2-3 KB, and a bundle cannot be streamed the way lines can - so 2 KB -> 4 KB. This turns the dispatch doc's FIFO-sizing *recommendation* into a requirement.

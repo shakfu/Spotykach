@@ -10,13 +10,13 @@ It behaves like any other engine on the panel, but is built and flashed a little
 
 One-time: build the ChucK library (needs the `arm-none-eabi` GCC toolchain). The script fetches a pinned ChucK release and cross-builds it for the Daisy — there is no official ChucK Daisy port, so the script *is* the port:
 
-```
+```text
 scripts/fetch_chuck.sh           # fetch ChucK + cross-build libchuck.a (gitignored sources)
 ```
 
 Then build + flash the engine (put the board in DFU first):
 
-```
+```text
 make engine-chuck                # clean + build the QSPI image + flash
 make program-chuck               # re-flash the last build without rebuilding
 ```
@@ -41,7 +41,7 @@ What each knob actually does is up to the patch (it reads named global variables
 
 Put `.ck` programs in a `chuck/` folder at the card root, named `0.ck` … `7.ck`:
 
-```
+```text
 <card>/chuck/0.ck
 <card>/chuck/1.ck
 ```
@@ -101,7 +101,7 @@ Every concurrent shred and every UGen costs time inside one audio block, and cod
 
 Build with `METER=1` to see the headroom on the panel instead of guessing:
 
-```
+```text
 make engine-chuck METER=1
 ```
 

@@ -47,6 +47,7 @@ Dual-deck + loops are hardware-verified ("working so far"). The latest control-m
 ## Architecture
 
 Producer/consumer split, **per deck**, mirroring the existing `Storage` service:
+
 - **Audio ISR** (`TapeEngine::process()`) only ever touches the bounded/lock-free per-deck SDRAM rings (`play_consume(deck)` / `record_produce(deck)`); it never blocks and never calls FatFs.
 
 - **Main loop** (`AppImpl::Loop` → `StreamDeck::process()`) does the slow FatFs chunked I/O for both decks sequentially - filling each playing deck's ring ahead of the ISR and draining each recording deck's ring to disk.
@@ -56,6 +57,7 @@ Producer/consumer split, **per deck**, mirroring the existing `Storage` service:
 `StreamDeck` holds **two independent `Deck` units** (`std::atomic<Mode> mode` + ring + `PlayStream`/`RecordStream` + `WavStreamReader`/`WavStreamWriter` + `FatFile`/file handle). `process()` pumps both. The `Mem` struct carries one ring per deck (`ring_a`/`ring_b`) + a shared scratch. The `IStreamDeck` contract is per-deck (`play_consume(deck, ...)`, `start_play(deck, path)`, `set_loop(deck, ...)`, ...); it encodes the threading split: the `*_consume`/`*_produce` calls are ISR-only and never block; `start_*`/`stop`/`set_loop` are main-loop-only; the state reads are safe from either side.
 
 Data flow (per deck):
+
 - **Play:** SD file → `WavStreamReader` → `PlayStream.pump()` fills the ring → ISR `play_consume` drains it (zero-fill on underrun). Looping: at EOF `PlayStream` calls `source->rewind()` and keeps filling.
 
 - **Record:** ISR `record_produce` fills the ring → `RecordStream.pump()` → `WavStreamWriter` (mono) → on stop, flush tail + `finalize()` patches the size fields.
@@ -69,6 +71,7 @@ SDRAM: **one 1 MB ring per deck** (static `DSY_SDRAM_BSS` in `buffer.sdram.cpp`,
 ## Files
 
 New (core, host-tested, engine-agnostic):
+
 - `src/memory/spsc_ring.h` — lock-free SPSC byte ring over an external buffer (kfifo-style, wrap-safe).
 
 - `src/memory/audio_stream.h` — `IChunkSource` (+ `rewind`) / `IChunkSink`, `PlayStream` (+ looping), `RecordStream`.
@@ -80,6 +83,7 @@ New (core, host-tested, engine-agnostic):
 - `host/test_stream.cpp` — end-to-end suite incl. the loop-rewind test (`make -C host test`).
 
 New (device):
+
 - `src/engine/istreamdeck.h` — the per-deck `IStreamDeck` contract (+ `set_loop`/`loop_frames`).
 
 - `src/hw/fat_file.{h,cpp}` — FatFs-backed `IByteFile` (body guarded `#if defined(SPK_ENGINE_TAPE)`).
@@ -95,6 +99,7 @@ New (device):
 - `host/test_tape.cpp` — host test for the tape FX (param round-trip incl. filter cutoff/reso, saturation wired/bounded, wow/flutter modulates, low-pass attenuates a high tone + resonance boosts near the corner, playback gate), wired into `make -C host test`. Each A/B comparison runs its engine in its **own arena** (a shared `ctx` restarts the bump allocator at the same base, aliasing kernels).
 
 Edited:
+
 - `src/engine/engine_context.h` — adds `IStreamDeck* stream = nullptr;`.
 
 - `src/hw/buffer.sdram.{h,cpp}` — `streamMem()` + the per-deck SDRAM rings (`ring_a`/`ring_b`, guarded).
@@ -170,6 +175,7 @@ Chain: **wow/flutter -> Jiles-Atherton hysteresis/saturation -> resonant low-pas
 ## What's left for the implementation
 
 ### Hardening (known gaps)
+
 - **SD-full / partial `f_write`** — `RecordStream::pump()` pulls bytes out of the ring before `sink->write()`; a short write (disk full) loses them. Don't advance the ring until written, or stop cleanly on SD-full.
 
 - **Error feedback** — done (coarse): `start_play` / `start_record` failures flash the ring amber ~1.2 s. Still one colour for all causes (missing file / not mounted / disk full); per-reason feedback would need `StreamDeck` to report a reason code.
@@ -181,6 +187,7 @@ Chain: **wow/flutter -> Jiles-Atherton hysteresis/saturation -> resonant low-pas
 - **Concurrency review** — play-finished + finalize + loop-rewind observed working on device; the remaining edge cases of the ISR <-> main-loop handshakes (stop during the `_finalizing` flush window, the Frippertronics ISR->prepare stop flag, underrun at a loop seam) are reasoned-through but not yet stress-tested.
 
 ### Feature backlog
+
 - **More slots / a browser** — 8 slots per deck exist now (`/tapes/tape_<d>_<n>.wav`, Alt+PITCH select, with a recorded-vs-empty selector); more banks or a proper file browser are the next step.
 
 - **Seek / scrub** within the long file (`f_lseek` + ring flush).
@@ -192,6 +199,7 @@ Chain: **wow/flutter -> Jiles-Atherton hysteresis/saturation -> resonant low-pas
 - **Loop-mode tuning** — the seam-fade length and Frippertronics decay/floor are first-cut constants; tune by ear. A wider / quantized varispeed range; progress/level meters on the rings.
 
 ### Docs / housekeeping
+
 - `CHANGELOG.md` — [done] `[Unreleased]` tape entry (kept current with the dual-deck work).
 
 - `README.md` / `docs/engines/README.md` — [done] `tape` in the engine lists, build options, flash targets.

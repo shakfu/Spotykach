@@ -28,7 +28,7 @@ The division table (`kDivBeats`, ascending so SIZE up = longer): `1/16T, 1/16, 1
 
 ![Delay control surface](../media/delay-controls.svg)
 
-_Generated from [`docs/diagrams/controls/delay.json`](../diagrams/controls/delay.json) via `make diagrams`._
+*Generated from [`docs/diagrams/controls/delay.json`](../diagrams/controls/delay.json) via `make diagrams`.*
 
 | Control | `ParamId` / config | Function |
 |---|---|---|

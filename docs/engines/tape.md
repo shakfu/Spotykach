@@ -25,9 +25,7 @@ Three knobs/controls place the decks in that bus:
 | **MIX knob** (per deck) | `Mix` | per-deck **playback volume** |
 | **Mix fader** | `Crossfade` | **A/B blend** (DJ-style: centre = both full, ends = one deck only) |
 
-(Bare **POS** is the tape-FX **saturation drive** — see the Controls table below and [Tape FX](#tape-fx).
-It was reserved for a future loop-start control when this section was written, which is no longer true:
-`tape_engine.cpp:127` routes it to `_fx_n[0]`.)
+(Bare **POS** is the tape-FX **saturation drive** — see the Controls table below and [Tape FX](#tape-fx). It was reserved for a future loop-start control when this section was written, which is no longer true: `tape_engine.cpp:127` routes it to `_fx_n[0]`.)
 
 The routing switch (mirrors the panel L/C/R, granular's int convention):
 
@@ -45,7 +43,7 @@ Total per-deck gain into the bus = **MIX volume x mix-fader blend x pan(L/R)**.
 
 ![Tape control surface](../media/tape-controls.svg)
 
-_Generated from [`docs/diagrams/controls/tape.json`](../diagrams/controls/tape.json) via `make diagrams`._
+*Generated from [`docs/diagrams/controls/tape.json`](../diagrams/controls/tape.json) via `make diagrams`.*
 
 | Control | Action |
 |---|---|

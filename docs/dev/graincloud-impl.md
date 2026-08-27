@@ -6,17 +6,14 @@ Developer notes for the `graincloud` engine (user doc: [`docs/engines/graincloud
 
 `graincloud` is **the granular engine compiled with `SPK_GRAIN_GF`**, which swaps granular's grain DSP (`Generator`/`Vox`/`Window`) for a GrainflowLib cloud. The build compiles `src/engine/granular/*.cpp` with its own `SPK_ENGINE_GRAINCLOUD` define and its own IEngine wrapper (`graincloud_engine.cpp` substitutes for `granular_engine.cpp`); everything else - recording, SD storage, dual-deck, crossfade, FX, UI - is the same source, inherited unchanged. This replaced an earlier *standalone* graincloud engine that reimplemented all that plumbing from scratch and kept hitting platform-integration bugs (record gesture, storage crash, crossfade traps); inheriting granular's proven plumbing removed that entire class of problems.
 
-> **History (2026-08-08).** This architecture was silently lost at some point: `src/engine/graincloud/` became a byte-for-byte **copy** of the granular tree - 35 of 42 files identical, ~3,400 duplicated lines - so fixes to `granular/` stopped reaching the published engine, and the two had begun to drift. The copy has been deleted and the `SPK_GRAIN_GF` design restored, with the guarded blocks living in the three files that actually differ (`generator.h`, `generator.cpp`, and two lines of `deck.cpp`).
->
-> **Why the guards are in `granular/` rather than a shared `graincore/` directory.** `src/engine/granular/` is a deliberately *frozen* copy of the upstream Synthux Academy Core, kept diffable against it (see [`1.2.0-upstream-sync.md`](1.2.0-upstream-sync.md)). Relocating it to a neutral directory would have made every future upstream diff a rename-plus-edit. Keeping it in place and marking the three divergent regions with `#if SPK_GRAIN_GF` costs ~30 lines of clearly-labelled diff noise in files that were *already* divergent copies - strictly less upstream burden than the duplication it replaces.
->
-> Because both engines now compile the same sources to the same object basenames with different flags - and `SPK_GRAIN_GF` **adds members to `Generator`** - a `granular`↔`graincloud` switch must invalidate every object. `build/.grainflavor-stamp` in the Makefile does that, in the same idiom (and for the same reason) as the `TERMINAL`/`USBDIAG` stamps.
+> **History (2026-08-08).** This architecture was silently lost at some point: `src/engine/graincloud/` became a byte-for-byte **copy** of the granular tree - 35 of 42 files identical, ~3,400 duplicated lines - so fixes to `granular/` stopped reaching the published engine, and the two had begun to drift. The copy has been deleted and the `SPK_GRAIN_GF` design restored, with the guarded blocks living in the three files that actually differ (`generator.h`, `generator.cpp`, and two lines of `deck.cpp`). > > **Why the guards are in `granular/` rather than a shared `graincore/` directory.** `src/engine/granular/` is a deliberately *frozen* copy of the upstream Synthux Academy Core, kept diffable against it (see [`1.2.0-upstream-sync.md`](1.2.0-upstream-sync.md)). Relocating it to a neutral directory would have made every future upstream diff a rename-plus-edit. Keeping it in place and marking the three divergent regions with `#if SPK_GRAIN_GF` costs ~30 lines of clearly-labelled diff noise in files that were *already* divergent copies - strictly less upstream burden than the duplication it replaces. > > Because both engines now compile the same sources to the same object basenames with different flags - and `SPK_GRAIN_GF` **adds members to `Generator`** - a `granular`↔`graincloud` switch must invalidate every object. `build/.grainflavor-stamp` in the Makefile does that, in the same idiom (and for the same reason) as the `TERMINAL`/`USBDIAG` stamps.
 
 The single seam: `Deck::process_out()` calls `_generator.process(bus[0], bus[1])` once per sample. Under `SPK_GRAIN_GF`, `Generator::process()` (generator.cpp) sums a `GfCloud` instead of the `Vox` array; `Generator` keeps its whole interface/state so `Deck`/`Drifter`/`granular_engine` compile and drive it unchanged.
 
 ## GfCloud (`src/engine/graincloud/gf_cloud.{h,cpp}`)
 
 The GrainflowLib cloud core, reading granular's `Buffer`:
+
 - **Per-block/per-sample bridge.** Granular is per-sample; GrainflowLib is per-block (96). `GfCloud::process(out0,out1)` serves one sample, recomputing a 96-sample stereo block at each boundary (`compute_block`).
 
 - **Buffer-reader seam.** `gf_i_buffer_reader<Buffer,float>` callbacks read granular's `Buffer` via `read_linear` (one channel each), report `rec_size()` as the buffer length, and use a Hann LUT for the envelope. A non-finite-position guard prevents `(int)NaN` OOB reads.
@@ -30,6 +27,7 @@ The de-STL'd GrainflowLib itself is vendored under `src/engine/graincloud/thirdp
 ## Knob -> cloud param mapping
 
 `Generator::process` (under the flag) reads granular's stored params and calls `GfCloud::set_params`:
+
 - start (POS) -> cloud centre; size (SIZE) -> grain duration; shape (ENV) -> density; smoothed increment (Speed) -> transpose; spread (Drift) -> position spray.
 
 `GfCloud` derives overlap = `round(onset(density) * duration)` clamped to `[2, kMaxGrains]` (min 2 avoids a single-grain tremolo), sets the grain-clock period to the duration, and normalizes the mixdown gain by the active grain count.

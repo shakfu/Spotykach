@@ -79,7 +79,8 @@ The generated `<name>_engine.h` is **preserved across regeneration** unless `--f
 ## 5. Shared Faust runtime (new): `src/engine/faust/`
 
 Today the zone-capture `CaptureUI` is **duplicated** (a full version in `reverb_engine.cpp`, a trimmed one in `tape/tapefx.h`). Factor it into a shared header, mirroring how `src/engine/gen/` shares `GenEngine<W>`
-+ `genlib_arena`:
+
+- `genlib_arena`:
 
 - **`faust/faust_capture.h`** — the generic `CaptureUI : UI` (label+box → zone\*, captures range) and the `Bind`/`Role` structs, lifted from `reverb_engine.cpp` verbatim.
 

@@ -8,10 +8,10 @@ Implementation, design, and roadmap for `ENGINE=pstretch` — a clean-room, real
 
 **Update 2026-07-01 (b):** the **8192 window is now the default** (~171 ms, lusher wash; 4096 is the `WINDOW=4096` opt-in), flashed and clean by ear incl. the SD+8192 path. A full **modulation / CV / gate control layer** was added — a per-deck LFO (Cycle/Glow) targeting diffusion/stretch/tone via the Size/Pos mod switch, sine/triangle/follower via Mod Type, **Alt+Cycle clock-sync** to tempo; **CV inputs** (V/Oct, Size/Pos, Mix, Crossfade, additive); **gate in** (re-grab / freeze); and **CV/gate out** (the LFO as CV + a per-cycle clock). All reuse the platform's existing mod/cv/gate hooks — no new capabilities. See the Modulation section below; host tests B14–B18. Open item is still the by-ear tuning of the mod ranges + SD character pass.
 
-
 **Phase 1 hardware-verified clean; Phase 2 (SD-file source + full control rework) landed in code.** Phase 1 is flashed on the H7 (spotykach); boots, glitch-free at the full **4096 / 85 ms** window, CPU (via `METER=1`) **avg ~32% / max ~64%** with both decks. Phase 2 adds the SD-file source mode, the Mode-switch source selector (Live/Capture/SD), and the Aux clip selector; it **builds + links + fits** (Make: SRAM_EXEC ~80%, SRAM ~74%, SDRAM ~78% now that the StreamDeck's 2 MB+32 KB SD rings are linked; CMake SRAM_EXEC ~81%) and **passes `make -C host test-pstretch`** (B7 capture-via-Mode, B8 SD source, B9 Aux clip select, B10 off-rate pitch correction, B11 Alt+POS scrub). The full Phase-2 control plan is now implemented; what remains is **NOT yet hardware-verified** (no card with clips tested on device, no by-ear pass).
 
 Done:
+
 - **Live smear** + **Freeze** (Play pad) + **Capture/hold** (Rev pad — grab the recent ~5 s and loop the stretch *through* it). Dual-deck (A=L, B=R), routing, crossfade, dry/wet, ENV tone, ±1-oct pitch.
 
 - **Real-time performance** solved (see that section below): FFT working set in on-chip SRAM, the hop pipelined across blocks, finely-chunked worker ticks. This was the hard part and it is finished.
@@ -23,6 +23,7 @@ Done:
 Async card-mount: the SD card mounts a moment after boot, so `prepare()` keeps any SD deck that is not yet streaming trying to (re)scan `/pstretch` and open a clip until one is playing - self-heals a slow mount, a late-inserted card, an empty folder filled later, or Drift already selected at power-on (no fixed boot window; stops once streaming). If SD is selected but no clips are found, the deck's pad LED shows **red** (vs magenta when streaming) so a card/folder/format problem is visible. Host tests B12/B13.
 
 NOT done / next session:
+
 1. **By-ear pass for SD mode** — SD streaming from `/pstretch` is now confirmed on the device (2026-07-01); still to do: re-measure CPU with clips streaming, and tune the wash character (stretch curve, diffusion, default tone) to taste. The character pass is the one thing only a human can sign off.
 
 2. ~~POS diffusion-vs-scrub contention~~ **DONE** — resolved by **scrub on Alt+POS** (`CapAltPos`): POS stays diffusion; Alt+POS seeks the SD stream playhead to a normalized position in the clip, debounced by a settle timer (mirrors radio, so a sweep only opens the spot you land on) and ignoring sub-1% nudges. Re-seek is `_open_clip(i, start_frame)` from `prepare()` (`_apply_scrub`, main-loop/FatFs); works while frozen (audition frozen spots). Host test B11. Residual: each settled seek re-primes the ring (~170 ms soft swell) — intentional/benign for an ambient scrub.
@@ -49,7 +50,7 @@ This engine is a **clean-room** reimplementation from the published algorithm de
 
 The PaulStretch DSP only ever reads grains from a ring buffer. *What fills that ring* is independent of the stretch math, so one engine can offer several **source modes** behind a selector, all sharing the FFT, window, phase-smear, freeze, and every knob:
 
-```
+```text
             +- Live:    the audio input writes the ring in real time (read head chases it)
 ring buffer +- Capture: the input filled the ring, then froze (read head loops a captured span)
             +- SD-file: a clip streams into the ring slowly, kept ahead of the read head
@@ -82,7 +83,7 @@ In **live** mode the head is clamped to the written, not-yet-overwritten span of
 
 ### Real-time performance (the bit that actually matters on hardware)
 
-A naive "do the whole hop when the output runs dry" pull model is unusable on the device, even though the *average* CPU is low. Measured with `METER=1` (the load meter on the FS_EXTERNAL USB-CDC), the journey was **avg 200% / max 4297%  ->  avg 32% / max 64%**, via three fixes, in order of impact:
+A naive "do the whole hop when the output runs dry" pull model is unusable on the device, even though the *average* CPU is low. Measured with `METER=1` (the load meter on the FS_EXTERNAL USB-CDC), the journey was **avg 200% / max 4297% -> avg 32% / max 64%**, via three fixes, in order of impact:
 
 1. **FFT working set in on-chip SRAM, not the SDRAM arena** (avg 200% -> 40%). The FFT hammers `re/im` and the twiddle/bit-reversal tables with *scattered* access; on the H7 scattered SDRAM (FMC) access is ~10x slower than on-chip SRAM. The whole FFT working set (`re/im`, `ola`, window, tables, the cos/sin LUT) is engine `.bss` (SRAM); only the big per-voice input ring (~1 MB) stays in the SDRAM arena, where it is read roughly sequentially. **General lesson for H7 DSP engines: keep FFT/scattered buffers in SRAM.**
 

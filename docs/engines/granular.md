@@ -4,15 +4,9 @@
 
 The original instrument and the default build: a two-deck granular looper/sampler with recording, overdub, feedback, a per-deck step sequencer, FX, and CV/MIDI. This is the largest engine, and the one the platform's whole knob/pad grammar was designed around.
 
-> Implementation, the DSP graph, and the file map live in [`docs/dev/granular-impl.md`](../dev/granular-impl.md).
-> Everything this page does **not** cover — power, clock and sync, CV/gate, routing, the SD card,
-> `config.txt`, MIDI and flashing — is shared by every engine and lives in [`../manual.md`](../manual.md).
+> Implementation, the DSP graph, and the file map live in [`docs/dev/granular-impl.md`](../dev/granular-impl.md). > Everything this page does **not** cover — power, clock and sync, CV/gate, routing, the SD card, > `config.txt`, MIDI and flashing — is shared by every engine and lives in [`../manual.md`](../manual.md).
 
-**This page is the exhaustive control reference for granular.** It used to live in `docs/manual.md`,
-which is titled as the Spotykach manual and read as though granular were *the* instrument — awkward for
-a project of 21 interchangeable engines, and doubly so because granular is the one engine releases do
-not ship (it is the stock upstream firmware). The platform half of that document stayed put; the
-granular half is below.
+**This page is the exhaustive control reference for granular.** It used to live in `docs/manual.md`, which is titled as the Spotykach manual and read as though granular were *the* instrument — awkward for a project of 21 interchangeable engines, and doubly so because granular is the one engine releases do not ship (it is the stock upstream firmware). The platform half of that document stayed put; the granular half is below.
 
 ## Decks and modes
 

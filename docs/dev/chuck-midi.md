@@ -74,7 +74,7 @@ The viable design is a **null-RtMidi backend** that keeps ChucK's class + buffer
 
 A pragmatic middle path: do **A now** (it satisfies the playable-keyboard need cheaply), and treat **B** as a later capability gated on whether portability of stock MIDI `.ck` files is actually a product goal.
 
-**Highest-uncertainty item to bench first (if B):** the `CBufferAdvance` put/get behaviour across the main-loop/ISR boundary. That is the load-bearing assumption; confirm it under the CritSec before committing to the rebuild.
+**Highest-uncertainty item to bench first (if B):** the `CBufferAdvance` put/get behaviour across the main-loop/ISR boundary. That is the structural assumption; confirm it under the CritSec before committing to the rebuild.
 
 ---
 

@@ -18,7 +18,7 @@ The division table, tempo sync, control smoothing, the crossfading two-head PITC
 
 ![QDelay control surface](../media/qdelay-controls.svg)
 
-_Generated from [`docs/diagrams/controls/qdelay.json`](../diagrams/controls/qdelay.json) via `make diagrams`._
+*Generated from [`docs/diagrams/controls/qdelay.json`](../diagrams/controls/qdelay.json) via `make diagrams`.*
 
 | Control | `ParamId` / config | Function |
 |---|---|---|
@@ -60,7 +60,7 @@ Identical to [`delay`](delay.md): **DoubleMono** (two independent mono delays), 
 
 ## Build
 
-```
+```text
 make engine-qdelay        # clean build + DFU flash
 make -j8 ENGINE=qdelay    # compile only
 ```

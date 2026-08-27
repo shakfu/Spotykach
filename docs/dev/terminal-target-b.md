@@ -1,9 +1,6 @@
 # Target B - engine-specific commands, redesigned
 
-Status: **B1 built (2026-07-31); B2/B3 unbuilt.** The declared query table, the platform-side matching /
-validation / framing / description, the `safe` rule and the host-side `kind` parsing all landed, with
-tape and radio as the first two users. `handle_command` remains for side-effecting verbs. What follows
-is the design as written; deviations and what is still open are marked at the end.
+Status: **B1 built (2026-07-31); B2/B3 unbuilt.** The declared query table, the platform-side matching / validation / framing / description, the `safe` rule and the host-side `kind` parsing all landed, with tape and radio as the first two users. `handle_command` remains for side-effecting verbs. What follows is the design as written; deviations and what is still open are marked at the end.
 
 Context: [`terminal-control.md`](terminal-control.md) (the two-target split), [`terminal-dispatch.md`](terminal-dispatch.md) (how dispatch works today), [`terminal-impl.md`](terminal-impl.md) (what actually landed).
 
@@ -44,36 +41,23 @@ The through-line: the platform half of the channel is a *declared* surface (stat
 
 ## The distinction that matters: safe to call, not query vs action
 
-Target B currently lumps together two things a generic host must treat differently. The obvious split is
-by category - reads versus side-effecting verbs - and that is most of the story:
+Target B currently lumps together two things a generic host must treat differently. The obvious split is by category - reads versus side-effecting verbs - and that is most of the story:
 
-- **Queries** - `loop_ms`, `station`, `grain_count`, `bookmark`. Derived state, side-effect free, safe in
-  any order. This is the overwhelming majority of what engines want and all of the value for testing.
-- **Actions** - `reload`, `seek 12.5`, `save`. A generic host must **not** call these speculatively;
-  sweeping them could clear a buffer or write an SD card.
+- **Queries** - `loop_ms`, `station`, `grain_count`, `bookmark`. Derived state, side-effect free, safe in any order. This is the overwhelming majority of what engines want and all of the value for testing.
 
-But the category is a judgment call and the boundary leaks - see the command model in
-[`terminal-control.md`](terminal-control.md#the-command-model-params-queries-and-actions). Actions
-already return values here (`pad play A` -> `ok empty=1`), so a reply does not make something a query.
-And `IEngine::take_param_reseed()` is a *read* that self-clears, so it would sit in the query column
-while being unsafe to sweep.
+- **Actions** - `reload`, `seek 12.5`, `save`. A generic host must **not** call these speculatively; sweeping them could clear a buffer or write an SD card.
+
+But the category is a judgment call and the boundary leaks - see the command model in [`terminal-control.md`](terminal-control.md#the-command-model-params-queries-and-actions). Actions already return values here (`pad play A` -> `ok empty=1`), so a reply does not make something a query. And `IEngine::take_param_reseed()` is a *read* that self-clears, so it would sit in the query column while being unsafe to sweep.
 
 So the entry is tagged with the property the tooling actually needs rather than the category:
 
-```
+```text
 safe = idempotent && side-effect-free
 ```
 
-`query empty` is safe. A latching read is not, whatever we call it. `pad play` is unsafe regardless of
-its reply. **Only safe entries are advertised in `describe`**, which makes the sweep correct by
-construction: it calls everything it can see, and it can only see things that are safe to call. An
-unsafe read stays reachable through the free-form hook for a human or a per-engine test, it is simply
-not offered to a generic consumer.
+`query empty` is safe. A latching read is not, whatever we call it. `pad play` is unsafe regardless of its reply. **Only safe entries are advertised in `describe`**, which makes the sweep correct by construction: it calls everything it can see, and it can only see things that are safe to call. An unsafe read stays reachable through the free-form hook for a human or a per-engine test, it is simply not offered to a generic consumer.
 
-The trade-off, stated honestly: a category is self-documenting, whereas `safe` puts the burden on
-whoever declares the entry to get one boolean right. The mitigation is that the default is the
-conservative one - an entry is advertised only if it declares itself safe, so forgetting the flag costs
-discoverability rather than correctness.
+The trade-off, stated honestly: a category is self-documenting, whereas `safe` puts the burden on whoever declares the entry to get one boolean right. The mitigation is that the default is the conservative one - an entry is advertised only if it declares itself safe, so forgetting the flag costs discoverability rather than correctness.
 
 ## Proposal
 
@@ -140,9 +124,7 @@ The dispatcher owns everything that is currently boilerplate:
 
 - **Reply framing.** The platform writes `ok `, calls `read_engine_query`, writes CRLF. The engine appends only the value, so it cannot get the grammar wrong.
 
-- **Description.** `describe` walks the same table and emits **only the entries marked `safe`**. One
-  source of truth; drift is structurally impossible, and the sweep cannot reach an unsafe entry because
-  it never learns the name.
+- **Description.** `describe` walks the same table and emits **only the entries marked `safe`**. One source of truth; drift is structurally impossible, and the sweep cannot reach an unsafe entry because it never learns the name.
 
 - **`CapTerminal`** becomes derivable: set it when `engine_queries().count > 0`, rather than asking engines to remember.
 
@@ -150,7 +132,7 @@ The dispatcher owns everything that is currently boilerplate:
 
 Engine queries emit as ordinary `query` lines, with a kind token added to *all* query lines:
 
-```
+```text
 query empty   deck   bool
 query mix     global float
 query route   global enum 0:stereo 1:dmono 2:genstereo
@@ -210,50 +192,34 @@ Per query: ~12 B of table (two pointers, two bytes, padding) plus the name strin
 
 4. **Name collisions with *future* platform queries.** An engine query named `tempo` today would break the day the platform adds one. Reserve a prefix (`e.`), or accept that platform-wins is enough and the descriptor will show the change?
 
-5. **Does `mode test` need to gate anything here?** Safe queries are pure reads, so no. The latching
-   case that would have needed it - a "since last read" counter - is now excluded by declaring
-   `safe = false`, which keeps it out of the sweep entirely.
+5. **Does `mode test` need to gate anything here?** Safe queries are pure reads, so no. The latching case that would have needed it - a "since last read" counter - is now excluded by declaring `safe = false`, which keeps it out of the sweep entirely.
 
-6. **The descriptor cannot express arity.** `query fit <deck> <fraction>` takes an argument, so it
-   cannot be advertised at all - the sweep calls every advertised query with a deck alone. Today that
-   is handled by omission, which costs discoverability. If parameterized queries become common the
-   table needs an arg-count (and probably arg-kind) field.
+6. **The descriptor cannot express arity.** `query fit <deck> <fraction>` takes an argument, so it cannot be advertised at all - the sweep calls every advertised query with a deck alone. Today that is handled by omission, which costs discoverability. If parameterized queries become common the table needs an arg-count (and probably arg-kind) field.
 
-7. **Who audits the `safe` flag?** Nothing verifies it; a mis-declared entry silently becomes sweepable.
-   Options: a naming convention, a review checklist, or accept it as the same class of trust already
-   placed in `live_params()`. Worth a decision before the second engine adopts this, not the first.
-
+7. **Who audits the `safe` flag?** Nothing verifies it; a mis-declared entry silently becomes sweepable. Options: a naming convention, a review checklist, or accept it as the same class of trust already placed in `live_params()`. Worth a decision before the second engine adopts this, not the first.
 
 ## What actually landed (B1, 2026-07-31)
 
-- `EngineQuery` / `EngineQueryTable` / `ValueKind` / `QueryScope` in `engine/terminal_io.h`; the two
-  virtuals `engine_queries()` and `read_engine_query()` on `IEngine`, both no-op by default.
-- **The platform queries became a table of the same shape** (`kPlatformQueries` in `dispatch.cpp`) with
-  its own index-based reader. That was not in the original sketch and is the change that made the rest
-  clean: `describe` now walks one code path over both halves, so the platform cannot drift from the
-  engine either. The `PQ_COUNT` static_assert guards the table/enum pairing on both sides.
-- Wire format `query <name> <scope> <kind> [labels]`, emitted for `safe` entries only. Backward
-  compatibility was verified in practice, not just claimed: a device running pre-`kind` firmware was
-  swept by the new host, which defaults the missing token to `text`.
-- `CapTerminal` is derived from a non-empty table rather than hand-set, in both `caps` and `describe`.
-- Two real users: **tape** (`slot`, `loopmode`, `speed` - the varispeed actually in effect, as opposed
-  to the PITCH knob value `get param speed` already reports) and **radio** (`station` - which station is
-  *actually* streaming, `-1` for none, so a test can assert a seek completed rather than that a knob
-  moved; plus `stations`, `bank`).
-- The platform's own latching read (`reseed`) now declares `safe = false` in the same table, so the rule
-  is enforced by one mechanism for both halves rather than by omission.
+- `EngineQuery` / `EngineQueryTable` / `ValueKind` / `QueryScope` in `engine/terminal_io.h`; the two virtuals `engine_queries()` and `read_engine_query()` on `IEngine`, both no-op by default.
 
-Off-target coverage exercises every `ValueKind`, both scopes, a deliberate name collision with a
-platform query (platform wins), a `safe = false` entry (reachable by name, never advertised), and the
-derived `CapTerminal` bit.
+- **The platform queries became a table of the same shape** (`kPlatformQueries` in `dispatch.cpp`) with its own index-based reader. That was not in the original sketch and is the change that made the rest clean: `describe` now walks one code path over both halves, so the platform cannot drift from the engine either. The `PQ_COUNT` static_assert guards the table/enum pairing on both sides.
+
+- Wire format `query <name> <scope> <kind> [labels]`, emitted for `safe` entries only. Backward compatibility was verified in practice, not just claimed: a device running pre-`kind` firmware was swept by the new host, which defaults the missing token to `text`.
+
+- `CapTerminal` is derived from a non-empty table rather than hand-set, in both `caps` and `describe`.
+
+- Two real users: **tape** (`slot`, `loopmode`, `speed` - the varispeed actually in effect, as opposed to the PITCH knob value `get param speed` already reports) and **radio** (`station` - which station is *actually* streaming, `-1` for none, so a test can assert a seek completed rather than that a knob moved; plus `stations`, `bank`).
+
+- The platform's own latching read (`reseed`) now declares `safe = false` in the same table, so the rule is enforced by one mechanism for both halves rather than by omission.
+
+Off-target coverage exercises every `ValueKind`, both scopes, a deliberate name collision with a platform query (platform wins), a `safe = false` entry (reachable by name, never advertised), and the derived `CapTerminal` bit.
 
 ## Still open after B1
 
-- **B2 (actions).** Not built. `handle_command` is still the only route for side-effecting verbs, and
-  still undiscoverable - deliberately, since a generic host must not invoke them speculatively.
-- **Arity.** `query fit <deck> <fraction>` still cannot be advertised, because the table has no
-  arg-count field. Handled by omission, which costs discoverability.
-- **Nothing audits `safe`.** A mis-declared entry silently becomes sweepable. Same class of trust as
-  `live_params()`, but worth a convention before this spreads further.
-- **`Text` values with spaces.** `query usb` returns a key=value string, which works because hosts take
-  the whole remainder - but it breaks the one-token assumption a stricter parser might make.
+- **B2 (actions).** Not built. `handle_command` is still the only route for side-effecting verbs, and still undiscoverable - deliberately, since a generic host must not invoke them speculatively.
+
+- **Arity.** `query fit <deck> <fraction>` still cannot be advertised, because the table has no arg-count field. Handled by omission, which costs discoverability.
+
+- **Nothing audits `safe`.** A mis-declared entry silently becomes sweepable. Same class of trust as `live_params()`, but worth a convention before this spreads further.
+
+- **`Text` values with spaces.** `query usb` returns a key=value string, which works because hosts take the whole remainder - but it breaks the one-token assumption a stricter parser might make.

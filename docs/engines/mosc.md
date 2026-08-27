@@ -28,7 +28,7 @@ Two switches set behaviour:
 
 ![Mosc control surface](../media/mosc-controls.svg)
 
-_Generated from [`docs/diagrams/controls/mosc.json`](../diagrams/controls/mosc.json) via `make diagrams`._
+*Generated from [`docs/diagrams/controls/mosc.json`](../diagrams/controls/mosc.json) via `make diagrams`.*
 
 | Knob | `ParamId` | Plaits target |
 |---|---|---|

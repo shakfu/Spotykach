@@ -16,7 +16,7 @@ The headline control is **PITCH as a bipolar capstan-speed knob**: noon stops th
 
 ![Shuttle control surface](../media/shuttle-controls.svg)
 
-_Generated from [`docs/diagrams/controls/shuttle.json`](../diagrams/controls/shuttle.json) via `make diagrams`._
+*Generated from [`docs/diagrams/controls/shuttle.json`](../diagrams/controls/shuttle.json) via `make diagrams`.*
 
 | Control | `ParamId` / pad | Scope | Effect |
 |---|---|---|---|

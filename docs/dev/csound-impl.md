@@ -14,7 +14,7 @@ It is **not** an SRAM engine. Csound's linked code is ~2 MB — far over the 186
 
 Build + flash the spotykach (board in DFU before the build finishes; one `dfu-util`, no retry loop):
 
-```
+```text
 make engine-csound      # clean + build the QSPI image + flash
 make program-csound      # re-flash the last build without rebuilding
 ```
@@ -48,6 +48,7 @@ The orchestra is loaded from the card when a numbered slot `/csound/<n>.csd` is 
 ### The heap (the thing that took the longest)
 
 Two heaps, deliberately:
+
 - The **platform's** default heap stays in **SRAM** (`alt_qspi.lds`). It must — global constructors `malloc` *before* `_hw.Init()` powers up the SDRAM controller, so a heap in SDRAM faults there.
 
 - **Csound's** heap is a 12 MB **SDRAM pool** (`src/engine/csound/csound_alloc.cpp`), reached by linking `--wrap=malloc/free/calloc/realloc/aligned_alloc` and gating on a flag that `CsoundEngine::init()` arms (`csound_heap_arm()`) *after* `_hw.Init()`. Csound's MBs at create/compile land in SDRAM; the platform's allocations stay in SRAM. The pool is a **free-capable coalescing allocator** (`CsoundPool`, `src/engine/csound/csound_pool.h`) — a boundary-tag allocator with segregated free lists — so `free`/`realloc` reclaim and coalesce, and a `csoundReset` + recompile returns its megabytes to the pool (this is what makes patch-swapping sustainable; it replaced the original bump pool, which never freed). On pool exhaustion the shim falls back to the SRAM heap so a request never hard-fails, and `in_pool()` routes each pointer's `free`/`realloc` back to whichever heap it came from. The allocator is host-tested in isolation (`make -C host test-csound-alloc`), since it has no `libcsound` dependency.
@@ -72,7 +73,7 @@ Two heaps, deliberately:
 
 `thirdparty/csound/` is Csound 7 (the pinned tag `7.0.0-beta.16` of [`csound/csound`](https://github.com/csound/csound)) with the official `Daisy/` port (toolchain, `Custom.cmake`, examples, linker script, v5.4 bootloader). It is **gitignored** (~115 MB) — fetch + build it with one script:
 
-```
+```text
 scripts/fetch_csound.sh            # clone Csound + wire the symlinks + cross-build libcsound.a
 scripts/fetch_csound.sh --no-build # just fetch + link (build later)
 ```
@@ -81,7 +82,7 @@ By default it downloads the GitHub release **source tarball** for the pinned tag
 
 Under the hood it runs the CMake recipe (also in `thirdparty/csound/Daisy/BUILD.md`):
 
-```
+```text
 cmake .. -DCMAKE_INSTALL_PREFIX=../Daisy \
          -DCUSTOM_CMAKE=../Daisy/Custom.cmake \
          -DCMAKE_TOOLCHAIN_FILE=../Daisy/crosscompile.cmake
@@ -188,7 +189,7 @@ Ordered by leverage. **#1, #2, #3, and #5 are done** (SD patches, the free-capab
 
 - `src/engine/csound/csound_engine.{h,cpp}` — `CsoundEngine : IEngine` (init/`try_compile`/process/set_param/param/render
 
-  + the built-in fallback orchestra + the `channel_for` param map). Compiles only for `ENGINE=csound`.
+  - the built-in fallback orchestra + the `channel_for` param map). Compiles only for `ENGINE=csound`.
 
 - `src/engine/csound/csound_patch.h` — the patch bank: `patch_path`/`scan_patches`/`aux_to_index`/`read_orchestra` (numbered `/csound/<n>.csd` slots, the Alt+PITCH quantizer, read+validate with built-in fallback; header-only, host-tested via `host/test_csound_patch.cpp`).
 

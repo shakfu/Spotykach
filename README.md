@@ -124,7 +124,7 @@ First you must build the libraries. For convenience there is a target in the `Ma
 
 `make -j8 libs`
 
-_Note: The `-j8` flag runs make with 8 parallel jobs, feel free to change the number. It works best if you use the number of cores (including hyperthread cores) on your machine._
+*Note: The `-j8` flag runs make with 8 parallel jobs, feel free to change the number. It works best if you use the number of cores (including hyperthread cores) on your machine.*
 
 Then, build the actual firmware code:
 
@@ -187,7 +187,7 @@ It is git-ignored and is a snapshot of whichever `ENGINE` you built (granular by
 
 ## Flashing the Firmware
 
-The bootloader version used in this project enables USB DFU firmware updating from the _external_ USB port - i.e. the USB-C port on the rear of the main PCB, NOT the one on the Seed. Application firmware can only be flashed using the USB-C port.
+The bootloader version used in this project enables USB DFU firmware updating from the *external* USB port - i.e. the USB-C port on the rear of the main PCB, NOT the one on the Seed. Application firmware can only be flashed using the USB-C port.
 
 1. Compile the firmware using the steps above
 
@@ -276,6 +276,7 @@ Firmware internals are documented under [`docs/`](docs/) — start with [`docs/a
 This project is **MIT** (see [`LICENSE`](LICENSE)), **except the `qdelay` and `glitch` engines**, which are **GPLv3**:
 
 - **`qdelay`** — `src/dsp/diffuser.h` is a port of [qdelay](https://github.com/tiagolr/qdelay)'s GPLv3 `Diffusor`, so that file and `src/engine/qdelay/` (and any firmware built with `ENGINE=qdelay`) are distributed under GPLv3 — see [`src/engine/qdelay/NOTICE.md`](src/engine/qdelay/NOTICE.md) and [`src/engine/qdelay/LICENSE`](src/engine/qdelay/LICENSE).
+
 - **`glitch`** — `src/engine/glitch/glitch_voice.h` ports the algorithms of the GPLv3 [Noisferatu](https://github.com/rob-scape/noisferatu), so `src/engine/glitch/` (and any firmware built with `ENGINE=glitch`) is distributed under GPLv3 — see [`src/engine/glitch/NOTICE.md`](src/engine/glitch/NOTICE.md) and [`src/engine/glitch/LICENSE`](src/engine/glitch/LICENSE).
 
 Every other engine and the platform itself remain MIT and do not include the GPLv3 code. Vendored third-party DSP keeps its own upstream license alongside the code (e.g. `stmlib`).

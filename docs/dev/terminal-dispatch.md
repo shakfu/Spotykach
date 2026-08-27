@@ -88,7 +88,7 @@ static const Verb kVerbs[] = {
 
 ### Flow
 
-```
+```text
 LineSink(line) -> tokenize -> Command
     match verb in kVerbs           -> handler(cmd, ctx)          (platform-reflective, target A/B-L1)
     no match -> engine.handle_command(view, reply)               (engine-specific, target B)
@@ -116,6 +116,7 @@ bool config_from_name(const char*, spotykach::ConfigId&);
 ```
 
 Refinement to the control doc's flag matrix: the **flat id<->name table is part of `SPK_TERMINAL`** (cheap, enables robust named addressing). `SPK_TERMINAL_REFLECT` adds only the *structured descriptor*
+
 - per-engine ranges, deck-scope, which params a build actually uses, and the `describe` dump - which is the genuinely expensive, engine-aware part. (Numeric ids are also accepted as a fallback, so a minimal build can drop the names by compiling the table out.)
 
 ### Verb catalog (phase 1)
@@ -164,72 +165,35 @@ Deck token is `A`/`B`; global params ignore it (pass `A`). Values are floats unl
 
 ### Composite verbs
 
-`reset` and `preset` are the two commands that do many things at once. Both operate on exactly the set
-`describe` advertises - live per the engine's mask, minus the platform-owned ids - so what a host can
-see is what a composite touches. Both reply with a count, so a harness can assert they did something
-rather than silently matching nothing.
+`reset` and `preset` are the two commands that do many things at once. Both operate on exactly the set `describe` advertises - live per the engine's mask, minus the platform-owned ids - so what a host can see is what a composite touches. Both reply with a count, so a harness can assert they did something rather than silently matching nothing.
 
-`reset` exists for **test isolation**: `mode test` stops the panel perturbing the engine but leaves the
-previous test's writes in place, which is how a suite ends up passing in isolation and failing in
-sequence. `tools/conftest.py` now resets in the `test_mode` fixture. The per-param default comes from
-`IEngine::param_default()`, which defaults to 0.5 - deterministic, which is what a baseline needs, but
-not necessarily musical; engines with real neutral values should override it.
+`reset` exists for **test isolation**: `mode test` stops the panel perturbing the engine but leaves the previous test's writes in place, which is how a suite ends up passing in isolation and failing in sequence. `tools/conftest.py` now resets in the `test_mode` fixture. The per-param default comes from `IEngine::param_default()`, which defaults to 0.5 - deterministic, which is what a baseline needs, but not necessarily musical; engines with real neutral values should override it.
 
-`reset cpu` is the one form that touches no params at all - it clears the CPU meter's min/max instead.
-It shares the verb because it is the same idea (put a measurable thing back to a known baseline), and it
-has to be a keyword rather than a deck, checked ahead of the deck parse that would otherwise reject it
-as `bad-deck`. The sequence a measurement wants is `reset cpu` -> drive the engine -> `query cpumax`;
-without the reset the peak is whatever the boot transient happened to be. See **CPU load** below.
+`reset cpu` is the one form that touches no params at all - it clears the CPU meter's min/max instead. It shares the verb because it is the same idea (put a measurable thing back to a known baseline), and it has to be a keyword rather than a deck, checked ahead of the deck parse that would otherwise reject it as `bad-deck`. The sequence a measurement wants is `reset cpu` -> drive the engine -> `query cpumax`; without the reset the peak is whatever the boot transient happened to be. See **CPU load** below.
 
-`preset` is **params only, in RAM, non-persistent**. Non-persistent because a test wants to snapshot and
-restore many times per run and should not wear flash to do it. Params only because of a genuine gap in
-the engine contract: `param()` can read a parameter back, but `set_config` is **write-only** - there is
-no config getter on `IEngine`, so configs cannot be captured at all. Restoring a slot that was never
-saved replies `ok 0` rather than erroring, which keeps the error taxonomy fixed.
+`preset` is **params only, in RAM, non-persistent**. Non-persistent because a test wants to snapshot and restore many times per run and should not wear flash to do it. Params only because of a genuine gap in the engine contract: `param()` can read a parameter back, but `set_config` is **write-only** - there is no config getter on `IEngine`, so configs cannot be captured at all. Restoring a slot that was never saved replies `ok 0` rather than erroring, which keeps the error taxonomy fixed.
 
-What neither does is apply its writes **atomically**. Commands dispatch on the main loop while the audio
-ISR runs, so a block can start midway through a reset and render with some params applied. Nothing has
-been bitten by this, and fixing it would need engine cooperation (a defer/commit flag or double-buffered
-param sets), so it is noted rather than built.
+What neither does is apply its writes **atomically**. Commands dispatch on the main loop while the audio ISR runs, so a block can start midway through a reset and render with some params applied. Nothing has been bitten by this, and fixing it would need engine cooperation (a defer/commit flag or double-buffered param sets), so it is noted rather than built.
 
-**Two queries are deliberately absent from `describe`**, though both are reachable by name. `fit` takes
-an argument and the descriptor cannot express arity, so the generic sweep - which calls every advertised
-query with a deck alone - would fail it. `reseed` is a *latching* read: it returns true once and
-self-clears, so asking changes the answer and a sweep would consume the flag the platform is waiting
-for. These are the two shapes the safe-to-call rule in [`terminal-target-b.md`](terminal-target-b.md)
-exists to exclude, and they are the reason it is a per-entry property rather than a category.
+**Two queries are deliberately absent from `describe`**, though both are reachable by name. `fit` takes an argument and the descriptor cannot express arity, so the generic sweep - which calls every advertised query with a deck alone - would fail it. `reseed` is a *latching* read: it returns true once and self-clears, so asking changes the answer and a sweep would consume the flag the platform is waiting for. These are the two shapes the safe-to-call rule in [`terminal-target-b.md`](terminal-target-b.md) exists to exclude, and they are the reason it is a per-entry property rather than a category.
 
-`IEngine::set_aux_active` is **not** exposed: the UI pushes it every `process()` for a `CapAux` engine
-(`core.ui.cpp:186-190`), so a terminal write would be overwritten within a millisecond - the same trap
-as the panel switches, and not worth a fourth freeze point for a display hint.
+`IEngine::set_aux_active` is **not** exposed: the UI pushes it every `process()` for a `CapAux` engine (`core.ui.cpp:186-190`), so a terminal write would be overwritten within a millisecond - the same trap as the panel switches, and not worth a fourth freeze point for a display hint.
 
 `config route` is global; the others in that verb are per-deck. `set_config` returns whether the value changed, echoed so a test can assert idempotence.
 
 ### CPU load - `query cpu` / `cpumin` / `cpumax`
 
-The platform has always owned a whole-callback `daisy::CpuLoadMeter` (`src/meter.h`), but reading it
-meant building `METER=1`, which brings up a **second USB device** (`_meter_usb`, `FS_EXTERNAL`) whose
-only job is to print the numbers. That device claims the same OTG core the terminal needs, so
-`METER=1 TERMINAL=1` is not a build that can work - and the numbers TODO.md P2 wants are exactly the
-numbers that second device existed to produce.
+The platform has always owned a whole-callback `daisy::CpuLoadMeter` (`src/meter.h`), but reading it meant building `METER=1`, which brings up a **second USB device** (`_meter_usb`, `FS_EXTERNAL`) whose only job is to print the numbers. That device claims the same OTG core the terminal needs, so `METER=1 TERMINAL=1` is not a build that can work - and the numbers TODO.md P2 wants are exactly the numbers that second device existed to produce.
 
-The channel makes it unnecessary. Measuring is cheap - two `System::GetTick()` reads per block - so a
-`TERMINAL=1` build drives the meter itself and reports on request. `app.cpp` therefore gates the
+The channel makes it unnecessary. Measuring is cheap - two `System::GetTick()` reads per block - so a `TERMINAL=1` build drives the meter itself and reports on request. `app.cpp` therefore gates the
 `Init`/`OnBlockStart`/`OnBlockEnd` calls on an internal `SPK_CPU_METER` (`METER || SPK_TERMINAL`) and
-keeps the USB-printing block under `METER` alone. With neither flag the macro is undefined and nothing
-changes; `cpu_stat.cpp` compiles to 0 bytes, like the rest of the terminal.
+keeps the USB-printing block under `METER` alone. With neither flag the macro is undefined and nothing changes; `cpu_stat.cpp` compiles to 0 bytes, like the rest of the terminal.
 
-Three separate `Float` queries rather than one `Text` line of `avg=.. min=.. max=..` (the shape `usb`
-uses), because these are the numbers a sweep collects: a `Float` query replies as a bare `ok <value>`
-the existing host tooling already parses, where a `Text` blob would need a parser of its own.
+Three separate `Float` queries rather than one `Text` line of `avg=.. min=.. max=..` (the shape `usb` uses), because these are the numbers a sweep collects: a `Float` query replies as a bare `ok <value>` the existing host tooling already parses, where a `Text` blob would need a parser of its own.
 
-Values are **percent of the block budget**, not the meter's native 0..1 - the unit every consumer
-already speaks (`METER=1` prints `load%`, and TODO.md's headroom figures are percentages).
+Values are **percent of the block budget**, not the meter's native 0..1 - the unit every consumer already speaks (`METER=1` prints `load%`, and TODO.md's headroom figures are percentages).
 
-`min`/`max` are extremes since the last `reset cpu`, not a rolling window, so a measurement must bound
-its own interval. One narrow caveat: `CpuLoadMeter::Reset()` sets all three to `NAN` and re-seeds on the
-next `OnBlockEnd()`, so a read landing inside that one-block gap (~1 ms at 48 kHz) reports `nan`. That is
-left as `nan` rather than coerced to 0 - "no sample yet" and "zero load" are different answers.
+`min`/`max` are extremes since the last `reset cpu`, not a rolling window, so a measurement must bound its own interval. One narrow caveat: `CpuLoadMeter::Reset()` sets all three to `NAN` and re-seeds on the next `OnBlockEnd()`, so a read landing inside that one-block gap (~1 ms at 48 kHz) reports `nan`. That is left as `nan` rather than coerced to 0 - "no sample yet" and "zero load" are different answers.
 
 ### Target B - engine-specific verbs and L1 state
 
@@ -284,19 +248,21 @@ These are the only three sites; each is a single early-return guarded by `if (_t
 - **Platform-owned static tables.** Per `ParamId`: name (the `kParamNames` table), deck-scope, and range. Scope and range are properties of the id, not the engine - a fixed table marks the global ids (`Tempo`, `ClickMix`, `PanSpeed`, `PanRange`, `KeyInterval`, `Crossfade`; and `Route` among configs) and the non-normalized ranges (`Tempo`, `KeyInterval`); everything else is per-deck, `0..1`. Per `ConfigId`: name + enum labels (e.g. `mode: 0:slice 1:reel 2:drift`, `route: 1:dmono 2:stereo 3:genstereo`).
 
 - **Engine-owned liveness masks.** Two new `IEngine` virtuals, default "all live", so the descriptor lists only what the engine implements (else a generic round-trip sweep gets false failures on ignored params):
+
   ```cpp
   // src/engine/iengine.h
   virtual ParamMask  live_params()  const { return ~0u; }   // bitset over ParamId (24 values < 32)
   virtual ConfigMask live_configs() const { return ~0u; }   // bitset over ConfigId  (6 values)
   // e.g. TapeEngine: return (1u<<(int)ParamId::Size)|(1u<<(int)ParamId::Feedback)|... ;
   ```
+
   `ParamMask = uint32_t`, `ConfigMask = uint8_t`. The dispatcher walks the platform tables and emits a line only where the engine's mask bit is set.
 
 ### Output format
 
 A line-per-item block, machine-parseable, terminated by `end` so the host knows the dump is complete:
 
-```
+```text
 > describe
 descr engine=tape version=0.9.3-tape masked=1
 param size deck 0..1
@@ -333,7 +299,7 @@ Either way `describe` never blocks: unsent lines wait in the FIFO / generator, d
 
 Deterministic and greppable, one reply per command, newline-framed so it interleaves safely with any `[tag]` log lines (transport guarantees single-threaded TX):
 
-```
+```text
 reply   := "ok" [SP result] CRLF
          | "err" SP reason CRLF
 result  := float | int | "0x" hex | (name SP value)*      ; float via append_f32, never %f
@@ -382,7 +348,7 @@ The engine is a single active instance (`ActiveEngine _engine`, `src/app.cpp:105
 
 ## Worked example - a delay feedback round-trip test
 
-```
+```text
 > mode test
 ok
 > config mode A 1

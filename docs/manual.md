@@ -1,11 +1,8 @@
 # Spotykach platform manual (firmware-tracked)
 
-This is the in-repo manual for the **platform** — the parts of the instrument that are the same
-whichever engine you flash: power, the clock and sync, CV and gate, routing, the SD card, `config.txt`,
-MIDI, and firmware update.
+This is the in-repo manual for the **platform** — the parts of the instrument that are the same whichever engine you flash: power, the clock and sync, CV and gate, routing, the SD card, `config.txt`, MIDI, and firmware update.
 
-**What each engine does with the knobs and pads is per-engine**, and lives in
-[`docs/engines/`](engines/). Start there for the instrument you are actually running:
+**What each engine does with the knobs and pads is per-engine**, and lives in [`docs/engines/`](engines/). Start there for the instrument you are actually running:
 
 | If you flashed... | Control reference |
 |---|---|
@@ -14,16 +11,9 @@ MIDI, and firmware update.
 | a looper or player | [tape](engines/tape.md) · [shuttle](engines/shuttle.md) · [softcut](engines/softcut.md) · [radio](engines/radio.md) · [bard](engines/bard.md) · [graincloud](engines/graincloud.md) |
 | an instrument | [edrums](engines/edrums.md) · [reso](engines/reso.md) · [mosc](engines/mosc.md) · [glitch](engines/glitch.md) · [voice](engines/voice.md) · [csound](engines/csound.md) · [chuck](engines/chuck.md) |
 
-Unlike the published manual, this document is kept in sync with the firmware in this repository: when
-you change behaviour, update it in the same commit. Where this document and the published manual
-(<https://tsemah.notion.site/Spotykach-Manual-22c6331933b880c59108c0de25102bb5>) disagree, this one
-describes what the current code actually does. The published manual documents the granular engine, so
-the differences are called out in [the granular page](engines/granular.md#notes-vs-the-published-manual).
+Unlike the published manual, this document is kept in sync with the firmware in this repository: when you change behaviour, update it in the same commit. Where this document and the published manual (<https://tsemah.notion.site/Spotykach-Manual-22c6331933b880c59108c0de25102bb5>) disagree, this one describes what the current code actually does. The published manual documents the granular engine, so the differences are called out in [the granular page](engines/granular.md#notes-vs-the-published-manual).
 
-Spotykach is a screenless, dual-deck instrument built on an Electro-Smith Daisy Seed. It runs at
-48 kHz. The two decks (A and B) are independent and share a clock, modulation, routing and SD-card
-storage; what a "deck" *is* depends on the engine — two recorders in granular, two delay lines in
-delay, two macro-oscillators in mosc.
+Spotykach is a screenless, dual-deck instrument built on an Electro-Smith Daisy Seed. It runs at 48 kHz. The two decks (A and B) are independent and share a clock, modulation, routing and SD-card storage; what a "deck" *is* depends on the engine — two recorders in granular, two delay lines in delay, two macro-oscillators in mosc.
 
 ## Power
 

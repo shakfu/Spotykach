@@ -86,7 +86,7 @@ Each drum runs a Euclidean step sequencer: POS sets how many onsets are spread a
 
 ![Edrums control surface](../media/edrums-controls.svg)
 
-_Generated from [`docs/diagrams/controls/edrums.json`](../diagrams/controls/edrums.json) via `make diagrams`._
+*Generated from [`docs/diagrams/controls/edrums.json`](../diagrams/controls/edrums.json) via `make diagrams`.*
 
 The platform gives each deck 7 knobs (see [README](README.md#knobs-how-a-physical-control-reaches-an-engine)); edrums uses all of them:
 

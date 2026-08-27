@@ -40,6 +40,7 @@ This is **why every teardown strategy we tried failed** — they differ only in 
 Before committing to a fix we added a **non-destructive** pool-usage readout so we could *measure* the leak (which resource, what rate) instead of guessing — the roadmap's "classify the leak" step. `ChuckEngine::note_pool_usage()` samples `CsoundPool::used_bytes()` **once per swap**, inside `do_reload` between the ReloadGate `take()` and `publish()` — i.e. with the VM out of the audio path, so the walk is race-free and entirely off the per-block hot path. (This is the deliberate opposite of the earlier **observer-effect bug** (#4): a pool meter that walked the whole pool under `PRIMASK` *every render* starved the audio ISR and itself triggered false overruns, worsening as the pool filled. That walk was removed; the new sample is swap-time only.) `csound_pool.h` is **unchanged** (no risk to the shared Csound allocator); `chuck_alloc.cpp` just exposes `chuck_pool_used()` / `chuck_pool_capacity()`.
 
 Readouts:
+
 - **Cased unit (no SWD): panel, `make engine-chuck METER=1`.** Ring A = CPU load. Ring B = SDRAM pool usage — bright arc = live bytes right after the last swap, dot = high-water mark. Under destroy+recreate the arc + dot **climbed multi-MB per swap and never recovered**, which both confirmed the leak and confirmed it was *memory* (not fragmentation — fragmentation would drop the arc while the dot stayed high).
 
 - **Bare Pod: SWD globals** `g_chuck_pool_used_kb` / `_peak_kb` / `_cap_kb` / `g_chuck_swaps` (always built). `openocd-attach` then `mdw <addr-from-build/spotykach.map>`.
@@ -77,6 +78,7 @@ Two levers, both required, both in `do_reload` / `load_program` (`chuck_engine.c
 After the leak fix, all patches recover memory across swaps **except slot 5**, which still latches the double-red panic. This is the **CPU-overrun safeguard doing its job**, not a leak: slot 5 is the heavy FM/STK patch (multiple `HnkyTonk` 4-op voices + reverb) whose `ck->run()` can't finish within the audio block, so `_panic` mutes it to keep the controls alive (see "CPU-overrun safeguard" in the memory note / `process()`). It's a headroom problem, fixable only by lightening the patch (fewer voices, drop the reverb/chorus) or raising the block size — orthogonal to the memory work here. The leak fix is complete and independent of it.
 
 ### Current code state (all uncommitted on branch `dev`)
+
 - `src/engine/chuck/chuck_engine.{h,cpp}` — M3 bank + selector; **one persistent VM + compile-once cache**: `build_vm()` (create/init/start ONCE at init, no compile); `compile_and_spork()` (the only compile path, bring-up-captured); `load_program()` (re-spork cached `Chuck_VM_Code` or compile+pin, keyed by slot via `cache_cell()`, built-in fallback); `do_reload()` (gated take → `removeAllShreds` + 1-frame `run()` flush → `load_program` → reseed → `note_pool_usage` → republish, VM never destroyed); `_builtin_code`/`_slot_code[]` pinned-code cache; `note_pool_usage()` (per-swap pool sampling → members + `g_chuck_pool_*` SWD globals); CPU-overrun safeguard (`_panic` mute-and-wait, always-on, DWT-timed in `process()`); METER meter (ring A CPU / ring B pool-usage arc + high-water); production stereo dB output meter; bring-up capture (`g_chuck_init_*`).
 
 - `src/engine/chuck/chuck_alloc.cpp` — 40 MB `--wrap` SDRAM pool (`CsoundPool`) + PRIMASK `CritSec`; `chuck_pool_used()`/`chuck_pool_capacity()` diagnostics (used_bytes walk, swap-time only).
@@ -94,6 +96,7 @@ After the leak fix, all patches recover memory across swaps **except slot 5**, w
 - Nothing committed this whole effort — the user commits.
 
 ---
+
 > > **Bring-up took four bug fixes** (`-u _printf_float`, `_ck->start()` before audio, a PRIMASK guard on > the non-reentrant SDRAM pool, and a sane knob cadence) — none ChucK-on-Cortex-M incompatibilities. The > full story, the SWD flash/inspect tooling, and the open items live in > [`chuck-pod-poc.md`](chuck-pod-poc.md) (read it for current state). The roadmap below (M3 SD bank, M4 > MIDI) and the risk analysis are still accurate; the `METER=1` CPU-headroom pass (risk #1) is the main > open measurement — `ck->run(256)` is CPU-heavy (~near the block budget).
 
 > This is a design + roadmap for embedding > the [ChucK](https://chuck.stanford.edu) language as a swappable engine, modelled directly on the > already-shipping **Csound** engine ([`docs/dev/csound-impl.md`](csound-impl.md)). ChucK is the same > *class* of problem — embed a runtime audio compiler/VM as a QSPI app behind `IEngine` — so most of > the hard, already-solved Csound machinery (QSPI boot, the dual-heap SDRAM allocator, the lock-free > live-recompile handoff, the SD patch bank) is reused, not re-invented. Read the Csound doc first; > this one is written as a **delta** against it.
@@ -190,7 +193,7 @@ These are the unknowns to retire on the Pod **before** committing to the spotyka
 
 `thirdparty/chuck/` is ChucK (pinned default `CHUCK_REF=chuck-1.5.5.8` of [`ccrma/chuck`](https://github.com/ccrma/chuck)), **gitignored**, fetched + cross-built by one script (modelled on `fetch_csound.sh`):
 
-```
+```text
 scripts/fetch_chuck.sh             # fetch source + cross-build libchuck.a + self-verify with a link probe
 scripts/fetch_chuck.sh --no-build  # just fetch + write the shim sysroot (build later)
 ```
@@ -222,6 +225,7 @@ Headers come straight from `thirdparty/chuck/src/core` (no copy step); the firmw
 **M2 — `IEngine` skeleton on the spotykach. — HARDWARE-VERIFIED (2026-06-21).** `ChuckEngine : IEngine` (`src/engine/chuck/chuck_engine.{h,cpp}`) implements `init`/`prepare`/`process`/ `set_param`→`setGlobalFloat`/`param`/`render`/`capabilities` + the built-in `kProgram` (a `SawOsc => LPF => dac` drone reading `speedA`/`mixA`/`sizeA`). `process()` interleaves the platform's de-interleaved buffers into `ck->run()` (SAMPLE=float) and back; the run() scratch is malloc'd from the SDRAM pool so the SRAM-tight platform pays nothing for it. Wired in: the `ENGINE=chuck` Makefile branch (BOOT_QSPI, the ChucK feature defines matching `libchuck.a`'s ABI, `-fexceptions -frtti` scoped to just the engine TU, `--wrap` malloc), `engine_select.h` (`SPK_ENGINE_CHUCK → ChuckEngine`), `chuck_alloc.cpp` (reuses the engine-agnostic `CsoundPool`), and the shared `spotykach_qspi_vtor.cpp`. `make engine-chuck` links the full firmware. **One platform fix this surfaced:** the QSPI build reserved 186 KB of AXI SRAM for `SRAM_EXEC` that holds no code (it executes in place from QSPIFLASH), so `CoreUI + libDaisy .bss` (~340 KB) overflowed the 326 KB `SRAM` region. Rather than touch the proven Csound QSPI path, ChucK gets its own `alt_qspi_chuck.lds` (identical to `alt_qspi.lds` except it reclaims the unused 186 KB `SRAM_EXEC` into `SRAM`, giving data the full 512 KB AXI SRAM); the `ENGINE=chuck` branch and the Pod harness point at it, and the stock `alt_qspi.lds` (csound) is byte-unchanged. The four Pod fixes are all in the spotykach build (`-u _printf_float` in the `ENGINE=chuck` branch; `start()` + the pool guard via the shared `chuck_engine.cpp`/`chuck_alloc.cpp`; the knob-cadence fix is n/a — the spotykach UI is event-driven). **Flashed the cased unit (2026-06-21): boots, runs the VM, makes sound.** Remaining hardware checks: read the CPU/shred meter for the actual headroom, and test the M3 bank with an SD card. MIDI is M4.
 
 **M3 — SD `.ck` patch bank + live swap. — CODE DONE, BUILD-VERIFIED (2026-06-21).** `chuck_patch.h` (numbered `chuck/<n>.ck` slots, the Alt+PITCH quantizer, read+normalize+BOM/CRLF-strip, built-in fallback) + the bank/selector wiring in `chuck_engine.{h,cpp}` (rescan, boot auto-load of the lowest slot, Alt+PITCH preview/commit, the cyan/white source LED, the gated live recompile). The host selector test (`make -C host test-chuck-patch`) passes and both firmware targets link clean (`pod/Makefile.chuck`, `make engine-chuck`). **Hardware-verified, incl. the memory-leak fix (2026-06-22)** — see the "Patch-swap memory leak — RESOLVED" section above for the full story. Three deliberate deltas from the Csound original:
+
 - **No `chuck_reload.h`.** The `ReloadGate` is engine-agnostic (`void*`, no Csound deps), so the ChucK engine reuses `engine/csound/csound_reload.h` directly - the same reuse pattern `chuck_alloc.cpp` already uses for `CsoundPool`. One gate, one host test (`test-csound-reload` covers it).
 
 - **One persistent VM + compile-once cache (NOT rebuilt, NOT reset).** Csound's `do_reload` destroys + recreates the `CSOUND`; ChucK keeps **one** VM for the whole session and only changes its *shreds*, because ChucK never frees its type system on teardown — so both destroying the VM and `CK_MSG_CLEARVM`- resetting it leaked (see the RESOLVED writeup for the full root cause + the earlier failed attempts). A reload, behind the `ReloadGate`: `removeAllShreds()` + a 1-frame `run()` to flush the *deferred* removal (which detaches the old patch's UGens from `dac`) BEFORE sporking the new patch, then either re-spork the target's **cached** `Chuck_VM_Code` (`vm()->spork(code, NULL, TRUE)` — no recompile, no leak) or, on the patch's first visit, `compileCode()` it once and pin the emitted code in the cache. The gate is required because `compileCode`/`spork` mutate VM state and, under `__DISABLE_THREADS__`, nothing locks them against a concurrent `run()`. A brief audio gap on the swap (and a slightly longer one on a patch's first, compiling visit) is the cost.
@@ -259,6 +263,7 @@ Headers come straight from `thirdparty/chuck/src/core` (no copy step); the firmw
 ### `sf_*` subset to implement (read side only)
 
 ChucK's `SndBuf` uses the libsndfile read API. The minimum to satisfy it:
+
 - `SNDFILE* sf_open(const char* path, int mode, SF_INFO* info)` — `mode == SFM_READ` only; `f_open` + parse the WAV header; fill `info->frames/samplerate/channels/format`; return an opaque handle (a small heap struct holding the `FIL`, data-chunk offset/length, format, channel count) or `NULL` on any error.
 
 - `sf_count_t sf_seek(SNDFILE*, sf_count_t frames, int whence)` — `f_lseek` into the data chunk (`data_off + frames*frame_bytes`); SEEK_SET/CUR/END.
@@ -269,7 +274,7 @@ ChucK's `SndBuf` uses the libsndfile read API. The minimum to satisfy it:
 
 - `const char* sf_strerror(SNDFILE*)`, and whatever else `SndBuf`/`util_sndfile` reference at link (audit the undefined-symbol set after dropping the stubs; e.g. `sf_open_fd`, `sf_command` may need benign stubs that still fail).
 
-**WAV parsing (minimal, robust).** RIFF/`WAVE`; walk chunks for `fmt ` and `data` (don't assume order or adjacency; skip unknown chunks via their size; handle the pad byte on odd sizes). Support `WAVE_FORMAT_PCM` 16-bit and 24-bit and `WAVE_FORMAT_IEEE_FLOAT` 32-bit, mono and stereo. Convert PCM→ float (`/32768`, sign-extend 24-bit). Reject (return `NULL`) anything else (compressed, >2ch, exotic bit-depths) — the patch then sees `!buf.ready()` and exits gracefully, same as today.
+**WAV parsing (minimal, robust).** RIFF/`WAVE`; walk chunks for `fmt` and `data` (don't assume order or adjacency; skip unknown chunks via their size; handle the pad byte on odd sizes). Support `WAVE_FORMAT_PCM` 16-bit and 24-bit and `WAVE_FORMAT_IEEE_FLOAT` 32-bit, mono and stereo. Convert PCM→ float (`/32768`, sign-extend 24-bit). Reject (return `NULL`) anything else (compressed, >2ch, exotic bit-depths) — the patch then sees `!buf.ready()` and exits gracefully, same as today.
 
 ### Memory & limits
 
@@ -289,7 +294,7 @@ ChucK's `SndBuf` uses the libsndfile read API. The minimum to satisfy it:
 
 - **Host test (`host/test_chuck_sndfile.cpp`, `make -C host test-chuck-sndfile`).** The WAV parser + PCM→float conversion are pure and `libchuck`-free: feed crafted byte buffers (PCM16/24, float32, mono/stereo, chunks in odd order, a truncated/garbage header, an unsupported format) through the parse
 
-  + decode and assert frame counts, sample values, and graceful rejection. Factor the parser so the FatFs `f_read` is behind a tiny "read N bytes" seam the host test fills from memory.
+  - decode and assert frame counts, sample values, and graceful rejection. Factor the parser so the FatFs `f_read` is behind a tiny "read N bytes" seam the host test fills from memory.
 
 - **On target:** flash with a card holding `chuck/5.ck` + `samples/snare.wav`; confirm it plays, confirm the load happens without a dropout/overrun (it runs on the main loop), and confirm an unsupported/missing file falls back to silence cleanly (not a hang).
 

@@ -31,7 +31,7 @@ repro of the engine's features:
 Prerequisite (once): build `libcsound.a` with [`scripts/fetch_csound.sh`](../scripts/fetch_csound.sh),
 same as the main engine. Then:
 
-```
+```text
 cd pod
 make                 # build the BOOT_QSPI harness
 make program-dfu     # flash over USB DFU (catch the bootloader's DFU window; tap RESET after)

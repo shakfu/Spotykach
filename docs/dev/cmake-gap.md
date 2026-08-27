@@ -4,51 +4,25 @@ The repo has two firmware build systems: the canonical, hardware-proven **Makefi
 
 ## Decision (2026-08-08): keep both — Makefile canonical, CMake supported
 
-TODO P5 framed this as binary: *finish the CMake adoption or back it out*, on the grounds that three
-build files on `main` with a hand-duplicated engine list is a standing liability. That framing was
-right at the time, because nothing detected the duplication going wrong. Seven divergences had
-accumulated silently, two of them hard build failures and one — the missing `USB_MIDI` equivalent —
-producing an image that built, booted, ran, and ignored MIDI.
+TODO P5 framed this as binary: *finish the CMake adoption or back it out*, on the grounds that three build files on `main` with a hand-duplicated engine list is a standing liability. That framing was right at the time, because nothing detected the duplication going wrong. Seven divergences had accumulated silently, two of them hard build failures and one — the missing `USB_MIDI` equivalent — producing an image that built, booted, ran, and ignored MIDI.
 
-**What changed is that the drift is now mechanically caught.** `.github/workflows/ci.yml` builds six
-flag-sensitive engines through CMake alongside the full Makefile matrix, chosen for what they exercise
-rather than for coverage: `pstretch` (own linker script), `reverb` and `graincloud` (`-Os`), `softcut`
-(extra sources), `mosc` (QSPI boot), `granular` (the default). Every past divergence would have been
-caught by one of those six. The liability was never *having* two build systems; it was having no
-forcing function, and that is the part that was missing.
+**What changed is that the drift is now mechanically caught.** `.github/workflows/ci.yml` builds six flag-sensitive engines through CMake alongside the full Makefile matrix, chosen for what they exercise rather than for coverage: `pstretch` (own linker script), `reverb` and `graincloud` (`-Os`), `softcut` (extra sources), `mosc` (QSPI boot), `granular` (the default). Every past divergence would have been caught by one of those six. The liability was never *having* two build systems; it was having no forcing function, and that is the part that was missing.
 
-So: **both stay.** The Makefile is canonical — it is what `make`, the README, the release script and
-every hardware-verified image use. CMake is *supported*, at parity, and CI keeps it there.
+So: **both stay.** The Makefile is canonical — it is what `make`, the README, the release script and every hardware-verified image use. CMake is *supported*, at parity, and CI keeps it there.
 
-**This decision was conditional on CI running unasked, and that condition was met 2026-08-11.**
-`ci.yml` now fires on push and pull request, so the CMake parity matrix catches divergence
-mechanically rather than resting on someone remembering to press a button. (`qspi-libs.yml` is still
-dispatch-plus-weekly by design; it builds no CMake target.) Caveat: neither workflow has yet completed
-a run on a GitHub runner, so the first push is also the first proof — if it turns out misconfigured,
-this decision is back to resting on a button until it is fixed.
+**This decision was conditional on CI running unasked, and that condition was met 2026-08-11.** `ci.yml` now fires on push and pull request, so the CMake parity matrix catches divergence mechanically rather than resting on someone remembering to press a button. (`qspi-libs.yml` is still dispatch-plus-weekly by design; it builds no CMake target.) Caveat: neither workflow has yet completed a run on a GitHub runner, so the first push is also the first proof — if it turns out misconfigured, this decision is back to resting on a button until it is fixed.
 
-**What is being given up.** TODO P5's headline justification for adopting CMake was item 4: per-target
-`target_include_directories(... PRIVATE)` making a platform→engine include a *compile error* instead of
-a grep hit. That is not built and is not planned here. Without it, CMake's remaining advantages over
-the Makefile are real but modest:
+**What is being given up.** TODO P5's headline justification for adopting CMake was item 4: per-target `target_include_directories(... PRIVATE)` making a platform→engine include a *compile error* instead of a grep hit. That is not built and is not planned here. Without it, CMake's remaining advantages over the Makefile are real but modest:
 
-- **Per-engine cached build dirs** (`build-cmake/<engine>/`), so switching engines never rebuilds. The
-  Makefile shares one `build/`, which is exactly why it needs the `.engine-stamp` / `.grainflavor-stamp`
-  / `.usbmidi-stamp` machinery — three stamps that exist purely to work around the shared directory.
-- **Flag changes are tracked properly.** `SPK_TERMINAL`, `TERM_USBDIAG` and `SPK_GRAIN_GF` change *type
-  layout*, so a partial rebuild puts members at the wrong offsets — a frozen panel with a working
-  terminal, which cost a hardware session to diagnose. CMake records definitions in `flags.make`, which
-  every object already depends on; the Makefile has to delete objects and defend against GNU Make
-  3.81's whole-second mtime resolution.
+- **Per-engine cached build dirs** (`build-cmake/<engine>/`), so switching engines never rebuilds. The Makefile shares one `build/`, which is exactly why it needs the `.engine-stamp` / `.grainflavor-stamp` / `.usbmidi-stamp` machinery — three stamps that exist purely to work around the shared directory.
+
+- **Flag changes are tracked properly.** `SPK_TERMINAL`, `TERM_USBDIAG` and `SPK_GRAIN_GF` change *type layout*, so a partial rebuild puts members at the wrong offsets — a frozen panel with a working terminal, which cost a hardware session to diagnose. CMake records definitions in `flags.make`, which every object already depends on; the Makefile has to delete objects and defend against GNU Make 3.81's whole-second mtime resolution.
+
 - `compile_commands.json` falls out natively, with no `bear`.
 
-**What would reopen this:** CI staying unarmed; a third build file appearing; or someone wanting the
-compiler-enforced boundary badly enough to build item 4, at which point CMake becomes canonical and the
-Makefile goes. Backing CMake out remains a clean revert — nothing depends on it.
+**What would reopen this:** CI staying unarmed; a third build file appearing; or someone wanting the compiler-enforced boundary badly enough to build item 4, at which point CMake becomes canonical and the Makefile goes. Backing CMake out remains a clean revert — nothing depends on it.
 
-**Still not established, either way:** no CMake-built `.bin` has been flashed. P5's acceptance gate 5
-stands unchanged and belongs to the P2 bench session. CI proves the two agree on the host; only a
-device proves the CMake image boots.
+**Still not established, either way:** no CMake-built `.bin` has been flashed. P5's acceptance gate 5 stands unchanged and belongs to the P2 bench session. CI proves the two agree on the host; only a device proves the CMake image boots.
 
 ## Symptom
 
@@ -213,7 +187,7 @@ Five engines sit outside the band: `csound` +1164 (*below* it), `graincloud` +13
 
 In proportion the delta is negligible: 0.05% on `csound`, ~0.8% on the small SRAM engines. Nor is any budget threatened. Since the `SRAM_EXEC` rebalance to 300K the loaded image sits near 60% on every SRAM engine, so 1.25 KB is ~0.4 percentage points:
 
-```
+```text
 reso        SRAM_EXEC 60.35%   SRAM 23.97%
 graincloud            60.49%        74.91%
 reverb                60.89%        27.79%
@@ -231,7 +205,9 @@ The one engine where it could have mattered — `pstretch`, at 93.17% of its dat
 Three things had to change to make it possible:
 
 - **`SPK_VERSION` was not overridable in CMake.** `execute_process(git describe)` overwrote whatever was passed, so a pinned release version could never reach the binary — and `build_release.py` *verifies* the banner it expects is present, so every artifact would have failed that check. It is now guarded, matching the Makefile's `?=`.
+
 - **No `clean` step, and no `ENGINE_MAKE_FLAGS`.** The canonical build cleans between engines because `build/` is shared and its stamps only force a subset of TUs to rebuild; CMake's per-engine `build-cmake/<engine>` has no cross-engine contamination to wipe, and cleaning would rebuild libDaisy once per engine. `APP_TYPE`/`LDSCRIPT` are Makefile concepts — `CMakeLists.txt` derives the linker script from `ENGINE` alone.
+
 - **Output goes to `dist-cmake/<version>/`, never `dist/`.** `make gh-release` globs `dist/<version>/*` and uploads it, so a shared output directory would let someone publish CMake-built binaries as an official release by running two targets in the wrong order. `dist-cmake/` needed its own `.gitignore` entry: `dist/` matches that name exactly and `build-*/` does not apply.
 
 Measured on `delay` and `chorus` at the same pinned version, the CMake artifacts are **+1256 B** and **+1248 B** — the newlib residual above, consistent per engine and independent of engine size.

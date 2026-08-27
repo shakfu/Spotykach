@@ -34,20 +34,24 @@ Typical debug loop: flash (DFU or SWD), boot, then `openocd-attach` + `mdw`/`mdb
 ## The four fixes in detail
 
 ### 1. Float printf (`-u _printf_float`)
+
 `pod/Makefile.chuck` appends `LDFLAGS += -u _printf_float` after the libDaisy include. Without it, `std::to_string(double)` (reached from ChucK's parser stringifying the float literals in the `.ck` program) computes a negative length and aborts in `__throw_length_error`. This is a generic `nano.specs` gotcha, not ChucK-specific — any `%f`/`std::to_string(float)` in the firmware needs it.
 
 ### 2. Start the VM (`_ck->start()`)
+
 `ChuckEngine::init()` now calls `_ck->start()` right after `_ck->init()` and before `compileCode()` — single-threaded, before `StartAudio`. This matches the proven embedding in `chuck-max` (`chuck_tilde.cpp`: `init()` -> `start()` before audio). `set_param` also null-guards `globals()` (it returns `NULL` pre-start). Without this, the VM only started lazily from inside the audio ISR, concurrently with the main loop — the source of the bug-3 race.
 
 ### 3. Reentrant pool (`CritSec`)
+
 `chuck_alloc.cpp` wraps every `g_alloc` op (`alloc`/`release`/`grow`/`payload`) in a short PRIMASK-masked critical section (RAII save/restore, so it nests). `CsoundPool` (the engine-agnostic SDRAM coalescing allocator under `src/engine/csound/`, reused by ChucK via `--wrap`) has no internal locking, so this serializes the main loop and the audio ISR. Cost: interrupts are masked for the duration of a pool op; acceptable given how infrequent allocations are after startup.
 
 ### 4. Knob cadence + deadband (`harness_chuck.cpp`)
+
 Knob reads + `set_param` moved from the main loop **into the audio callback** (one read per block, ~187 Hz) — the correct bare-metal pattern with no host thread to schedule global updates. The main loop now only does off-ISR housekeeping (`prepare()`). Each knob is **deadbanded** (only re-sent when it moves > 0.004 from the last sent value) so ADC jitter on a still pot sends nothing (clean audio at rest), and **one-pole smoothed** so turning glides instead of stepping.
 
 ## Build & flash
 
-```
+```text
 scripts/fetch_chuck.sh                       # once: fetch + cross-build libchuck.a (gitignored)
 cd pod && make -f Makefile.chuck             # build the harness (full ChucK by default)
 
@@ -68,7 +72,7 @@ Bring-up knobs still available: `NOCHUCK=1` (skip the whole ChucK runtime) and `
 
 - `src/engine/chuck/chuck_engine.cpp` — `_ck->start()` in init; null-guarded `globals()`; `try/catch`
 
-  + `abort`/`__assert_func` overrides + `g_chuck_init_stage`/`g_chuck_init_error` capture.
+  - `abort`/`__assert_func` overrides + `g_chuck_init_stage`/`g_chuck_init_error` capture.
 
 - `src/engine/chuck/chuck_alloc.cpp` — `CritSec` (PRIMASK) around every pool op.
 
@@ -82,7 +86,7 @@ Bring-up knobs still available: `NOCHUCK=1` (skip the whole ChucK runtime) and `
 
 - **CPU headroom.** `ck->run(256)` dominates the audio budget (~all of it at block 256). The drone fits real-time, but there is little margin. Profile before adding voices; consider a larger block, a coarser `.ck` control rate, or trimming the program. **Now measurable on the spotykach panel, no probe:** build `make engine-chuck METER=1` and the ChucK engine's `render()` shows ring A = whole-callback CPU load (arc=avg, dot=peak, colour=severity; red >= 85% = at/over budget) and ring B = live concurrent-shred count (one cyan dot per shred, from `vm()->shreduler()->get_all_shred_ids`, sampled in `process()` after `run()` so it can't race the shreduler). Same flag also streams max/avg/min load over USB CDC (app.cpp's `CpuLoadMeter`). The production build's rings are a stereo output meter (per-channel RMS arc
 
-  + peak dot, dB-scaled). This is the answer to "how many concurrent shreds fit" - read CPU vs shred count together as you add voices.
+  - peak dot, dB-scaled). This is the answer to "how many concurrent shreds fit" - read CPU vs shred count together as you add voices.
 
 - **Decide what debug instrumentation to keep.** The `abort`/`__assert_func` capture + `g_chuck_init_*` buffers are cheap and genuinely useful for future bring-up — recommend keeping. The stack-scan backtrace in `abort` and any leftover `blink()` checkpoints are optional.
 

@@ -12,13 +12,13 @@ _Generated from [`docs/diagrams/controls/csound.json`](../diagrams/controls/csou
 
 One-time: build the Csound library (needs `cmake` and the `arm-none-eabi` GCC toolchain):
 
-```
+```text
 scripts/fetch_csound.sh          # download Csound 7 + cross-build libcsound.a
 ```
 
 Then build + flash the engine (put the board in DFU first):
 
-```
+```text
 make engine-csound               # clean + build the QSPI image + flash
 make program-csound              # re-flash the last build without rebuilding
 ```
@@ -43,7 +43,7 @@ What each knob actually does is up to the patch (it reads named control channels
 
 Put full CSD documents in a `csound/` folder at the card root, named `0.csd` … `7.csd`:
 
-```
+```text
 <card>/csound/0.csd
 <card>/csound/1.csd
 ```
@@ -78,7 +78,7 @@ Define `instr MidiNote` (with `p4` = note frequency in Hz) to make the patch pla
 
 - A UTF-8 BOM and CRLF (Windows) line endings are tolerated — the engine strips them on load.
 
-```
+```text
 <CsoundSynthesizer>
 <CsOptions>
 </CsOptions>

@@ -7,7 +7,7 @@ CSD that compiles on the Daisy build.
 
 Copy the files into a `csound/` folder at the **root of the SD card**, keeping the numbered names:
 
-```
+```text
 <card>/csound/0.csd
 <card>/csound/1.csd
 ```
@@ -47,6 +47,7 @@ Control channels the panel drives (read with `chnget`): `speedA` (PITCH), `mixA`
 to be keyboard-playable.
 
 Format rules that matter (the on-device CSD parser is line-oriented):
+
 - Each section tag on its **own line** — `<CsScore>` and `</CsScore>` separately, never
   `<CsScore></CsScore>` on one line.
 - Core opcodes only — no plugin opcodes, no soundfile I/O (`diskin`/`GEN01`); prefer table-less

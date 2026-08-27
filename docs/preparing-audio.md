@@ -1,10 +1,6 @@
 # Preparing audio for the SD card (tape / shuttle)
 
-> **Start at [`docs/sd-card.md`](sd-card.md) if you just want a working card.** `make sdcard` builds
-> one, `sk_card.py convert` puts your audio on it in the right format, and `make check-sdcard` explains
-> anything wrong with a card you already have. This page is the tape/shuttle format reference behind
-> those tools — read it when you want to know *why* the format is what it is, or to drive
-> `convert_tape_audio.py` directly.
+> **Start at [`docs/sd-card.md`](sd-card.md) if you just want a working card.** `make sdcard` builds > one, `sk_card.py convert` puts your audio on it in the right format, and `make check-sdcard` explains > anything wrong with a card you already have. This page is the tape/shuttle format reference behind > those tools — read it when you want to know *why* the format is what it is, or to drive > `convert_tape_audio.py` directly.
 
 The `tape` and `shuttle` engines read audio straight off the SD card into the audio path with **no format conversion on-device**. They accept exactly one format; anything else is rejected (the deck's amber error LED **strobes** for a wrong-format file vs a steady amber for an empty slot). So source files must be converted on a computer first.
 
@@ -23,7 +19,7 @@ Common mistakes that still play as garbage / get rejected: 16-bit PCM, **32-bit 
 
 8 slots per deck, selected on the device with **Alt+PITCH**:
 
-```
+```text
 tape    -> /tapes/tape_<a|b>_<1..8>.wav
 shuttle -> /shuttle/tape_<a|b>_<1..8>.wav
 ```

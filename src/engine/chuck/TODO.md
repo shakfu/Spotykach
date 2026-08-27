@@ -11,6 +11,7 @@ Deferred work specific to the script-engine pair (`src/engine/chuck`, `src/engin
 **Symptom.** When the selected patch changes (Alt+PITCH commit, or boot auto-load), the new patch does **not** start from the default values its own code declares. Instead the engine immediately overwrites every mapped global/channel with the *current knob positions*, so the patch jumps to wherever the pots happen to sit. Loading a fresh `.ck`/`.csd` therefore never sounds the way the patch author intended at its defaults.
 
 **Desired behaviour (soft takeover / "pickup", a.k.a. catch mode).** On a patch swap:
+
 1. The new patch boots at **its own default values** (the value its code assigns to each global/channel, or the language default of 0 if it assigns none) - the host writes nothing.
 
 2. Each knob is then **inactive**: physically moving it does *not* change the parameter yet.

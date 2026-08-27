@@ -14,7 +14,7 @@ There are two ways an engine's indicators reach the LEDs (`src/ui/core.ui.leds.c
 
 - **Co-authored (granular only, plus its clone `graincloud`).** `capabilities()` does *not* set `CapOwnDisplay`. The engine reports *semantics* (`deck_leds/fx_leds/play_leds/alt_leds/mix/route`
 
-  + `render_ring()`); the **platform** owns the palette, breathe/blink timers, the knob-value "deviation" pickup overlays (`_show_value`), storage rings, and all eight named indicators. This path is where the full grammar lives.
+  - `render_ring()`); the **platform** owns the palette, breathe/blink timers, the knob-value "deviation" pickup overlays (`_show_value`), storage rings, and all eight named indicators. This path is where the full grammar lives.
 
 - **Own-display (every other engine).** `capabilities()` sets `CapOwnDisplay`. The engine fills a `DisplayModel` in `render()` and the platform **blits it verbatim** (`_blit_display()`), doing *no* palette/blink/value interpretation. The engine gets a blank canvas and must draw everything itself.
 
@@ -42,7 +42,7 @@ The consequence is structural, not incidental: **an own-display engine that want
 
 Counts are raw references to each `DisplayModel` field / `LEDRing` primitive in an engine's `render()` (a proxy for "does it use this at all", not a quality score). Faust engines (`chorus/filter/voice` and others) inherit render from `faust/faust_chain.h` / `faust_fx.h`.
 
-```
+```text
 ENGINE      | RING: seg pnt setpt bri | play rev | modeLCR | breathe/blink | named LEDs used
 ------------|-------------------------|----------|---------|---------------|-----------------
 granular*   |       3   2    0    1   |  (query) | (query) |   yes (plat)  | ALL 8 + globals
@@ -79,7 +79,9 @@ voice       |    (faust: level arc + play, if Traits::meter)               | pla
 ## 4. Per-engine notes
 
 ### reso (the requested engine)
+
 `render()` at `src/engine/reso/reso_engine.cpp:289`. Draws, per deck:
+
 - **arc** = envelope level meter (`level·1.5` clamped), in a local 3-color mode palette (`0xffcc00 / 0x00aaff / 0xaa00ff` — note these are *re-declared constants*, close to but not equal to the platform's `kReelColor/kSliceColor/kDriftColor`);
 
 - **one white dot** = pitch position, or, while Alt+PITCH is held, **5 evenly-spaced dots** = the resonator-model selector with the active model bright;
@@ -91,13 +93,17 @@ voice       |    (faust: level arc + play, if Traits::meter)               | pla
 It's a clean, representative member of the minimal dialect. What it does **not** do, though the panel supports it: no breathe on idle, no value feedback when you turn Size/Structure/Brightness/Damping (you turn a knob and the ring shows nothing), no clock indicator despite `CapTransport`, and it hand- rolls a mode palette instead of sharing one.
 
 ### mosc, delay, qdelay, tape, reverb, glitch, pstretch, radio, csound
+
 All variations on *level/activity arc + a dot or two + play + mode LEDs*. `radio` and `glitch` and `pstretch` add expressive dots (spectral/scan/grain positions). `csound`/`chuck` add an Alt-held **patch selector** ring (dots per program) — the same idiom `reso` uses for models and `softcut/shuttle` use for tape slots, each **implemented independently**.
 
 ### chuck
+
 The richest `render()` (most primitive calls): patch-selector ring, running/stopped play color, per-deck arcs and dots. Still confined to ring + play + mode; no breathe/blink/named-LED use.
 
 ### softcut & shuttle (the "reinventors")
+
 These go furthest — and in doing so **duplicate platform capability**:
+
 - **Own breathe**: a raised-cosine `0.35+0.25·…` over `now_ms()%2400` (`softcut_engine.cpp`, `shuttle_engine.cpp`) — a hand-rolled copy of the platform's `_breathe_led()`.
 
 - **Own storage-slot ring**: an Alt-held tape-slot selector (selected bright / used mid / empty dim) — a hand-rolled copy of the platform's `_show_slots()` / storage progress ring.
@@ -107,9 +113,11 @@ These go furthest — and in doing so **duplicate platform capability**:
 They are the *best-looking* non-granular engines precisely because they re-created features the platform already has — evidence the capability is desirable and the reuse path is missing.
 
 ### edrums
+
 The only own-display engine to light a second named LED (`rev`), used as a second trigger/deck indicator. No mode LEDs. Shows the named indicators *can* be driven from `render()` — nobody else does.
 
 ### chorus, filter, voice (and other Faust engines)
+
 Inherit `render()` from `faust/faust_chain.h:122` / `faust_fx.h:153`: a level-meter arc + play dot, **compile-time gated by `Traits::meter`**. If a Faust engine's manifest doesn't set `meter`, its panel is entirely dark. This is the floor of the spectrum.
 
 ---
@@ -120,7 +128,7 @@ Inherit `render()` from `faust/faust_chain.h:122` / `faust_fx.h:153`: a level-me
 
 2. **No knob-value feedback off the granular path.** The platform's `_show_value` pickup overlay (the red deviation arc + target dot that makes granular's knobs legible, and the whole tracking/pickup UX) is keyed off `MValue`/`ParamId` inside the platform's `_draw_ring`. Own-display engines get **none of it**: turning a knob on reso/mosc/etc. produces no visual response at all. This is the single biggest expressive gap. *(`shuttle` and now `tape` close it engine-side via `ring::value`
 
-   + param-aware overlays — tape shows a value bar for scalars, a `ring::selector` for the ENV loop-mode, and markers for PITCH/pan; the same pattern is ready for the other engines.)*
+   - param-aware overlays — tape shows a value bar for scalars, a `ring::selector` for the ENV loop-mode, and markers for PITCH/pan; the same pattern is ready for the other engines.)*
 
 3. **Breathe / blink must be re-coded.** Only `softcut` and `shuttle` bother, by copying the math. Everyone else has a static (often black-when-idle) panel. "Idle but ready" vs "off" is indistinguishable on most engines.
 

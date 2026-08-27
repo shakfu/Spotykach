@@ -12,7 +12,7 @@ Verified on hardware: `skterm.py` connects, `describe` parses (24 params, 6 conf
 
 `query usb` on the Spotykach, working:
 
-```
+```text
 ok boot=3 region=3 clkcfg=1 hsi48=1 usbsel=3 usb33den=1 usb33rdy=1 phy=1 pullup=1 \
    vbussense=0 vbusovr=0 dp=1 dm=1 rst=0 sof=1
 ```
@@ -138,7 +138,7 @@ Two defects found by review of the shipped `flush_tx`, both fixed before the nex
 
 ## How to build and run
 
-```
+```text
 make ENGINE=delay TERMINAL=1                 # lean engine, fits at -O2
 make ENGINE=tape  TERMINAL=1 OPT=-Os         # near-full engine, needs -Os
 make ENGINE=mosc APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi.lds TERMINAL=1   # QSPI-execute, unlimited room
@@ -189,33 +189,7 @@ Platform service under `src/terminal/`, parallel to `src/transport/` (added to t
 
 Enabling the channel links the **USB-device CDC stack + ~6 KB of terminal code = ~19-25 KB of SRAM_EXEC**, because a normal build never brings USB up (Logger off/external, no METER). SRAM_EXEC is only 186 KB and several engines already sit near the ceiling, so the channel does **not** fit everywhere:
 
-> ### The rebalance below BROKE `pstretch` outright - found and FIXED 2026-08-01
->
-> **Resolved:** `pstretch` now builds and is **flashed and confirmed working on hardware** (2026-08-01,
-> `make engine-pstretch`). The fix is a per-engine linker script,
-> [`linker/alt_sram_pstretch.lds`](../../linker/alt_sram_pstretch.lds) (200K/312K), selected
-> automatically on `ENGINE=pstretch`; the other 20 engines stay on the 300K split. Same precedent as
-> `linker/alt_qspi_chuck.lds`. The hardware check is the part that counts - moving the code/data
-> boundary links clean either way, so only a boot proves the layout. Still unflashed: the `TERMINAL=1`
-> pstretch image, a different binary at 94.38%/97.40%.
->
-> The diagnosis is kept below because the failure mode is worth recognising again.
->
-> **`pstretch` did not link at all - terminal or not, clean build, any window.** It was not a
-> terminal-hosting limitation; the channel was incidental. `make ENGINE=pstretch` on the committed
-> `v0.6.1` tree failed with `region SRAM overflowed by 80576 bytes`.
->
-> Cause: `993210f` ("more hardware tests") moved 114K from the data `SRAM` region into `SRAM_EXEC`
-> (186K -> 300K) so the terminal would fit everywhere. `pstretch` is the one engine that lived in the
-> region that paid for it - its FFT working set needs **297664 B** of data `SRAM`, 89% of the old 326K.
-> The new region is 212K, leaving it 80.5K short, which is the overflow exactly. Restoring the
-> pre-rebalance script links it immediately (`SRAM_EXEC 164328 B / 86.28%`, `SRAM 297664 B / 89.17%`).
->
-> So the table below is measuring the wrong axis for this engine, and "every engine now fits" was true
-> only of `SRAM_EXEC`.
->
-> **The split is a genuine three-way squeeze, and only a narrow band satisfies all of it.** Measured with
-> `pstretch TERMINAL=1`:
+> ### The rebalance below BROKE `pstretch` outright - found and FIXED 2026-08-01 > > **Resolved:** `pstretch` now builds and is **flashed and confirmed working on hardware** (2026-08-01, > `make engine-pstretch`). The fix is a per-engine linker script, > [`linker/alt_sram_pstretch.lds`](../../linker/alt_sram_pstretch.lds) (200K/312K), selected > automatically on `ENGINE=pstretch`; the other 20 engines stay on the 300K split. Same precedent as > `linker/alt_qspi_chuck.lds`. The hardware check is the part that counts - moving the code/data > boundary links clean either way, so only a boot proves the layout. Still unflashed: the `TERMINAL=1` > pstretch image, a different binary at 94.38%/97.40%. > > The diagnosis is kept below because the failure mode is worth recognising again. > > **`pstretch` did not link at all - terminal or not, clean build, any window.** It was not a > terminal-hosting limitation; the channel was incidental. `make ENGINE=pstretch` on the committed > `v0.6.1` tree failed with `region SRAM overflowed by 80576 bytes`. > > Cause: `993210f` ("more hardware tests") moved 114K from the data `SRAM` region into `SRAM_EXEC` > (186K -> 300K) so the terminal would fit everywhere. `pstretch` is the one engine that lived in the > region that paid for it - its FFT working set needs **297664 B** of data `SRAM`, 89% of the old 326K. > The new region is 212K, leaving it 80.5K short, which is the overflow exactly. Restoring the > pre-rebalance script links it immediately (`SRAM_EXEC 164328 B / 86.28%`, `SRAM 297664 B / 89.17%`). > > So the table below is measuring the wrong axis for this engine, and "every engine now fits" was true > only of `SRAM_EXEC`. > > **The split is a genuine three-way squeeze, and only a narrow band satisfies all of it.** Measured with > `pstretch TERMINAL=1`: >
 >
 > | `SRAM_EXEC` | result |
 > |---|---|
@@ -224,20 +198,9 @@ Enabling the channel links the **USB-device CDC stack + ~6 KB of terminal code =
 > | 210K | `SRAM` overflows by 1920 B |
 > | 300K (current) | `SRAM` overflows by 13504 B (94080 B with the default window) |
 >
-> A single *global* 200K split would restore pstretch and keep the channel, but at 94%/97% it leaves
-> almost no headroom for either region - not obviously right for the other 20 engines, all of which are
-> comfortable at 300K. Hence the per-engine script: the squeeze is confined to the engine that has it,
-> and nothing else moves.
->
-> **The lesson worth keeping:** the rebalance was justified per-engine on `SRAM_EXEC` alone, and every
-> engine did fit on that axis - so "every engine now fits" looked verified. `pstretch` is large in
-> *both* halves at once, so the axis that broke it was the one nobody was measuring. When a change
-> trades one region against another, the engine to check is the one with the largest total, not the
-> largest code.
+> > A single *global* 200K split would restore pstretch and keep the channel, but at 94%/97% it leaves > almost no headroom for either region - not obviously right for the other 20 engines, all of which are > comfortable at 300K. Hence the per-engine script: the squeeze is confined to the engine that has it, > and nothing else moves. > > **The lesson worth keeping:** the rebalance was justified per-engine on `SRAM_EXEC` alone, and every > engine did fit on that axis - so "every engine now fits" looked verified. `pstretch` is large in > *both* halves at once, so the axis that broke it was the one nobody was measuring. When a change > trades one region against another, the engine to check is the one with the largest total, not the > largest code.
 
-`SRAM_EXEC` was rebalanced from 186K to 300K on 2026-07-31 (see
-`alt_sram.lds`): the old ceiling was a linker-script split, not silicon, and it left ~260K idle in the
-data region while code sat at 99%. Measured with the terminal enabled:
+`SRAM_EXEC` was rebalanced from 186K to 300K on 2026-07-31 (see `alt_sram.lds`): the old ceiling was a linker-script split, not silicon, and it left ~260K idle in the data region while code sat at 99%. Measured with the terminal enabled:
 
 | Engine | SRAM_EXEC | data SRAM | was (at 186K) |
 |---|---|---|---|
@@ -249,34 +212,23 @@ data region while code sat at 99%. Measured with the terminal enabled:
 | reverb (-Os) | 69.54% | 33.99% | **overflowed** |
 | granular (-O2) | 69.93% | 35.41% | **overflowed at -O2 and -Os** |
 
-granular + terminal was flashed and verified on hardware (214812 B, 24K past the old ceiling), which is
-what proves the bootloader copies more than the old region - a link-time pass alone would not have.
+granular + terminal was flashed and verified on hardware (214812 B, 24K past the old ceiling), which is what proves the bootloader copies more than the old region - a link-time pass alone would not have.
 
-The QSPI-execute engines (mosc/csound/chuck) still need `USB_MIDI=0`, since `MidiUsbHandler` claims the
-same OTG_HS core as the terminal.
+The QSPI-execute engines (mosc/csound/chuck) still need `USB_MIDI=0`, since `MidiUsbHandler` claims the same OTG_HS core as the terminal.
 
 Historical rule of thumb, now mostly moot: engines needed `-Os` or a QSPI-execute build to host the channel. With the rebalanced split none of that applies - `-Os` remains worthwhile on the heavy engines for its own sake, not to make the terminal fit. The terminal code itself is ~6 KB (`dispatch` 3.3 KB, `text_sink` 0.8 KB, `names` 0.8 KB, `terminal` 0.7 KB, `fmt` 0.3 KB); the rest is the USB stack and is not reducible.
 
 ## CPU load over the channel (added 2026-08-01)
 
-The channel now reports the platform `CpuLoadMeter`: `query cpu` / `cpumin` / `cpumax` (percent of the
-block budget) and `reset cpu` to clear the extremes. Design and the `METER` interaction are in
-[`terminal-dispatch.md` "CPU load"](terminal-dispatch.md#cpu-load---query-cpu--cpumin--cpumax); the short
-version is that `METER=1` needed a second USB device on the OTG core the terminal itself uses, so the
-two flags could never be combined - and a `TERMINAL=1` build now drives the meter directly instead.
+The channel now reports the platform `CpuLoadMeter`: `query cpu` / `cpumin` / `cpumax` (percent of the block budget) and `reset cpu` to clear the extremes. Design and the `METER` interaction are in [`terminal-dispatch.md` "CPU load"](terminal-dispatch.md#cpu-load---query-cpu--cpumin--cpumax); the short version is that `METER=1` needed a second USB device on the OTG core the terminal itself uses, so the two flags could never be combined - and a `TERMINAL=1` build now drives the meter directly instead.
 
-This is what makes TODO.md's P2 a *measured* pass rather than a listening one: `reset cpu` -> drive the
-engine -> `query cpumax` is scriptable per engine, where before the numbers needed a build flag that
-conflicted with the channel collecting them.
+This is what makes TODO.md's P2 a *measured* pass rather than a listening one: `reset cpu` -> drive the engine -> `query cpumax` is scriptable per engine, where before the numbers needed a build flag that conflicted with the channel collecting them.
 
-Footprint: `delay TERMINAL=1` went 59.42% -> 59.66% SRAM_EXEC (~740 B). Zero-cost-off holds -
-`cpu_stat.o` is 0 bytes with `TERMINAL` off, and with neither `METER` nor `SPK_TERMINAL` the
-`SPK_CPU_METER` guard is undefined, so `ProcessAudio` is unchanged.
+Footprint: `delay TERMINAL=1` went 59.42% -> 59.66% SRAM_EXEC (~740 B). Zero-cost-off holds - `cpu_stat.o` is 0 bytes with `TERMINAL` off, and with neither `METER` nor `SPK_TERMINAL` the `SPK_CPU_METER` guard is undefined, so `ProcessAudio` is unchanged.
 
-**HARDWARE-VERIFIED 2026-08-01 on `pstretch TERMINAL=1`.** `describe` advertises all three queries
-(12 platform queries total), `reset cpu` replies `ok`, and the readings are real:
+**HARDWARE-VERIFIED 2026-08-01 on `pstretch TERMINAL=1`.** `describe` advertises all three queries (12 platform queries total), `reset cpu` replies `ok`, and the readings are real:
 
-```
+```text
 reset cpu -> ok
   after 1s  avg=  41.5647  min=   2.0025  max=  87.6321
   after 3s  avg=  43.4994  min=   2.0025  max=  88.2400
@@ -285,23 +237,16 @@ reset cpu -> ok
 
 Two things this first real use established beyond "it works":
 
-- **`min` is genuinely useful, and it is not noise.** 2.0025% is the callback with the FFT not running
-  in that block - i.e. the floor cost of the platform (UI tick, CV read, marshalling) as distinct from
-  the engine. Reading avg/min/max together separates "this engine is expensive" from "this engine is
-  spiky", which a single average cannot.
+- **`min` is genuinely useful, and it is not noise.** 2.0025% is the callback with the FFT not running in that block - i.e. the floor cost of the platform (UI tick, CV read, marshalling) as distinct from the engine. Reading avg/min/max together separates "this engine is expensive" from "this engine is spiky", which a single average cannot.
 
-- **A rising `max` is the signal to watch.** Sampling repeatedly after one `reset cpu` shows whether the
-  peak has converged. Above it had not (87.6 -> 91.3 and still climbing), meaning the worst case had not
-  been found yet; the same engine at `WINDOW=4096` converged within 0.3 pp. That distinction is only
-  visible because `reset cpu` bounds the interval and the query can be re-read - it is the main reason
-  the reset verb earns its place.
+- **A rising `max` is the signal to watch.** Sampling repeatedly after one `reset cpu` shows whether the peak has converged. Above it had not (87.6 -> 91.3 and still climbing), meaning the worst case had not been found yet; the same engine at `WINDOW=4096` converged within 0.3 pp. That distinction is only visible because `reset cpu` bounds the interval and the query can be re-read - it is the main reason the reset verb earns its place.
 
-The `nan` window predicted in `cpu_stat.h` (a read landing between the reset and the next block end) was
-not observed in practice, as expected - the reset and the first query are a USB round-trip apart.
+The `nan` window predicted in `cpu_stat.h` (a read landing between the reset and the next block end) was not observed in practice, as expected - the reset and the first query are a USB round-trip apart.
 
 ## Verification status
 
 Done (host / build):
+
 - **Off-target test coverage of everything below the USB transport** (`host/test_terminal.cpp`, run by `make -C host test-terminal`, part of `make -C host test`). The codec, dispatcher, name/describe tables, reply formatter, ring, TX FIFO and line assembler are all hardware-free, so they run on the desktop against a recording mock `IEngine`; only `src/terminal/terminal.cpp` (which owns `daisy::UsbHandle`) is excluded. Covers the tokenizer and its arg limits, CRLF vs bare LF and the over-long-line swallow, ring wraparound/overflow, the TX FIFO's peek/commit discipline and all-or-nothing enqueue, every coercion including its rejections, float formatting by integer decomposition (rounding carry, nan/inf, INT32_MIN, hex), every phase-1 verb bound to the exact `IEngine` call and the exact reply bytes, the full error taxonomy, target-B forwarding, and `describe` (liveness masks honoured, scope tags, CRLF framing, `end` terminator).
 
 - **The firmware/host descriptor loop is closed.** The C++ test writes the exact `describe` block to `host/build/describe_sample.txt`; `tools/test_descriptor.py` parses that file through the real `skdev.descriptor.parse_describe`. It needs no device, so a descriptor format change fails in CI rather than on the bench. `skdev/__init__.py` now re-exports its serial-backed names lazily (PEP 562) so `skdev.descriptor` imports without pyserial.
@@ -315,6 +260,7 @@ Done (host / build):
 - Fixed a pre-existing `-j` build race (the stamp recipes' `mkdir -p build` vs the core Makefile's plain `mkdir build`): all three stamps now order-only-depend on `$(BUILD_DIR)` instead of each racing to create it.
 
 Done on hardware (Daisy Pod, macOS, 2026-07-31) - the checks from `terminal-transport.md` "To verify on hardware":
+
 - `TransmitInternal` cadence with a draining host: the 938-byte `describe` dump (~15 packets) arrives whole and parses, so `flush_tx` neither spins nor corrupts across packets.
 
 - Enumeration as the host sees it: a `/dev/tty.usbmodem*` node appears and the `tools/` VID-based discovery finds it unaided.
@@ -322,6 +268,7 @@ Done on hardware (Daisy Pod, macOS, 2026-07-31) - the checks from `terminal-tran
 - End-to-end command path: connect, `describe`, `caps`, `query`, and a `set`/`get` param round-trip.
 
 Not yet done:
+
 - CDC RX re-arm across back-to-back packets (a >64-byte line arriving intact through the ring; send a >128-char line and expect `err line-too-long`, then a normal command, to prove the swallowed tail is not re-parsed).
 
 - ~~`make test-hw` end to end.~~ **DONE 2026-08-01 - run against real hardware for the first time: `30 passed, 3 skipped`** (on `pstretch TERMINAL=1`, at both window sizes). Its stated blocker is gone: the note here used to read "no engine implements `live_params()`", which was already stale (11 did) and is now false. Every engine reports a real mask, confirmed live on the device - `describe` returns `masked=True` with 9 params advertised for pstretch instead of the whole 24-id `ParamId` enum, so the generic sweep tests only what the engine actually implements.
@@ -337,6 +284,7 @@ Not yet done:
   How the remaining engines got their masks matters for keeping them honest. The three **generated** families derive theirs instead of listing them, because a hand-written mask would be a second copy of a table the generator owns and would drift on the next regeneration:
 
   - `FaustEngine` / `FaustChainEngine` (chorus, filter, voice) - from `Role::bound()`, i.e. which `ParamId`s actually captured a kernel slider at `init()` from the Traits bind table. The chain wrapper takes the **union** of both stages, which bind different tables.
+
   - `GenEngine` (gigaverb) - from `W::index_of(id) >= 0`, the wrap's own `ParamId` -> gen-parameter mapping (now a documented member of the wrap contract).
 
   The rest are hand-written against their `set_param` switch, which is the only authority they have: edrums, graincloud (granular's list plus `Aux`/`AltPos` for the cloud layer), reso, mosc, csound, chuck. `passthrough` is deliberately **empty** - it overrides neither `set_param` nor `set_config`, so the inherited all-live mask was advertising 24 params on an engine that has none.

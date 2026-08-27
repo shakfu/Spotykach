@@ -13,10 +13,12 @@ Read from the vendored fork; cite before trusting.
 - **The Logger owns USB bring-up only when logging is compiled in.** `Log::StartLog` (`src/app.cpp:213`) reaches `LoggerImpl<LOGGER_INTERNAL>::Init()` -> `usb_handle_.Init(FS_INTERNAL)` **only if** `INFS_LOG` is set, because `common.h:46-50` selects `Logger<LOGGER_NONE>` otherwise and its `StartLog` is a no-op. So the "log routing" decision is exactly the existing `INFS_LOG` flag, with no libDaisy edits. This spec handles both cases.
 
 - **RX re-arms before the callback, into a shared buffer.** `CDC_Receive_FS` (`lib/libDaisy/src/usbd/usbd_cdc_if.c:274-280`):
+
   ```c
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);   // re-arm reception (into UserRxBufferFS, 2048B, set once)
   rx_callback_fs(Buf, Len);                // Buf aliases UserRxBufferFS; *Len = bytes this packet
   ```
+
   The callback runs in **USB IRQ context** (`OTG_FS_IRQHandler`) and **must copy `Buf`/`*Len` out immediately** - the buffer is reused by the next packet. This is the SPSC producer.
 
 - **`SetReceiveCallback` takes a plain C function pointer** `void(*)(uint8_t*, uint32_t*)` (`hid/usb.h:38`). No context arg -> the callback is a `static` function pushing into a file-scope ring; it cannot be a capturing lambda or a bound member.

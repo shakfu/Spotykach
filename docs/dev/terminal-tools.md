@@ -6,7 +6,7 @@ This is **on-target** tooling - it talks to a flashed device over serial. It is 
 
 ## Layout
 
-```
+```text
 tools/
   skdev/                 # shared client library (importable by harness and REPL)
     __init__.py
@@ -381,33 +381,17 @@ if __name__ == "__main__":
 
 ## Lessons from first contact with hardware (2026-07-31)
 
-**A parameter sweep must not assert exact equality.** Plenty of params are legitimately QUANTIZED -
-tape's `aux` selects one of 8 SD slots, so setting 0.5 reads back 0.5625 - and the descriptor has no
-way to declare a step. `test_param_roundtrip` therefore asserts two properties that hold for continuous
-and quantized params alike, and that a broken one fails:
+**A parameter sweep must not assert exact equality.** Plenty of params are legitimately QUANTIZED - tape's `aux` selects one of 8 SD slots, so setting 0.5 reads back 0.5625 - and the descriptor has no way to declare a step. `test_param_roundtrip` therefore asserts two properties that hold for continuous and quantized params alike, and that a broken one fails:
 
-1. **it tracks input** - two different targets must read back differently. A param whose getter is
-   missing returns a constant and fails here.
-2. **it is a fixed point** - writing back what was just read must be stable. Catches a getter and
-   setter that disagree about scaling or units.
+1. **it tracks input** - two different targets must read back differently. A param whose getter is missing returns a constant and fails here.
 
-The old exact-equality form caught a real bug (`crossfade` returning 0) but could not say *why* -
-`set 0.5 got 0.0` reads the same as a clamp, a scale error, or quantization. The new form names it.
+2. **it is a fixed point** - writing back what was just read must be stable. Catches a getter and setter that disagree about scaling or units.
 
-**One timeout used to poison the whole session.** The protocol is synchronous, which the spec below
-says removes the correlation problem - but only while nothing times out. A single late reply offset
-every subsequent read for the life of the connection, surfacing as nonsense parse errors far from the
-cause, and non-deterministically (19 errors on one run, 15 on the next). `Device._drain_stale()` now
-discards anything pending before each command, so every command self-synchronises and a timeout costs
-only that command. The default timeout is also 3 s rather than 1 s, because **the channel's latency is
-bounded by the slowest main-loop consumer** - a streaming engine scanning the SD card in `prepare()`
-stalls replies. A full sweep takes ~0.1 s on delay and ~12 s on radio for exactly this reason.
+The old exact-equality form caught a real bug (`crossfade` returning 0) but could not say *why* - `set 0.5 got 0.0` reads the same as a clamp, a scale error, or quantization. The new form names it.
 
-**A per-engine test should test what the engine does.** The original `test_tape.py` asserted that
-`pad rec A` makes a deck non-empty. It had never been run, and could never have passed: tape does not
-override `audio_is_empty`, so `query empty` returns the `IEngine` default forever. It now tests the
-aux-param/`slot`-query mapping across all 8 slots - the pairing a descriptor cannot express, which is
-the case that justifies per-engine tests existing at all.
+**One timeout used to poison the whole session.** The protocol is synchronous, which the spec below says removes the correlation problem - but only while nothing times out. A single late reply offset every subsequent read for the life of the connection, surfacing as nonsense parse errors far from the cause, and non-deterministically (19 errors on one run, 15 on the next). `Device._drain_stale()` now discards anything pending before each command, so every command self-synchronises and a timeout costs only that command. The default timeout is also 3 s rather than 1 s, because **the channel's latency is bounded by the slowest main-loop consumer** - a streaming engine scanning the SD card in `prepare()` stalls replies. A full sweep takes ~0.1 s on delay and ~12 s on radio for exactly this reason.
+
+**A per-engine test should test what the engine does.** The original `test_tape.py` asserted that `pad rec A` makes a deck non-empty. It had never been run, and could never have passed: tape does not override `audio_is_empty`, so `query empty` returns the `IEngine` default forever. It now tests the aux-param/`slot`-query mapping across all 8 slots - the pairing a descriptor cannot express, which is the case that justifies per-engine tests existing at all.
 
 ## Cross-cutting notes
 

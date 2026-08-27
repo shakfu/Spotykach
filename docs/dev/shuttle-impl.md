@@ -91,16 +91,21 @@ Memory scales **linearly** with seconds, rate, and bytes/frame; they **stack mul
 | chunked pool | pay-per-use | up to pool | flexible | full | large |
 
 ### A. 60 s `kBufSeconds`
+
 One-line change (`kBufSeconds = 60`). 4 x 11.52 MB = 46.1 MB — fits the 48 MB arena with **~2 MB to spare** (near the ceiling for 4 contiguous float tracks). No quality cost. Verified to build + host-green when tried. The only risk is arena exhaustion: `Arena::alloc` returns null past 48 MB and `init()` defensively sets `_cap = 0` (silent tape) — host tests catch this (a 0-cap buffer fails the record round-trip assertions).
 
 ### B. `int16` storage (recommended memory lever)
+
 Store samples as 16-bit (`int16_t`, 4 B -> 2 B). **Halves memory** (same as 60->30 s but keeps 60 s, or frees 11.5 MB at 30 s), with **full 24 kHz bandwidth and no aliasing** — 16-bit is ~96 dB, inaudible loss for tape. Contained change: convert float->int16 (clamp + scale by 32767) on the record/load write, and int16->float (x 1/32768) on the read; the interpolation, declick, wrap, loop window, and load drain are unchanged in shape. Mirrors the granular engine's path in [lofi-int16-scope.md](lofi-int16-scope.md) (same "lo-fi via bit depth, not rate" rationale). Cost: a multiply+clamp on write, a multiply on read. This is the first lever to reach for if the goal is footprint.
 
 ### C. Lower storage sample rate
+
 Store the buffers at `Fs_buf < Fs_engine` (engine stays 48 kHz). **Playback is nearly free** — shuttle already fractional-resamples, so "unity" becomes a pointer step of `Fs_buf/Fs_engine` (e.g. 0.5 for 24 k). **Record needs an anti-alias decimator** (a cheap box/halfband filter; dropping samples without one aliases highs into the band). Saves linearly (24 k = ½, 16 k = ⅓) at the cost of bandwidth — which is on-theme for a lo-fi varispeed tape. Do **not** lower the *platform* rate (`app.cpp`) for this; that touches the codec and every engine. See [lofi-path-b-scope.md](lofi-path-b-scope.md) for the rate-change surface area (frame<->tempo coupling) on the granular side; shuttle is free-running so it avoids most of that, but the record decimator is still required.
 
 ### D. Chunked / paged pool allocator (true dynamic + flexible budget)
+
 The only way to **pay-per-use** and let tracks grow. Replace the per-track contiguous buffer with a list of fixed-size blocks (e.g. 1 MB chunks) drawn from one shared pool; total live memory = sum of actual track usage, so an empty track costs ~nothing and one long track can borrow from three short ones (a shared budget instead of four fixed slots). Cost is real:
+
 - Read path maps `frame -> (chunk, offset)` (cheap with power-of-two chunk size: shift/mask), with boundary-crossing interpolation, wrap, and reverse all chunk-aware.
 
 - Chunk acquisition runs in the **main loop**, not the ISR (no allocation at audio time) — record pre-acquires chunks ahead in `prepare()`, with a "tape full" state when the pool is exhausted.
@@ -110,9 +115,11 @@ The only way to **pay-per-use** and let tracks grow. Replace the per-track conti
 This re-introduces some of the non-contiguous complexity the shuttle deliberately avoided. **On a single-engine firmware it does not reduce the committed footprint** (the arena/pool is still statically reserved) — its value is *flexibility* (uneven track lengths) and a higher effective ceiling, not idle RAM savings. Worth it only if you want one very long track alongside short ones. Scope as its own task.
 
 ### E. Soft length cap ("short by default, long on demand")
+
 If the goal is just UX, not memory: keep the buffers physically allocated at max, but enforce a runtime `_max_frames` (default e.g. 15 s, raisable) on record/loop. ~10 lines, no allocation change, **zero** memory effect. Orthogonal to A-D.
 
 ### Decision guide
+
 - Want **footprint** -> B (`int16`) first; combine with C if you also want the lo-fi color; set `kBufSeconds` + `kEngineArenaBytes` to the static size you actually need.
 
 - Want **more time, have the RAM** -> A (60 s) or B-at-60 s.

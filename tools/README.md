@@ -15,7 +15,7 @@ design is in [`../docs/dev/terminal-tools.md`](../docs/dev/terminal-tools.md).
 
 ## Layout
 
-```
+```text
 tools/
   skdev/                 # shared client library (importable by harness and REPL)
     protocol.py          # port discovery, line framing, log filtering, reply/error parsing
@@ -136,7 +136,7 @@ Command kinds:
 
 Named macros live in `~/.skterm_macros`, one per line:
 
-```
+```text
 # name: cmd; cmd; ...
 recA: mode test; config mode A 1; pad clear A; pad rec A
 ```

@@ -20,7 +20,7 @@ Live knobs (only to make it audible while metering): PITCH = rate spread, SIZE =
 
 ## Build / flash / read the meter
 
-```
+```text
 make ENGINE=softcut METER=1          # load% streams over USB serial; panel ring A also shows it
 make program-dfu                     # flash (hold BOOT+tap RESET to enter DFU first)
 ```
@@ -41,7 +41,7 @@ Worst-case config (every voice overdub-recording at a non-integer rate with both
 
 Clean linear scaling, ~15.3% avg / voice. Two takeaways:
 
-- **The host bench under-predicted by ~2-5x** (it estimated 3-8% / voice; hardware is ~15%). softcut is SDRAM-buffer-bound like the reverb, so host wall-clock cannot model it - this is why the on-device METER pass was load-bearing, not a formality. For reference, the 4-voice 62%/79% is ~1.5x the reverb DoubleMono cap (41%/61%) that already ships.
+- **The host bench under-predicted by ~2-5x** (it estimated 3-8% / voice; hardware is ~15%). softcut is SDRAM-buffer-bound like the reverb, so host wall-clock cannot model it - this is why the on-device METER pass was structural, not a formality. For reference, the 4-voice 62%/79% is ~1.5x the reverb DoubleMono cap (41%/61%) that already ships.
 
 - **4 voices is the safe target as-is; 6 is recoverable**, via either the `std::function` removal below (typically +15-30% headroom) or simply because real playback voices (no record / integer-ish rate / one filter) are much cheaper than this all-voices-overdubbing worst case.
 

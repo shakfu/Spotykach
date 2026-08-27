@@ -186,6 +186,7 @@ Set `--order file` (or `shuffle`) and the sidecar becomes a score: armed to the 
 For **structural** runs two numbers say whether to trust the result:
 
 - **drift** - if `max` equals the `--band` value *exactly*, the warp path is pinned against its constraint and the marks are fiction. Healthy output sits well inside the band.
+
 - **pause score** - fragment boundaries should land in real pauses; a low median with most marks in the quietest 20% is good.
 
 Both are **suppressed for word-index runs**, because neither applies there: a word mid-line is not in a pause, and drift assumes the marks cover the whole text. Printing them would invite reading a correct result as a failure.
@@ -200,8 +201,11 @@ Both are **suppressed for word-index runs**, because neither applies there: a wo
 #### Limits
 
 - **Word timing is approximate by construction.** Fragment boundaries come from the alignment, then each fragment's duration is split across its words by syllable count - so expect a second or two of error inside a long stanza. `--lead S` (default 0.6) places each mark that far *before* the estimated onset so the word is heard rather than missed.
+
 - **Prose needs sentence-level fragmenting**, not implemented: blank-line paragraphs in a full-length book will exceed the 64-mark cap.
+
 - **The text must match the recording.** For a translated work, confirm the reader used the same translation as your text source - a mismatched translation fails outright rather than degrading. Trimming spoken boilerplate from the audio matters more here than it might seem: a DTW aligner cannot absorb unmatched material locally, so anything extra at either end skews the whole path.
+
 - Runtime scales with duration x band width; a 9-minute file is well under a minute.
 
 ### Resume - persisted, and switchable off
@@ -238,7 +242,7 @@ rate=48000
 
 ![Bard control surface](../media/bard-controls.svg)
 
-_Generated from [`docs/diagrams/controls/bard.json`](../diagrams/controls/bard.json) via `make diagrams`._
+*Generated from [`docs/diagrams/controls/bard.json`](../diagrams/controls/bard.json) via `make diagrams`.*
 
 The default column stays entirely on **navigation and pace** - the things you touch while listening - and all the effects live on the Flux/Grit modifier layers, which is what those pads are for.
 
