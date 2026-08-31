@@ -6,7 +6,7 @@ Implementation, the file map, and dev notes for `ENGINE=gigaverb`. The user-faci
 
 - 2-in / 2-out, 8 parameters, no `[buffer]`s. Stereo, so it maps 1:1 onto the platform bus.
 
-- Links and fits: `make ENGINE=gigaverb` -> SRAM_EXEC 158732 B (83.3% of 186 KB) at the default `-O2`, no overflow, no `-Os` needed.
+- Links and fits: `make ENGINE=gigaverb` -> SRAM_EXEC **159,004 B (59.7% of 260 KB)** at the default `-O2`, no overflow, no `-Os` needed. (Re-measured 2026-08-31; read "158732 B (83.3% of 186 KB)" while the region was still 186 KB.)
 
 - `SRAM` (data) stays flat (~52 KB) despite the reverb delay lines, because all gen~ state is bump-allocated from the injected SDRAM arena.
 

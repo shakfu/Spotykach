@@ -72,7 +72,7 @@ void test_ring_fifo_and_drop() {
 void test_ring_wraparound() {
     std::printf("note ring: wraparound over many cycles\n");
     NoteQueue<4> q;
-    MidiNoteEvent e;
+    MidiNoteEvent e{};   // value-init: a failing pop() leaves e untouched, and the next line reads e.note
     uint8_t next_push = 0, next_pop = 0;
     for (int cycle = 0; cycle < 1000; cycle++) {
         // push 3, pop 3 each cycle -> head/tail sweep past the 4-slot boundary repeatedly

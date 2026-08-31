@@ -18,7 +18,7 @@ New to this flavor:
 
 ## Memory / cost
 
-Normal SRAM build. The two ~6 s delay lines and the diffuser (~235 KB of allpass buffers at 48 kHz) all live in the SDRAM arena, so SRAM_EXEC is unaffected — the ARM link reports ~77 % SRAM_EXEC (`186 KB` region), comfortable headroom. The diffuser adds ~16 allpass taps/sample (cheap linear-interp reads) only while a Diffuse deck is active.
+Normal SRAM build. The two ~6 s delay lines and the diffuser (~235 KB of allpass buffers at 48 kHz) all live in the SDRAM arena, so SRAM_EXEC is unaffected — the ARM link reports **58.3 % SRAM_EXEC** (155,272 B of the 260 KB region), comfortable headroom. The diffuser adds ~16 allpass taps/sample (cheap linear-interp reads) only while a Diffuse deck is active.
 
 ## Tests
 

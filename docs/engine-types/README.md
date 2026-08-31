@@ -14,7 +14,7 @@ All three end at the same place: a class implementing `IEngine` (`init`/`prepare
 
 - **The contract.** Every engine - hand-written, Faust, or gen~ - implements `IEngine` and is registered in `src/engine/engine_select.h` + the root `Makefile`. The platform only ever sees `IEngine`.
 
-- **The arena.** Large DSP state (delay lines, resonators, reverb tanks) is placement-allocated into the injected `EngineContext` SDRAM arena at `init()`, never held as static members - otherwise it lands in `.bss` and overflows the 326 KB `SRAM` region. Consequence across all methods: **`SRAM_EXEC` (code), not `SRAM` (data), is the binding budget** (186 KB; a big engine may need its branch built at `-Os`).
+- **The arena.** Large DSP state (delay lines, resonators, reverb tanks) is placement-allocated into the injected `EngineContext` SDRAM arena at `init()`, never held as static members - otherwise it lands in `.bss` and overflows the 252 KB `SRAM` region. Consequence across all methods: **`SRAM_EXEC` (code), not `SRAM` (data), is the binding budget** (260 KB per `linker/alt_sram.lds`; `pstretch` gets its own 200 KB / 312 KB split. A big engine may need its branch built at `-Os`).
 
 - **Host-side codegen.** The Faust and gen~ generators (cyfaust, gen-dsp) run only on the host at codegen time and live in the repo-local `.venv`; the firmware build is plain `arm-none-eabi-g++` over checked-in generated files. Native C++ has no codegen step.
 

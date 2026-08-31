@@ -16,7 +16,12 @@ struct Command {
     const char* argv[kMaxArgs];
     uint8_t     argc = 0;
     const char* verb() const { return argc ? argv[0] : ""; }
-    const char* arg(uint8_t i) const { return i < argc ? argv[i] : ""; }
+    // `i < kMaxArgs` is redundant against the invariant (tokenize() never sets argc above kMaxArgs) but
+    // it is what makes the bound PROVABLE to the compiler: without it, GCC inlining a literal
+    // out-of-range call - which test_terminal does deliberately, to assert this returns "" rather than
+    // reading past the end - reports `array subscript 9 is above array bounds of const char*[6]`. The
+    // access was always safe; the second test states the invariant instead of leaving it inferred.
+    const char* arg(uint8_t i) const { return (i < argc && i < kMaxArgs) ? argv[i] : ""; }
 };
 
 // Split `line` on ' '/'\t' in place. Returns false if the line has more than kMaxArgs tokens

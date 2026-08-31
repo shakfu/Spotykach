@@ -10,7 +10,7 @@ Implementation/bring-up notes for `ENGINE=reverb`. The user-facing reference (th
 
 - CPU measured on hardware (METER build): one hall ~18.6%, DoubleMono two plates ~41%/61% peak; the capped corner (two halls) ~70%/89% can no longer occur. The reverb is SDRAM-latency-bound, so the cap is what keeps the worst block comfortably under the 2 ms deadline.
 
-- Links and fits: `make ENGINE=reverb` -> SRAM_EXEC ~92% of 186 KB, no overflow.
+- Links and fits: `make ENGINE=reverb` -> SRAM_EXEC **69.8%** (185,720 B of 260 KB), no overflow.
 
 - `SRAM` (data) stays flat at ~52 KB despite a few MB of reverb delay-line state, because every kernel is placement-new'd into the SDRAM arena.
 
@@ -26,15 +26,15 @@ The reverb is **memory-latency-bound** (delay lines in SDRAM), so two heavy voic
 
 ## Footprint (Faust 2.85.5)
 
-Arena placement-new keeps `SRAM` (data) flat regardless of delay-line size, so **`SRAM_EXEC` (code) is the binding constraint** - not SDRAM (the per-deck voices live inside the static 48 MB arena, whose region usage is unchanged). From `-Wl,--print-memory-usage` (`SRAM_EXEC` is 186 KB):
+Arena placement-new keeps `SRAM` (data) flat regardless of delay-line size, so **`SRAM_EXEC` (code) is the binding constraint** - not SDRAM (the per-deck voices live inside the static 48 MB arena, whose region usage is unchanged). From `-Wl,--print-memory-usage` (`SRAM_EXEC` is **260 KB** since commit `993210f`; it was 186 KB when this table was first written, and the percentages below were re-measured 2026-08-31):
 
-| Build | SRAM_EXEC |
-|---|---|
-| `passthrough` (platform floor) | ~149 KB (78%) |
-| `reverb` (plate + hall + greyhole, all Faust, **`-Os`**) | ~185.5 KB (97.4%) |
-| `reverb` at `-O2` (counter-example) | ~201 KB -> overflows by ~11 KB |
+| Build | SRAM_EXEC | (against the old 186 KB) |
+|---|---|---|
+| `passthrough` (platform floor) | 149,584 B (56.2%) | 78% |
+| `reverb` (plate + hall + greyhole, all Faust, **`-Os`**) | 185,720 B (69.8%) | 97.4% |
+| `reverb` at `-O2` (historical counter-example) | ~201 KB -> overflowed 186 KB by ~11 KB | overflow |
 
-Greyhole (modulated diffusion + a feedback pitch-shifter) is the heaviest voice; with it the three-voice build overflows `SRAM_EXEC` at `-O2` by ~11 KB, so the reverb branch of the `Makefile` sets **`OPT = -Os`** (as reso does), fitting at ~97.4% with ~5 KB headroom. The `METER` build adds ~12 KB (the USB CDC stack) on top - already over even at `-Os`, so the on-device CPU meter needs a voice dropped to measure. **Greyhole's per-block device CPU is unmeasured** (the host `bench_reverb` only times the plate); verify on hardware.
+Greyhole (modulated diffusion + a feedback pitch-shifter) is the heaviest voice; with it the three-voice build overflowed the **then-186 KB** `SRAM_EXEC` at `-O2` by ~11 KB, so the reverb branch of the `Makefile` sets **`OPT = -Os`** (as reso does). **Worth revisiting:** ~201 KB fits the 260 KB region with room to spare, so the overflow this works around no longer exists — re-measure before removing the override, since `-Os` may still be wanted for CPU headroom. The `METER` build adds ~12 KB (the USB CDC stack) on top - already over even at `-Os`, so the on-device CPU meter needs a voice dropped to measure. **Greyhole's per-block device CPU is unmeasured** (the host `bench_reverb` only times the plate); verify on hardware.
 
 ## Files
 

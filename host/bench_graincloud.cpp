@@ -18,6 +18,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <initializer_list>   // the block-size sweep deduces from a braced-init-list
 #include <cstdint>
 #include <cstdio>
 

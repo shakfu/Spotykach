@@ -21,11 +21,22 @@ DAISYSP   = $(ROOT)/lib/DaisySP/Source
 # DaisySP .cpp files include sibling headers (e.g. "dsp.h") by bare name, so every Source subdirectory
 # must be on the include path. src/transport/ headers (transport.h) likewise pull siblings
 # (synclock.h/tempo.h) by bare name, so that dir is on the path too for TUs that include the transport.
-DAISYSP_INC = $(addprefix -I,$(wildcard $(DAISYSP)/*/))
-INCLUDES  = -Ishim -I$(ROOT)/src -I$(ROOT)/src/transport -I$(RESO_TP) -I$(ROOT)/src/engine/common/thirdparty -I$(GRAINCLOUD_TP) -I$(ROOT)/src/engine/softcut/vendor/include -I. -I$(DAISYSP) $(DAISYSP_INC)
+# VENDORED trees go behind -isystem, not -I. They are upstream code kept diffable against upstream, so
+# their warnings are not ours to fix and would bury the ones that are: DaisySP alone emits ~2,900 under
+# -Wextra, against a handful from this project. -isystem suppresses them without suppressing ours.
+DAISYSP_INC = $(addprefix -isystem,$(wildcard $(DAISYSP)/*/))
+VENDOR_INC  = -isystem$(RESO_TP) -isystem$(ROOT)/src/engine/common/thirdparty -isystem$(GRAINCLOUD_TP) \
+              -isystem$(ROOT)/src/engine/softcut/vendor/include -isystem$(DAISYSP) $(DAISYSP_INC)
+INCLUDES  = -Ishim -I$(ROOT)/src -I$(ROOT)/src/transport -I. $(VENDOR_INC)
 # -DTEST selects stmlib's portable C paths (the ARM ssat/usat asm is gated behind #ifndef TEST), so
 # the Rings DSP (under $(RESO_TP)) compiles on the desktop. Unused elsewhere in this repo.
-CXXFLAGS  = -std=c++17 -O2 -DTEST -Wall -Wno-unused-variable -Wno-unused-but-set-variable $(INCLUDES)
+# -Wextra earns its place: it is what caught the tapefx restrict violation (one pointer array passed as
+# both `FAUSTFLOAT** RESTRICT` arguments) and an uninitialised read on a failing-pop path in
+# test_csound_midi. -Wno-missing-field-initializers is the one part of it worth turning back off - the
+# Faust bind tables deliberately omit trailing fields and rely on value-initialisation, which is correct
+# and would otherwise account for 57 of the warnings on its own.
+CXXFLAGS  = -std=c++17 -O2 -DTEST -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
+            -Wno-unused-but-set-variable -Wno-missing-field-initializers $(INCLUDES)
 
 CORE_SRC    = $(wildcard $(ROOT)/src/engine/granular/*.cpp)
 # Engine-agnostic shared primitives (biquad/follower/adenv/cpattern + header-only siblings) live in
@@ -144,8 +155,18 @@ TEST_CHUCK_PATCH = $(BUILD)/test_chuck_patch
 BENCH_REVERB     = $(BUILD)/bench_reverb
 BENCH_GRAINCLOUD = $(BUILD)/bench_graincloud
 
-.PHONY: all clean run bard-card-check test test-terminal test-terminal-osc test-osc-labels test-osc-addr test-granular test-granular-audio test-edrums test-reso test-mosc test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
+.PHONY: all build-all clean run bard-card-check test test-softcut test-terminal test-terminal-osc test-osc-labels test-osc-addr test-granular test-granular-audio test-edrums test-reso test-mosc test-graincloud-kernel test-graincloud test-reverb test-delay test-qdelay test-diffuser test-tape test-stream test-wav-cues test-shuttle test-radio test-bard test-glitch test-pstretch test-chorus test-filter test-voice test-csound-alloc test-csound-patch test-csound-midi test-csound-reload test-chuck-patch bench-reverb bench-graincloud
 all: $(TARGET)
+
+# Everything in here that is NOT an assertion suite: the WAV harness, the card validator, and the two
+# micro-benchmarks. `test` deliberately does not name them - they print measurements or need a card
+# rather than passing or failing - so before this target nothing built them at all, and both
+# main_host.cpp and bench_graincloud.cpp had rotted into non-compiling states (a missing <memory> and
+# a missing <initializer_list>) without anything noticing. CI runs this to compile them; it does not
+# RUN the benchmarks, whose own headers are explicit that a desktop timing is a lower bound and a
+# scaling signal, never a device load %.
+.PHONY: build-all
+build-all: $(TARGET) $(BARD_CARD_CHECK) $(BENCH_REVERB) $(BENCH_GRAINCLOUD)
 
 $(TARGET): $(SRC) | $(BUILD)
 	$(CXX) $(CXXFLAGS) $(SRC) -o $@

@@ -2,7 +2,7 @@
 
 `ENGINE=bard` - `src/engine/bard/bard_engine.{h,cpp}` - class `BardEngine`
 
-> **Status: complete in code, host-tested, not yet hardware-tested.** Every phase of the plan is implemented, including the WSOLA pitch-keep that decision #3 deferred and the Grit room: `make -C host test-bard` runs 144 checks green and `make test-scripts` covers the card-prep companion. The firmware links at **~88% SRAM_EXEC** (built `-Os`, as `reso`/`reverb` are). **Nothing has been run on the device** - no card of real books, no `METER=1` number, and none of the feel constants tuned by ear. The one open question is unchanged and is a measurement: [the jump rate](#still-open). Implementation notes, the file map and the risks live in [`docs/dev/bard-impl.md`](../dev/bard-impl.md).
+> **Status: complete in code, host-tested, and confirmed working on hardware.** Every phase of the plan is implemented, including the WSOLA pitch-keep that decision #3 deferred and the Grit room: `make -C host test-bard` runs 144 checks green and `make test-scripts` covers the card-prep companion. The firmware links at **62.8% SRAM_EXEC** (167,080 B of 260 KB, built `-Os`, as `reso`/`reverb` are). What remains is the *measured* pass the other engines are also waiting on (TODO P2): no `Meter::cpu` number has been taken, and the feel constants have not been tuned by ear. The one open question is unchanged and is a measurement: [the jump rate](#still-open). Implementation notes, the file map and the risks live in [`docs/dev/bard-impl.md`](../dev/bard-impl.md).
 
 ---
 

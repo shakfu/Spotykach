@@ -82,6 +82,16 @@ jobs:
       - name: Platform/engine boundary guard
         run: make check-boundary
 
+      # The host binaries that are NOT assertion suites: the WAV harness (host_spotykach), the bard card
+      # validator, and the two micro-benchmarks. `make -C host test` does not name them, so until this
+      # step nothing compiled them at all - and three had rotted into non-compiling states unnoticed
+      # (main_host.cpp missing <memory>, bench_graincloud.cpp missing <initializer_list>,
+      # bard_card_check.cpp with its <algorithm> included AFTER the std::sort that needs it). Build
+      # only: a benchmark prints a host timing its own header calls a lower bound rather than a device
+      # load %, and the card validator wants a card.
+      - name: Host binaries (harness, card validator, benchmarks)
+        run: make -C host build-all
+
       - name: Host engine + DSP suites
         run: make -C host test
 

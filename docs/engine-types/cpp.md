@@ -39,7 +39,7 @@ When the DSP is an existing C++ library (reso/Rings), colocate it under `src/eng
 
 - **`-DM_PI`** - strict `-std=c++17` does not expose `M_PI` from `<cmath>` on `arm-none-eabi`.
 
-- **`OPT = -Os` per engine** - a large DSP (Rings ~30 KB) overflows the 186 KB `SRAM_EXEC` at `-O2`; scope `-Os` to that engine's branch so the others stay `-O2`.
+- **`OPT = -Os` per engine** - a large DSP (Rings ~30 KB) overflowed the **then-186 KB** `SRAM_EXEC` at `-O2`; scope `-Os` to that engine's branch so the others stay `-O2`. (The region is 260 KB today and reso links at 69.1% *with* `-Os`, so the original overflow likely no longer applies - the technique is still the right one when an engine genuinely does not fit.)
 
 ## Vendoring a runtime VM (csound, chuck)
 

@@ -8,7 +8,7 @@ Implementation/bring-up notes for `ENGINE=reso`. The user-facing reference (conc
 
 - Host test suite passes: `make -C host test` -> `OK: all reso checks passed`.
 
-- Firmware links and fits: `make ENGINE=reso` -> SRAM_EXEC ~96% (183 KB / 186 KB), no overflow.
+- Firmware links and fits: `make ENGINE=reso` -> SRAM_EXEC **69.1%** (184,060 B / 260 KB), no overflow. (Re-measured 2026-08-31; this read "~96% (183 KB / 186 KB)" while the region was still 186 KB.)
 
 - ARM compile of all Rings/stmlib sources is clean.
 
@@ -46,7 +46,7 @@ Three build gotchas, all handled:
 
 2. **`-DM_PI` on the ARM build.** stmlib's filters use `M_PI`, which strict `-std=c++17` does not expose from `<cmath>` on `arm-none-eabi`. The reso branch of the root `Makefile` adds `-DM_PI=3.14159265358979323846`.
 
-3. **`OPT = -Os` for reso only.** Rings (~30 KB of code+tables) overflows the 186 KB execution SRAM at `-O2` (overflow ~5.4 KB). The reso branch sets `OPT = -Os`, which fits (~96%) and leaves other engines at `-O2`. (`-Os` was briefly suspected of miscompiling the pitch path; it does not - the pitch bug was elsewhere. A Rings-only `-O2` override was tried and reverted.)
+3. **`OPT = -Os` for reso only.** Rings (~30 KB of code+tables) overflowed the **then-186 KB** execution SRAM at `-O2` (overflow ~5.4 KB). **Worth revisiting:** the region is 260 KB since `993210f`, and reso now links at 69.1% *with* `-Os`, so the `-O2` overflow this works around almost certainly no longer exists. Re-measure before removing the override — `-Os` may still be wanted on CPU-headroom grounds, which is a separate question this note never answered. The reso branch sets `OPT = -Os`, which fits (~96%) and leaves other engines at `-O2`. (`-Os` was briefly suspected of miscompiling the pitch path; it does not - the pitch bug was elsewhere. A Rings-only `-O2` override was tried and reverted.)
 
 Registered in: `src/engine/engine_select.h`, root `Makefile` (`ENGINE=reso`, `engine-reso` flash target), `CMakeLists.txt`, `host/Makefile` (`test-reso`).
 

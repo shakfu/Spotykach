@@ -187,7 +187,6 @@ class AppImpl {
     DaisyTimeSource _time_source;
     Transport       _transport; // platform clock; injected into the engine + driven by CoreUI
     ActiveEngine    _engine;  // concrete engine chosen at build time; platform sees only IEngine
-    CoreUI      _ui;
     Hardware    _hw;
     Settings    _settings;
     Storage     _storage;
@@ -197,6 +196,14 @@ class AppImpl {
 #if SPK_TERMINAL
     Terminal    _terminal;  // USB-C text/command channel: on-target engine testing + runtime control
 #endif
+    // DECLARED LAST, deliberately. Members are initialised in DECLARATION order, not in the order the
+    // constructor's init list writes them, and _ui is the one member built from other members:
+    // `_ui { CoreUI(_hw, _engine, _transport, _settings, _storage) }`. While _ui sat above _hw/
+    // _settings/_storage those three were still uninitialised when CoreUI's constructor received them
+    // - harmless only because that constructor does nothing but bind the references
+    // (core.ui.cpp:21-32), and silent UB the moment anyone reads through one of them there. Keep _ui
+    // below every member it is passed.
+    CoreUI      _ui;
 };
 };
 

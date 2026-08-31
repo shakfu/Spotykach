@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 #include <chrono>
+#include <memory>   // std::make_unique (the engine is heap-held so the large buffers stay off the stack)
 #include <string>
 #include <vector>
 

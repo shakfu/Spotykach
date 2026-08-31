@@ -81,7 +81,7 @@ Four further engines live in the tree and build the same way, but are not (yet) 
 | [shuttle](docs/engines/shuttle.md) | Looper | Optional (load slots) | SRAM | C++ | Four in-SDRAM tracks, bipolar varispeed |
 | [softcut](docs/engines/softcut.md) | Looper (overdub) | Optional (load/save clips) | SRAM | C++ | Vendored monome softcut-lib, 4 voices |
 | [radio](docs/engines/radio.md) | Player / instrument | **Required** (streams) | SRAM | C++ | Dual virtual RadioMusic, `.raw`/`.wav` banks |
-| [bard](docs/engines/bard.md) | Player | **Required** (streams) | SRAM (`-Os`) | C++ | Audiobook decks; not yet hardware-tested |
+| [bard](docs/engines/bard.md) | Player | **Required** (streams) | SRAM (`-Os`) | C++ | Audiobook decks; bookmark navigation |
 | [delay](docs/engines/delay.md) | Effect | — | SRAM | C++ | Clean / Tape / Shimmer characters |
 | [qdelay](docs/engines/qdelay.md) | Effect | — | SRAM | C++ | Clean / Diffuse / Duck; **GPLv3** |
 | [reverb](docs/engines/reverb.md) | Effect | — | SRAM (`-Os`) | Faust | Plate / hall / Greyhole, route-aware |

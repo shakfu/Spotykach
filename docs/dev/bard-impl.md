@@ -4,9 +4,11 @@ Implementation and bring-up notes for `ENGINE=bard`. The user-facing reference (
 
 ## Status - pick up here (2026-07-30)
 
-- **Feature-complete in code, host-tested, NOT hardware-tested.** `make -j8 ENGINE=bard` links at **~88% SRAM_EXEC** (167,000 B of 186 KB, built `-Os`), SRAM ~41%, SDRAM ~78%. CMake is at parity (~88.3%). `make -C host test-bard` runs **144 checks** green and is wired into `make -C host test`; `make test-scripts` covers the card-prep script.
+- **Feature-complete in code, host-tested, and confirmed working on hardware.** `make -j8 ENGINE=bard` links at **62.8% SRAM_EXEC** (167,080 B of 260 KB, built `-Os`), SRAM 52.7%, SDRAM 78.2%. CMake is at parity (63.2%). `make -C host test-bard` runs **144 checks** green and is wired into `make -C host test`; `make test-scripts` covers the card-prep script.
 
-- **Nothing has run on the device.** No card of real books has been played, no `METER=1` number taken, and none of the feel constants tuned by ear. That is the whole of what is left.
+  > Figures re-measured 2026-08-31. They previously read "~88% SRAM_EXEC (167,000 B of 186 KB), SRAM ~41%": the byte counts had barely moved, but the SRAM_EXEC region has since grown from 186 KB to 260 KB and the percentages were never re-derived from a build. Quote bytes-of-region, not a bare percentage, when updating these.
+
+- **What is left is the measured pass**, the same one TODO P2 scopes for the other engines: no `Meter::cpu` number has been taken and none of the feel constants have been tuned by ear.
 
 - Everything in the design doc is now built, including the two items originally deferred: the **WSOLA pitch-keep** on ENV (decision #3's experiment) and the **Grit room**.
 

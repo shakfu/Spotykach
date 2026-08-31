@@ -670,6 +670,7 @@ test-hw:
 # liblo7` / `brew install liblo`) before trusting a codec change.
 .PHONY: test-tools
 test-tools:
+	@$(TEST_PY) -c 'import pytest' 2>/dev/null || $(TEST_PY) -m pip install -q --group dev
 	$(TEST_PY) -m pytest -q tools/test_descriptor.py tools/test_osc_codec.py \
 	    tools/test_bridge.py tools/test_liblo_conformance.py
 
@@ -1142,14 +1143,26 @@ clean-libs:
 #
 # `test` MUST be .PHONY. Without it, make matches the `test/` DIRECTORY, decides it is up to date, and
 # a bare `make test` silently does nothing - which is exactly what the README used to have to warn
-# about. The four suites below are independent and are the whole off-target contract; the on-target
+# about. The five suites below are independent and are the whole off-target contract; the on-target
 # one is `make test-hw` (needs a flashed TERMINAL=1 device, and skips cleanly without one).
+#
+# `test-tools` is the fifth and was missing here for a while: CI ran it as its own step, so it was
+# covered there, but a developer running the documented "all the tests" command locally did NOT run the
+# tests for the newest and most intricate subsystem in the tree (the OSC codec, the semantic
+# translator, the liblo conformance check). One command should mean all of them.
+#
+# `-C host build-all` compiles the host binaries that are not assertion suites - the WAV harness, the
+# card validator, the two benchmarks. It does not RUN them (a benchmark prints a measurement, and the
+# card validator wants a card); it is here because nothing built them at all, and three of them had
+# rotted into non-compiling states unnoticed.
 .PHONY: test
 test:
 	$(MAKE) check-boundary
+	$(MAKE) -C host build-all
 	$(MAKE) -C host test
 	$(MAKE) -C test test
 	$(MAKE) test-scripts
+	$(MAKE) test-tools
 	$(MAKE) test-web
 
 # `make help` - the discoverable index. This Makefile has ~50 targets and a dozen toggles; before this
@@ -1181,9 +1194,10 @@ help:
 	@echo '  USBDIAG=1      USB bring-up blink codes    WINDOW=<n>    pstretch FFT window (4096/8192)'
 	@echo ''
 	@echo 'Test (off-target, no hardware needed):'
-	@echo '  make test                     all four suites + the boundary guard'
+	@echo '  make test                     all five suites + the boundary guard + the host binaries'
 	@echo '  make -C host test             engine + DSP suites          make -C test test    standalone unit tests'
 	@echo '  make test-scripts             the Python host tooling       make test-web        the browser front end'
+	@echo '  make test-tools               the OSC codec + describe parser (device-free half of tools/)'
 	@echo '  make check-boundary           platform must not include engine DSP'
 	@echo 'Test (on-target, needs a flashed TERMINAL=1 device; skips cleanly without one):'
 	@echo '  make test-hw                  pytest harness over USB-C     python tools/skterm.py   hand REPL'

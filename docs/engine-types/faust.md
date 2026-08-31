@@ -53,16 +53,16 @@ The kernel is pure DSP; the engine `.cpp` wires it to the platform:
 
 ## Memory and footprint
 
-As with all engines, arena placement-new keeps `SRAM` (data) flat regardless of delay-line size, so **`SRAM_EXEC` (code) is the binding constraint**. Measured (Faust 2.85.5, `-O2`, from `-Wl,--print-memory-usage`; `SRAM_EXEC` is 186 KB):
+As with all engines, arena placement-new keeps `SRAM` (data) flat regardless of delay-line size, so **`SRAM_EXEC` (code) is the binding constraint**. Measured (Faust 2.85.5, `-O2`, from `-Wl,--print-memory-usage`). **`SRAM_EXEC` is 260 KB** (`linker/alt_sram.lds`); the byte counts below were taken when the region was 186 KB, so the percentages have been re-derived against 260 KB and the originals kept for reference:
 
-| Build | SRAM_EXEC | SRAM (data) |
-|---|---|---|
-| passthrough (platform floor) | 149304 B (78.4%) | ~52 KB |
-| reverb, Dattorro only | 155912 B (81.9%) | 52104 B |
-| reverb, Dattorro + Zita (shipped) | 175696 B (92.3%) | 52088 B |
-| Zita as a static member (counter-example) | - | 638 KB -> SRAM overflow |
+| Build | SRAM_EXEC | % of 260 KB | (was, of 186 KB) | SRAM (data) |
+|---|---|---|---|---|
+| passthrough (platform floor) | 149,304 B | 56.1% | 78.4% | ~52 KB |
+| reverb, Dattorro only | 155,912 B | 58.6% | 81.9% | 52,104 B |
+| reverb, Dattorro + Zita | 175,696 B | 66.0% | 92.3% | 52,088 B |
+| Zita as a static member (counter-example) | - | - | - | 638 KB -> SRAM overflow |
 
-At ~92% a third sizable algorithm would need this engine built at `-Os` (as reso is) or one dropped.
+The old conclusion here - "at ~92% a third sizable algorithm would need `-Os` or one dropped" - has been overtaken by the region change *and* by events: the shipped `reverb` now carries **three** algorithms (plate + hall + Greyhole) at **69.8%** (185,720 B, measured 2026-08-31). It is still built `-Os`, but see [`../dev/reverb-impl.md`](../dev/reverb-impl.md) - that override works around an `-O2` overflow of the old 186 KB region and is worth re-testing.
 
 ## Setup, build, add
 

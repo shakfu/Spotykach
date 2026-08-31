@@ -31,7 +31,16 @@ struct TapeFx {
         dsp.buildUserInterface(&ui);
     }
     void set(int which, float v) { role[which].set(v); }                // which: 0..5, v in [0,1]
-    void process(float* buf, int n) { FAUSTFLOAT* io[1] = { buf }; dsp.compute(n, io, io); } // in-place
+    // In-place: the same sample buffer is both source and destination, which is safe here because the
+    // generated loop reads input0[i] into a temporary before writing output0[i] at the same index.
+    // The two POINTER ARRAYS must still be distinct: compute() takes `FAUSTFLOAT** RESTRICT` for both,
+    // so handing it one array twice is a restrict violation (caught by -Wrestrict) even though the
+    // sample aliasing itself is fine. Two arrays, one buffer.
+    void process(float* buf, int n) {
+        FAUSTFLOAT* in[1]  = { buf };
+        FAUSTFLOAT* out[1] = { buf };
+        dsp.compute(n, in, out);
+    }
 };
 
 } // namespace spotykach

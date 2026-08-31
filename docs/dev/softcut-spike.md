@@ -49,7 +49,7 @@ NB a deck-gating bug was found and fixed during bring-up: the platform pushes `s
 
 ## Measured footprint (build, on-target)
 
-- **SRAM_EXEC ~87.7%** of 186 KB at the default `-O2` - fits with headroom, **no QSPI, no `-Os`**. The softcut DSP itself is only ~11 KB; the rest is the platform floor.
+- **SRAM_EXEC 67.3%** (179,244 B of 260 KB) at the default `-O2` - fits with headroom, **no QSPI, no `-Os`**. (Re-measured 2026-08-31; read "~87.7% of 186 KB" while the region was still 186 KB.) The softcut DSP itself is only ~11 KB; the rest is the platform floor.
 
 - **`.bss` ~35%** of SRAM: voice STATE lives in SRAM (engine members, ~9.3 KB/voice after the port fixes below); only the audio BUFFERS are in the SDRAM arena (softcut's `setVoiceBuffer` split).
 

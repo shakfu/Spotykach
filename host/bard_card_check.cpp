@@ -13,6 +13,7 @@
 // WAV header, the per-shelf book cap, and then per book: the sidecar's mark count, ordering, spans, and
 // whether any mark falls outside the audio.
 
+#include <algorithm>   // std::sort, used by the case-insensitive bank ordering below
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -231,8 +232,6 @@ void check_shelf(const std::string& dir) {
 }
 
 } // namespace
-
-#include <algorithm>
 
 int main(int argc, char** argv) {
     if (argc < 2) {
