@@ -7,6 +7,8 @@
 #include <cstring>
 
 #include "engine/wav_cues.h"   // spotykach::WavCues (the platform-owned parsed-marker type)
+#include "memory/wav_source.h"  // the shared RIFF chunk walk (spotykach::parse_wav / WavInfo)
+#include "memory/pcm_convert.h" // PcmFormat (the native storage format, derived from kWav* below)
 
 struct WavHeader {
   // Master RIFF chunk
@@ -43,6 +45,12 @@ static constexpr uint16_t kWavBitsPerSample  = 32;
 static constexpr uint16_t kWavBytesPerSample = 4;
 #endif
 
+// The same storage choice as a PcmFormat: what the loop buffer holds, what the decks record, and what
+// an incoming file is converted TO. One definition so the load path and the streaming path cannot
+// disagree about what "native" means.
+inline constexpr spotykach::PcmFormat kNativeSampleFormat =
+    (kWavAudioFormat == 3) ? spotykach::PcmFormat::f32 : spotykach::PcmFormat::i16;
+
 inline WavHeader wav_header(const size_t size, const uint16_t channels = 2) {
     WavHeader header;
     static_assert(sizeof(header) == 44, "");
@@ -72,70 +80,27 @@ inline bool check_id(const uint8_t* data, size_t offset, const char* id)
   return std::memcmp(data + offset, id, 4) == 0;
 }
 
+// Parse a WAV header out of an in-memory copy of the file head into the canonical 44-byte WavHeader
+// layout, reporting the data-chunk BODY offset in `header_size` (what the caller seeks to before
+// streaming the samples). A thin adapter over the shared chunk walk in wav_source.h - the walk, the
+// bounds checks and the EXTENSIBLE unwrapping all live there; this only re-shapes the result. The
+// chunk IDs are the struct's defaults: reaching a `fmt `/`data` at all is what proves they were seen.
 inline bool wav_header(const uint8_t* bytes, size_t size, WavHeader& header, size_t& header_size)
 {
-    size_t cursor = 0;
-    
-    // Need at least 12 bytes for RIFF header
-    if (size < 12) return false;
+    spotykach::WavInfo info;
+    if (!spotykach::parse_wav(bytes, static_cast<uint32_t>(size), info)) return false;
 
-    if (!check_id(bytes, cursor, "RIFF")) return false;
-    
-    std::memcpy(header.FileTypeBlocID, bytes + cursor, 4);
-    cursor += 4;
-
-    uint32_t riffChunkSize = read_val<uint32_t>(bytes, cursor);
-    header.size = riffChunkSize; 
-    cursor += 4;
-
-    if (!check_id(bytes, cursor, "WAVE")) return false;
-    
-    std::memcpy(header.FileFormatID, bytes + cursor, 4);
-    cursor += 4;
-    
-    bool foundFmt = false;
-    bool foundData = false;
-
-    while (cursor < size) {
-        if (cursor + 8 > size) break;
-
-        char chunkID[4];
-        std::memcpy(chunkID, bytes + cursor, 4);
-        cursor += 4;
-
-        uint32_t chunkSize = read_val<uint32_t>(bytes, cursor);
-        cursor += 4;
-
-        if (std::memcmp(chunkID, "fmt ", 4) == 0) {
-            std::memcpy(header.FormatBlocID, chunkID, 4);
-            header.BlocSize = chunkSize;
-
-            if (chunkSize < 16) return false;
-
-            header.AudioFormat   = read_val<uint16_t>(bytes, cursor + 0);
-            header.NbrChannels   = read_val<uint16_t>(bytes, cursor + 2);
-            header.SampleRate    = read_val<uint32_t>(bytes, cursor + 4);
-            header.BytePerSec    = read_val<uint32_t>(bytes, cursor + 8);
-            header.BytePerBloc   = read_val<uint16_t>(bytes, cursor + 12);
-            header.BitsPerSample = read_val<uint16_t>(bytes, cursor + 14);
-
-            foundFmt = true;
-        } 
-        else if (std::memcmp(chunkID, "data", 4) == 0) {
-            std::memcpy(header.DataBlocID, chunkID, 4);
-            header.DataSize = chunkSize;
-            header_size = cursor;
-            foundData = true; 
-        }
-
-        if (foundFmt && foundData) return true;
-
-        cursor += chunkSize;
-        if (cursor % 2 != 0) cursor++;
-        if (cursor > size) return false;
-    }
-
-    return false;
+    header.size          = read_val<uint32_t>(bytes, 4);   // the RIFF chunk size, as stated
+    header.BlocSize      = info.fmt_size;
+    header.AudioFormat   = info.audio_format;
+    header.NbrChannels   = info.channels;
+    header.SampleRate    = info.sample_rate;
+    header.BytePerSec    = info.byte_per_sec;
+    header.BytePerBloc   = info.byte_per_bloc;
+    header.BitsPerSample = info.bits_per_sample;
+    header.DataSize      = info.data_size;
+    header_size          = info.data_start;
+    return true;
 }
 
 // Scan a WAV byte buffer for the `cue ` chunk and fill `out` with the cue markers' sample-frame

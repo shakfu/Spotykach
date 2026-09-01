@@ -16,6 +16,7 @@
 #include "engine/istreamdeck.h"
 #include "memory/byte_file.h"
 #include "memory/raw_stream.h"
+#include "memory/converting_source.h"
 #include "host_setup.h"
 
 using namespace spotykach;
@@ -227,13 +228,69 @@ int main() {
         int16_t r0 = (int16_t)(blk[0] | (blk[1] << 8));
         check(r0 == (int16_t)(0 * 7 + 1), "wav: rewind returns to the body start, not the file start");
 
-        auto rejects = [](std::vector<uint8_t> bytes) {
+        auto opens = [](std::vector<uint8_t> bytes) {
             MemFile m; m.buf = std::move(bytes); uint32_t rr; RawStreamReader x;
-            return !x.begin_wav(&m, (uint32_t)m.buf.size(), rr);
+            return x.begin_wav(&m, (uint32_t)m.buf.size(), rr);
         };
-        check(rejects(wav_make(1, 2, 16, 48000, 100)), "wav: stereo rejected");
-        check(rejects(wav_make(1, 1,  8, 48000, 100)), "wav: 8-bit rejected");
-        check(rejects(wav_make(3, 1, 32, 48000, 100)), "wav: float rejected");
+        // Any decodable PCM shape is now accepted here and converted to the int16-mono frames these
+        // engines consume (StreamDeck::start_play_wav inserts the adapter). Only genuinely undecodable
+        // headers are refused - a station that cannot be played must not enter the bank.
+        check(opens(wav_make(1, 2, 16, 48000, 100)), "wav: stereo accepted (downmixed by the adapter)");
+        check(opens(wav_make(1, 1,  8, 48000, 100)), "wav: 8-bit accepted");
+        check(opens(wav_make(3, 1, 32, 48000, 100)), "wav: float accepted");
+        check(opens(wav_make(1, 1, 24, 48000, 100)), "wav: 24-bit accepted");
+        check(!opens(wav_make(3, 1, 64, 48000, 100)), "wav: 64-bit float rejected (undecodable)");
+        check(!opens(wav_make(2, 1,  4, 48000, 100)), "wav: ADPCM rejected (undecodable)");
+        check(!opens(wav_make(1, 9, 16, 48000, 100)), "wav: 9 channels rejected (past the downmix bound)");
+
+        // Lengths and seeks stay in SOURCE frames whatever the shape, which is what keeps the radio's
+        // free-running playhead (a frame index modulo the station length) meaningful across formats.
+        {
+            MemFile m; m.buf = wav_make(1, 2, 24, 44100, 250);   // stereo i24: a 6-byte frame
+            RawStreamReader x; uint32_t rr = 0;
+            check(x.begin_wav(&m, (uint32_t)m.buf.size(), rr), "wide: stereo 24-bit station opens");
+            check(x.src_frame_bytes() == 6 && x.src_channels() == 2, "wide: source frame size reported");
+            check(x.frames() == 250, "wide: frames counted in source frames, not bytes");
+            check(rr == 44100, "wide: the file's own rate still drives the pitch rebase");
+            check(x.seek_to_frame(100), "wide: seek to a source frame");
+            check(x.frames() - 100 == 150 && x.data_bytes() == 250 * 6, "wide: body length unchanged by the seek");
+        }
+
+        // The adapter over this reader: a stereo 24-bit body arrives as int16 mono frames, one per
+        // source frame, with the two channels averaged.
+        {
+            auto le16 = [](std::vector<uint8_t>& v, uint16_t x){ v.push_back(x & 0xff); v.push_back((x >> 8) & 0xff); };
+            auto le32 = [](std::vector<uint8_t>& v, uint32_t x){ for (int i = 0; i < 4; i++) v.push_back((x >> (8 * i)) & 0xff); };
+            auto tag  = [](std::vector<uint8_t>& v, const char* s){ for (int i = 0; i < 4; i++) v.push_back((uint8_t)s[i]); };
+            const uint32_t N = 400;
+            std::vector<uint8_t> v;
+            tag(v, "RIFF"); le32(v, 36 + N * 6); tag(v, "WAVE");
+            tag(v, "fmt "); le32(v, 16); le16(v, 1); le16(v, 2); le32(v, 48000);
+            le32(v, 48000 * 6); le16(v, 6); le16(v, 24);
+            tag(v, "data"); le32(v, N * 6);
+            for (uint32_t i = 0; i < N; i++) {          // L = +x, R = 0 -> mono x/2
+                uint8_t f[6];
+                const float x = 0.5f;
+                pcm_write1(f, PcmFormat::i24, x);
+                pcm_write1(f + 3, PcmFormat::i24, 0.f);
+                v.insert(v.end(), f, f + 6);
+            }
+            MemFile m; m.buf = std::move(v);
+            RawStreamReader r; uint32_t rr = 0;
+            check(r.begin_wav(&m, (uint32_t)m.buf.size(), rr), "adapter: stereo 24-bit station opens");
+            ConvertingSource c;
+            check(c.begin(&r, r.src_format(), r.src_channels(), kRawFrameFormat, kRawFrameChannels),
+                  "adapter: configured to the int16-mono frames the engines consume");
+            std::vector<uint8_t> out; uint8_t blk[256];
+            for (int g = 0; g < 10000 && !c.eof(); g++) {
+                uint32_t got = c.read(blk, sizeof(blk));
+                if (!got) break;
+                out.insert(out.end(), blk, blk + got);
+            }
+            check(out.size() == N * 2, "adapter: one int16 mono frame per source frame");
+            int16_t s0 = (int16_t)(out[0] | (out[1] << 8));
+            check(s0 > 8100 && s0 < 8300, "adapter: (0.5 + 0.0)/2 = 0.25 full-scale in int16");
+        }
     }
 
     // --- B. RadioEngine through IEngine -----------------------------------------------------------

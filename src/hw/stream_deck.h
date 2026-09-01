@@ -5,6 +5,7 @@
 #include "memory/audio_stream.h"
 #include "memory/wav_stream.h"
 #include "memory/raw_stream.h"
+#include "memory/converting_source.h"
 #include "hw/fat_file.h"
 
 #include <atomic>
@@ -63,13 +64,16 @@ private:
         RecordStream    record;
         WavStreamReader reader;
         RawStreamReader raw;                 // headerless 16-bit-mono source (radio/bard engines)
+        ConvertingSource conv;               // depth/channel adapter, inserted only for a non-native file
         bool            raw_src = false;     // the live play source is `raw` (frame-seekable), not `reader`
+        bool            conv_on = false;     // the live play source is routed through `conv`
         WavStreamWriter writer;
         FatFile         file;                // one file handle per deck (play XOR record)
     };
     Deck _d[2];
 
     void _pump(Deck& d);
+    static IChunkSource* _play_src(Deck& d);
 };
 
 } // namespace spotykach

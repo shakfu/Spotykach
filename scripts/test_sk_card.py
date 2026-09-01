@@ -16,6 +16,8 @@ No hardware, no toolchain, no decoder: all stdlib. `make test-scripts` runs them
 
 from pathlib import Path
 
+import struct
+
 import pytest
 
 import card_audio as ca
@@ -69,8 +71,8 @@ def test_scan_name_rules(name, ok):
 def test_raw_format_description_does_not_claim_a_wav_format_tag():
     # A headerless file has no AudioFormat field; saying "(WAV AudioFormat 1)" for one would be
     # actively misleading, since the absence of any self-description is that format's whole hazard.
-    assert "AudioFormat" not in cl.FMT_RADIO.describe()
-    assert "AudioFormat" in cl.FMT_TAPE.describe()
+    assert "AudioFormat" not in cl.TARGET_RADIO_RAW.describe()
+    assert "AudioFormat" in cl.TARGET_TAPE.describe()
 
 
 # --- WAV parsing --------------------------------------------------------------------------------
@@ -177,16 +179,48 @@ def test_verify_accepts_a_correct_tape_file(tmp_path):
     assert problems == []
 
 
-@pytest.mark.parametrize("rate,channels,encoding,expect", [
-    (44100, 1, ca.F32, "44100 Hz"),      # right encoding, wrong rate - plays ~8% flat
-    (48000, 2, ca.F32, "2 channel"),     # stereo where mono is required
-    (48000, 1, ca.INT16, "16-bit"),      # the classic int-for-float mistake
+@pytest.mark.parametrize("rate,channels,encoding", [
+    (48000, 2, ca.F32),      # stereo: downmixed to mono as it loads
+    (48000, 1, ca.INT16),    # another depth: converted as it loads
+    (48000, 2, ca.INT16),    # both at once
 ])
-def test_verify_flags_wrong_tape_format(tmp_path, rate, channels, encoding, expect):
+def test_verify_accepts_any_decodable_depth_or_channel_count(tmp_path, rate, channels, encoding):
+    """Since the unified read path, these are correct files rather than findings: the device converts
+    depth and channel count on the way to the ring. Only `convert`'s output format stayed narrow."""
     root = _card(tmp_path)
     ca.write_wav(root / "tapes/tape_a_1.wav", [0.0] * 2048 * channels, rate, channels, encoding)
+    problems = [f for f in sk_card.verify_card(root) if f.path.startswith("tapes/")]
+    assert problems == [], [f.problem for f in problems]
+
+
+def test_verify_accepts_an_off_rate_file_now_that_the_loader_resamples(tmp_path):
+    # 44.1 kHz was the single most common way to get a card wrong. It is resampled on the way in now,
+    # to the device rate, so the buffer still holds the same number of frames per second as a take
+    # recorded on the device - which is why nothing downstream (loop length, tempo) had to change.
+    root = _card(tmp_path)
+    ca.write_wav(root / "tapes/tape_a_1.wav", [0.0] * 2048, 44100, 1, ca.F32)
+    problems = [f for f in sk_card.verify_card(root) if f.path.startswith("tapes/")]
+    assert problems == [], [f.problem for f in problems]
+
+
+def test_verify_flags_a_rate_outside_the_resampler_bounds(tmp_path):
+    root = _card(tmp_path)
+    ca.write_wav(root / "tapes/tape_a_1.wav", [0.0] * 2048, 1000, 1, ca.F32)
     errors = _levels(sk_card.verify_card(root), "error")
-    assert any(expect in f.problem for f in errors), [f.problem for f in errors]
+    assert any("outside the" in f.problem for f in errors), [f.problem for f in errors]
+
+
+def test_verify_flags_an_encoding_the_firmware_cannot_decode(tmp_path):
+    # 64-bit float is a legal WAV the device has no decoder for; it must read as an error, not as
+    # something that will merely be converted.
+    root = _card(tmp_path)
+    body = b"\0" * 4096
+    hdr = (b"RIFF" + struct.pack("<I", 36 + len(body)) + b"WAVE"
+           + b"fmt " + struct.pack("<IHHIIHH", 16, 3, 1, 48000, 48000 * 8, 8, 64)
+           + b"data" + struct.pack("<I", len(body)))
+    (root / "tapes/tape_a_1.wav").write_bytes(hdr + body)
+    errors = _levels(sk_card.verify_card(root), "error")
+    assert any("cannot decode" in f.problem for f in errors), [f.problem for f in errors]
 
 
 def test_verify_flags_a_name_too_long_for_the_scan(tmp_path):
@@ -424,28 +458,43 @@ def test_scan_name_limit_matches_firmware():
 
 
 @pytest.mark.skipif(not (REPO / "src/memory/raw_stream.h").exists(), reason="firmware source absent")
-def test_scanned_banks_are_16_bit_mono_per_firmware():
+def test_scanned_banks_accept_any_decodable_pcm_per_firmware():
+    """The scanned path's .wav side goes through the shared adapter, so its gate is `pcm_format_of`
+    plus the channel bound - not a fixed 16-bit-mono test. Its .raw side is still int16 mono by
+    convention, because a headerless file states nothing about itself."""
     text = _src("src/memory/raw_stream.h")
-    assert "bits != 16 || ch != 1" in text, \
-        "raw_stream.h's accepted format changed - update FMT_SCAN_WAV/FMT_RADIO in card_layout.py"
-    assert cl.FMT_SCAN_WAV.channels == 1 and cl.INT16 in cl.FMT_SCAN_WAV.encodings
+    assert "pcm_format_of(info.audio_format, info.bits_per_sample, fmt)" in text, \
+        "raw_stream.h's accepted format changed - update ACCEPT_SCANNED in card_layout.py"
+    assert "info.channels > kMaxChannels" in text, \
+        "raw_stream.h's channel bound changed - update MAX_CHANNELS in card_layout.py"
+    assert "kRawFrameFormat   = PcmFormat::i16" in text, \
+        "the raw path's fixed format changed - update TARGET_RADIO_RAW in card_layout.py"
+    acc = cl.BANKS["radio"].accepts
+    assert acc.rate is cl.ANY_RATE and set(acc.encodings) == set(cl.DECODABLE)
+    assert cl.TARGET_SCAN_WAV.channels == 1 and cl.INT16 in cl.TARGET_SCAN_WAV.encodings
 
 
-@pytest.mark.skipif(not (REPO / "src/memory/raw_stream.h").exists(), reason="firmware source absent")
+@pytest.mark.skipif(not (REPO / "src/memory/wav_source.h").exists(), reason="firmware source absent")
 def test_chunk_walk_bound_matches_firmware():
-    assert "kMaxChunks = 64" in _src("src/memory/raw_stream.h"), \
+    # One walk for the whole firmware now (src/memory/wav_source.h), so there is one bound to mirror.
+    assert "kWavMaxChunks = 64" in _src("src/memory/wav_source.h"), \
         "the WAV chunk-walk bound changed - update MAX_CHUNKS in card_audio.py"
     assert ca.MAX_CHUNKS == 64
 
 
 @pytest.mark.skipif(not (REPO / "src/hw/card.cpp").exists(), reason="firmware source absent")
-def test_granular_accepts_both_depths_at_48k_stereo_per_firmware():
+def test_granular_accepts_any_decodable_pcm_at_48k_per_firmware():
+    """granular's load path converts depth, channel count AND rate into its stereo buffer, so its gate
+    is `pcm_format_of` plus the channel bound and a sanity range on the rate - nothing is pinned."""
     text = _src("src/hw/card.cpp")
-    assert "hdr.NbrChannels == 2" in text and "hdr.SampleRate == 48000" in text
-    assert "hdr.AudioFormat == 3 && hdr.BitsPerSample == 32" in text
-    assert "hdr.AudioFormat == 1 && hdr.BitsPerSample == 16" in text
-    assert cl.FMT_GRANULAR.channels == 2 and cl.FMT_GRANULAR.rate == 48000
-    assert set(cl.FMT_GRANULAR.encodings) == {cl.F32, cl.INT16}
+    assert "pcm_format_of(info.audio_format, info.bits_per_sample, src_fmt)" in text
+    assert "info.channels >= 1 && info.channels <= kPcmMaxChannels" in text
+    assert "info.sample_rate >= kMinRate && info.sample_rate <= kMaxRate" in text
+    acc = cl.BANKS["granular"].accepts
+    assert acc.rate is cl.ANY_RATE and set(acc.encodings) == set(cl.DECODABLE)
+    assert acc.max_channels == cl.MAX_CHANNELS
+    # What `convert` still writes: the buffer's own stereo shape, so it loads with no fold.
+    assert cl.TARGET_GRANULAR.channels == 2 and cl.TARGET_GRANULAR.rate == 48000
 
 
 @pytest.mark.skipif(not (REPO / "src/memory/wav.h").exists(), reason="firmware source absent")
@@ -473,7 +522,7 @@ def test_engine_paths_match_firmware_literals(engine, rel, literal):
 @pytest.mark.skipif(not (REPO / "src/engine/softcut/softcut_engine.h").exists(),
                     reason="firmware source absent")
 def test_softcut_slot_count_and_buffer_match_firmware():
-    """softcut adds no new format - it is FMT_TAPE in a different folder - so what has to be mirrored
+    """softcut adds no new format - it is TARGET_TAPE in a different folder - so what has to be mirrored
     is the slot count and the RAM cap, both of which are silent when wrong: too many slots and `init`
     writes files no engine opens; a wrong cap and `verify` mis-warns about loop length."""
     text = _src("src/engine/softcut/softcut_engine.h")
@@ -488,10 +537,10 @@ def test_softcut_slot_count_and_buffer_match_firmware():
 
 
 def test_softcut_reuses_the_tape_format_rather_than_declaring_its_own():
-    # The three writable streaming banks share one Fmt on purpose: same 48k mono float WAV through the
+    # The three writable streaming banks share one target Fmt on purpose: same 48k mono float WAV through the
     # same StreamDeck path. Only the folder and the filename prefix differ, which is what keeps a
     # softcut loop from overwriting a tape take.
-    assert cl.BANKS["softcut"].fmt is cl.FMT_TAPE is cl.BANKS["tape"].fmt is cl.BANKS["shuttle"].fmt
+    assert cl.BANKS["softcut"].fmt is cl.TARGET_TAPE is cl.BANKS["tape"].fmt is cl.BANKS["shuttle"].fmt
     dirs = {cl.BANKS[e].dirs[0] for e in ("tape", "shuttle", "softcut")}
     assert len(dirs) == 3, "they must not share a folder, or their slots collide"
 

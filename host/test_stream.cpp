@@ -7,6 +7,7 @@
 #include "memory/audio_stream.h"
 #include "memory/byte_file.h"
 #include "memory/wav_stream.h"
+#include "memory/converting_source.h"
 #include "engine/istreamdeck.h"   // BankEntry + bank_sort (scanner ordering)
 
 #include <cstdio>
@@ -14,6 +15,7 @@
 #include <cstring>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 using namespace spotykach;
 
@@ -306,11 +308,11 @@ int main() {
         check(tiled_ok, "loop: playback repeats the body seamlessly across the rewind");
     }
 
-    // --- 10. Format validation + header robustness. The streaming reader hands raw body bytes straight
-    // to the engine's float frames with no conversion, so it must accept ONLY the native record format
-    // (mono, kWav* depth/format, 48 kHz) - else 16-bit / 32-bit-int / stereo files reinterpret as garbage
-    // (the distortion seen on hardware). It must also find `data` even when an externally-authored WAV
-    // prepends a fat metadata chunk that pushes `data` past the old 64-byte parse window.
+    // --- 10. Format acceptance + header robustness. The reader accepts any PCM depth this firmware can
+    // convert, mono or multichannel, at 48 kHz; StreamDeck wraps a non-native file in a ConvertingSource
+    // (section 11) so the engine still receives native mono frames. Off-RATE is still a hard reject -
+    // converting that means resampling, which changes what a frame count means. It must also find `data`
+    // even when an externally-authored WAV prepends a fat metadata chunk.
     {
         auto le16 = [](std::vector<uint8_t>& v, uint16_t x){ v.push_back(x & 0xff); v.push_back((x >> 8) & 0xff); };
         auto le32 = [](std::vector<uint8_t>& v, uint32_t x){ for (int i = 0; i < 4; i++) v.push_back((x >> (8 * i)) & 0xff); };
@@ -336,11 +338,48 @@ int main() {
         const uint16_t wrongFmt  = (kWavAudioFormat == 3) ? 1 : 3;     // int vs float, opposite the build
         const uint16_t wrongBits = (kWavBitsPerSample == 32) ? 16 : 32;
 
-        check( accepts(make_wav(kWavAudioFormat, 1, kWavBitsPerSample, 48000, 0, body)), "validation: native mono file accepted");
-        check(!accepts(make_wav(kWavAudioFormat, 2, kWavBitsPerSample, 48000, 0, body)), "validation: stereo rejected");
-        check(!accepts(make_wav(wrongFmt,        1, kWavBitsPerSample, 48000, 0, body)), "validation: wrong audio-format (int vs float) rejected");
-        check(!accepts(make_wav(kWavAudioFormat, 1, wrongBits,         48000, 0, body)), "validation: wrong bit depth rejected");
-        check(!accepts(make_wav(kWavAudioFormat, 1, kWavBitsPerSample, 44100, 0, body)), "validation: non-48k sample rate rejected");
+        (void)wrongFmt; (void)wrongBits;
+
+        check(accepts(make_wav(kWavAudioFormat, 1, kWavBitsPerSample, 48000, 0, body)), "acceptance: native mono file accepted");
+        check(accepts(make_wav(kWavAudioFormat, 2, kWavBitsPerSample, 48000, 0, body)), "acceptance: stereo accepted (downmixed by the adapter)");
+        check(accepts(make_wav(1, 1, 16, 48000, 0, body)), "acceptance: 16-bit PCM accepted");
+        check(accepts(make_wav(1, 1, 24, 48000, 0, body)), "acceptance: 24-bit PCM accepted");
+        check(accepts(make_wav(1, 1, 32, 48000, 0, body)), "acceptance: 32-bit INTEGER PCM accepted (was the classic silent-noise case)");
+        check(accepts(make_wav(1, 1,  8, 48000, 0, body)), "acceptance: 8-bit PCM accepted");
+        check(accepts(make_wav(1, 2, 24, 48000, 0, body)), "acceptance: stereo 24-bit accepted (both axes at once)");
+
+        check(accepts(make_wav(kWavAudioFormat, 1, kWavBitsPerSample, 44100, 0, body)), "acceptance: 44.1 kHz accepted (resampled by the adapter)");
+        check(accepts(make_wav(1, 2, 24, 96000, 0, body)), "acceptance: 96 kHz stereo 24-bit accepted (all three axes at once)");
+
+        // Still refused: a nonsense rate, and a format nothing can decode.
+        check(!accepts(make_wav(kWavAudioFormat, 1, kWavBitsPerSample, 100, 0, body)), "acceptance: an absurd sample rate rejected");
+        check(!accepts(make_wav(3, 1, 64, 48000, 0, body)), "acceptance: 64-bit float rejected (undecodable)");
+        check(!accepts(make_wav(2, 1,  4, 48000, 0, body)), "acceptance: ADPCM rejected (undecodable)");
+        check(!accepts(make_wav(1, 9, 16, 48000, 0, body)), "acceptance: 9 channels rejected (past the downmix bound)");
+
+        // The reader reports the file's own shape, and a length in SOURCE frames - the count the engine
+        // ends up with, since conversion changes a frame's width, never how many frames there are.
+        {
+            MemFile mf; mf.buf = make_wav(1, 2, 24, 48000, 0, 6 * 60); mf.cur = 0;   // 60 stereo i24 frames
+            WavStreamReader r;
+            check(r.begin(&mf), "shape: a stereo 24-bit file parses");
+            check(r.src_format() == PcmFormat::i24 && r.src_channels() == 2, "shape: file format/channels reported out");
+            check(r.src_frame_bytes() == 6 && r.frames() == 60, "shape: frames counted in source frames, not bytes");
+            check(r.src_rate() == 48000, "shape: the file's own rate reported out");
+        }
+
+        // Resampling accounting: the length an ENGINE receives is the source length at the device
+        // rate, which is what keeps a 44.1 kHz loop the same number of buffer frames as a take
+        // recorded on the device (and so keeps softcut's loop lengths and sync honest).
+        {
+            check(ConvertingSource::out_frames(44100, 44100, 48000) == 48000, "rate: 1 s at 44.1k -> 1 s of device frames");
+            check(ConvertingSource::out_frames(96000, 96000, 48000) == 48000, "rate: 1 s at 96k -> 1 s of device frames");
+            check(ConvertingSource::out_frames(1000, 48000, 48000) == 1000, "rate: no rate change is exact");
+            check(!ConvertingSource::is_identity(PcmFormat::f32, 1, PcmFormat::f32, 1, 44100, 48000),
+                  "rate: an off-rate file is not an identity, however native its depth");
+            check(ConvertingSource::is_identity(PcmFormat::f32, 1, PcmFormat::f32, 1, 48000, 48000),
+                  "rate: a native file at the device rate still bypasses the adapter entirely");
+        }
 
         // Robustness: a 64-byte metadata chunk pushes `data` well past offset 64; the old 64-byte window
         // would miss it (begin -> false -> silent no-load), the widened window must still find + stream it.
@@ -410,6 +449,223 @@ int main() {
             put(v, "JUNK", std::vector<uint8_t>(3, 0x7));   // odd size -> 1 pad byte
             put(v, "data", bodyramp(body));
             check(reads_body(wrap(v), body), "spec: odd-sized chunk pad byte handled (data stays aligned)");
+        }
+    }
+
+    // --- 11. ConvertingSource: the depth/channel adapter that lets a non-native file reach a native
+    // engine. Everything here runs in the main-loop pump; the ISR still only drains the ring.
+    {
+        // A source that hands back deliberately awkward byte counts, ending mid-frame. FatFs behind a
+        // ring does exactly this, and a frame stitched across two reads is the failure it causes.
+        struct DribbleSource : IChunkSource {
+            std::vector<uint8_t> buf; uint32_t cur = 0; uint32_t step = 3;
+            uint32_t read(uint8_t* dst, uint32_t n) override {
+                uint32_t want = std::min<uint32_t>(std::min<uint32_t>(n, step), (uint32_t)buf.size() - cur);
+                std::memcpy(dst, buf.data() + cur, want); cur += want; return want;
+            }
+            bool eof() const override { return cur >= buf.size(); }
+            void rewind() override { cur = 0; }
+        };
+        auto drain = [](IChunkSource& src, uint32_t chunk) {          // read to exhaustion
+            std::vector<uint8_t> out; uint8_t blk[4096];
+            for (uint32_t guard = 0; guard < 100000 && !src.eof(); guard++) {
+                uint32_t g = src.read(blk, chunk);
+                if (!g && src.eof()) break;
+                if (!g) break;
+                out.insert(out.end(), blk, blk + g);
+            }
+            return out;
+        };
+        auto as_floats = [](const std::vector<uint8_t>& b) {
+            std::vector<float> f(b.size() / 4);
+            std::memcpy(f.data(), b.data(), f.size() * 4);
+            return f;
+        };
+
+        check(ConvertingSource::is_identity(PcmFormat::f32, 1, PcmFormat::f32, 1), "adapter: native mono is an identity (bypassed)");
+        check(!ConvertingSource::is_identity(PcmFormat::f32, 2, PcmFormat::f32, 1), "adapter: stereo is not an identity");
+        check(!ConvertingSource::is_identity(PcmFormat::i16, 1, PcmFormat::f32, 1), "adapter: a different depth is not an identity");
+
+        // i16 mono -> f32 mono, through a source that dribbles 3 bytes at a time (so every other frame
+        // straddles a read). Values and count must both survive.
+        {
+            const int N = 200;
+            DribbleSource src; src.buf.resize(N * 2);
+            for (int i = 0; i < N; i++) {
+                const int16_t v = (int16_t)((i - N / 2) * 100);
+                std::memcpy(src.buf.data() + i * 2, &v, 2);
+            }
+            ConvertingSource c;
+            check(c.begin(&src, PcmFormat::i16, 1, PcmFormat::f32, 1), "adapter: i16 mono -> f32 mono begins");
+            const auto out = as_floats(drain(c, 37 * 4));
+            bool ok = (out.size() == (size_t)N);
+            for (int i = 0; i < N && ok; i++) {
+                const float want = (float)((int16_t)((i - N / 2) * 100)) * (1.f / 32767.f);
+                if (std::fabs(out[i] - want) > 1e-6f) ok = false;
+            }
+            check(ok, "adapter: i16 -> f32 exact, and no frame lost across a mid-frame read boundary");
+        }
+
+        // Stereo -> mono is an AVERAGE, not a channel drop: material only on one side must survive.
+        {
+            const int N = 64;
+            DribbleSource src; src.buf.resize(N * 8); src.step = 5;   // stereo f32, awkward dribble
+            for (int i = 0; i < N; i++) {
+                const float l = 0.5f, r = -0.25f;
+                std::memcpy(src.buf.data() + i * 8,     &l, 4);
+                std::memcpy(src.buf.data() + i * 8 + 4, &r, 4);
+            }
+            ConvertingSource c;
+            check(c.begin(&src, PcmFormat::f32, 2, PcmFormat::f32, 1), "adapter: f32 stereo -> mono begins");
+            check(c.src_frame_bytes() == 8 && c.dst_frame_bytes() == 4, "adapter: frame sizes reflect both formats");
+            const auto out = as_floats(drain(c, 4096));
+            bool ok = out.size() == (size_t)N;
+            for (float v : out) if (std::fabs(v - 0.125f) > 1e-6f) ok = false;   // (0.5 + -0.25)/2
+            check(ok, "adapter: stereo folds to mono by averaging (one-sided material is kept)");
+        }
+
+        // Mono -> stereo duplicates (the granular loop buffer's direction).
+        {
+            DribbleSource src; src.buf.resize(4 * 4); src.step = 4096;
+            for (int i = 0; i < 4; i++) { const float v = 0.1f * (i + 1); std::memcpy(src.buf.data() + i * 4, &v, 4); }
+            ConvertingSource c;
+            check(c.begin(&src, PcmFormat::f32, 1, PcmFormat::f32, 2), "adapter: mono -> stereo begins");
+            const auto out = as_floats(drain(c, 4096));
+            bool ok = out.size() == 8;
+            for (int i = 0; i < 4 && ok; i++) {
+                if (std::fabs(out[i * 2] - out[i * 2 + 1]) > 1e-9f) ok = false;          // L == R
+                if (std::fabs(out[i * 2] - 0.1f * (i + 1)) > 1e-6f) ok = false;
+            }
+            check(ok, "adapter: mono duplicates into both channels");
+        }
+
+        // Whole destination frames only: a read whose `n` is not frame-aligned returns the frames that
+        // fit and keeps the rest, rather than emitting a partial sample.
+        {
+            DribbleSource src; src.buf.resize(16 * 2); src.step = 4096;
+            ConvertingSource c; c.begin(&src, PcmFormat::i16, 1, PcmFormat::f32, 1);
+            uint8_t blk[16];
+            check(c.read(blk, 10) == 8, "adapter: a non-frame-aligned read returns whole frames only");
+        }
+
+        // A file truncated mid-frame drops the partial tail rather than emitting half a sample, and
+        // still reports eof so the stream can finish.
+        {
+            DribbleSource src; src.buf.resize(4 * 3 + 2); src.step = 4096;   // 4 i24 frames + 2 stray bytes
+            ConvertingSource c; c.begin(&src, PcmFormat::i24, 1, PcmFormat::f32, 1);
+            const auto out = drain(c, 4096);
+            check(out.size() == 16, "adapter: a trailing partial frame is dropped");
+            check(c.eof(), "adapter: eof once the source is dry and no whole frame is staged");
+        }
+
+        // rewind clears the carried partial frame, so a looping stream does not stitch the first frame
+        // of pass two out of bytes from either side of the seam.
+        {
+            DribbleSource src; src.buf.resize(3 * 2); src.step = 3;
+            ConvertingSource c; c.begin(&src, PcmFormat::i16, 1, PcmFormat::f32, 1);
+            uint8_t blk[4]; c.read(blk, 4);              // leaves 1 carried byte
+            c.rewind();
+            const auto out = drain(c, 4096);
+            check(out.size() == 12, "adapter: rewind drops the carry and replays every frame");
+        }
+
+        // Resampling: a 24 kHz ramp becomes twice as many frames at 48 kHz, interpolated - and it does
+        // that through a source that dribbles bytes, so the interpolator's state has to survive chunk
+        // boundaries (a discontinuity there is an audible tick every read).
+        {
+            const int N = 512;
+            DribbleSource src; src.buf.resize(N * 4); src.step = 7;
+            for (int i = 0; i < N; i++) { const float v = (float)i / (float)N; std::memcpy(src.buf.data() + i * 4, &v, 4); }
+            ConvertingSource c;
+            check(c.begin(&src, PcmFormat::f32, 1, PcmFormat::f32, 1, 24000, 48000), "resample: 24k -> 48k begins");
+            const auto out = as_floats(drain(c, 97 * 4));
+            // 2x the frames, give or take the final partial step at the end of the source.
+            check(out.size() >= (size_t)(2 * N - 2) && out.size() <= (size_t)(2 * N),
+                  "resample: 24k -> 48k roughly doubles the frame count");
+            bool monotone = true, halved = true;
+            for (size_t i = 1; i < out.size(); i++) if (out[i] < out[i - 1] - 1e-6f) monotone = false;
+            // A ramp resampled 2:1 advances by half the source step per output frame.
+            for (size_t i = 1; i < out.size() - 2; i++) {
+                if (std::fabs((out[i] - out[i - 1]) - 0.5f / (float)N) > 1e-5f) halved = false;
+            }
+            check(monotone, "resample: output stays monotone across every chunk boundary (no discontinuity)");
+            check(halved, "resample: the interpolated step is exactly half the source step");
+        }
+
+        // Downward: 96 kHz halves the frame count, and the values are the even-indexed source frames.
+        {
+            const int N = 400;
+            DribbleSource src; src.buf.resize(N * 4); src.step = 4096;
+            for (int i = 0; i < N; i++) { const float v = (float)i; std::memcpy(src.buf.data() + i * 4, &v, 4); }
+            ConvertingSource c;
+            check(c.begin(&src, PcmFormat::f32, 1, PcmFormat::f32, 1, 96000, 48000), "resample: 96k -> 48k begins");
+            const auto out = as_floats(drain(c, 4096));
+            check(out.size() >= (size_t)(N / 2 - 1) && out.size() <= (size_t)(N / 2 + 1),
+                  "resample: 96k -> 48k roughly halves the frame count");
+            bool picked = true;
+            for (size_t i = 0; i < out.size() && picked; i++) if (std::fabs(out[i] - (float)(2 * i)) > 1e-3f) picked = false;
+            check(picked, "resample: 2:1 lands exactly on every other source frame");
+        }
+
+        // rewind must reset the interpolator, not just the byte carry: a looping stream that kept its
+        // phase would drift one fractional frame per pass and smear the seam.
+        {
+            const int N = 64;
+            DribbleSource src; src.buf.resize(N * 4); src.step = 4096;
+            for (int i = 0; i < N; i++) { const float v = (float)i; std::memcpy(src.buf.data() + i * 4, &v, 4); }
+            ConvertingSource c; c.begin(&src, PcmFormat::f32, 1, PcmFormat::f32, 1, 32000, 48000);
+            const auto first = as_floats(drain(c, 4096));
+            c.rewind();
+            const auto second = as_floats(drain(c, 4096));
+            check(!first.empty() && first == second, "resample: rewind replays the pass identically (phase reset)");
+        }
+
+        // End to end, the real path: a stereo 24-bit WAV on "disk" -> WavStreamReader -> ConvertingSource
+        // -> PlayStream -> the ISR's consume(), landing as native mono float frames.
+        {
+            auto le16 = [](std::vector<uint8_t>& v, uint16_t x){ v.push_back(x & 0xff); v.push_back((x >> 8) & 0xff); };
+            auto le32 = [](std::vector<uint8_t>& v, uint32_t x){ for (int i = 0; i < 4; i++) v.push_back((x >> (8 * i)) & 0xff); };
+            auto tag  = [](std::vector<uint8_t>& v, const char* s){ for (int i = 0; i < 4; i++) v.push_back((uint8_t)s[i]); };
+            const uint32_t N = 300;
+            std::vector<uint8_t> v;
+            tag(v, "RIFF"); le32(v, 0); tag(v, "WAVE");
+            tag(v, "fmt "); le32(v, 16); le16(v, 1); le16(v, 2); le32(v, 48000);
+            le32(v, 48000 * 6); le16(v, 6); le16(v, 24);
+            tag(v, "data"); le32(v, N * 6);
+            for (uint32_t i = 0; i < N; i++) {                       // L = +ramp, R = -ramp -> mono 0
+                uint8_t f[6];
+                const float x = (float)i / (float)N * 0.8f;
+                pcm_write1(f,     PcmFormat::i24,  x);
+                pcm_write1(f + 3, PcmFormat::i24, -x);
+                v.insert(v.end(), f, f + 6);
+            }
+            const uint32_t riff = (uint32_t)v.size() - 8;
+            v[4] = riff & 0xff; v[5] = (riff >> 8) & 0xff; v[6] = (riff >> 16) & 0xff; v[7] = (riff >> 24) & 0xff;
+
+            MemFile file; file.buf = std::move(v); file.cur = 0;
+            WavStreamReader r;
+            check(r.begin(&file), "end-to-end: stereo 24-bit WAV opens");
+            check(r.frames() == N, "end-to-end: length in source frames");
+
+            ConvertingSource conv;
+            check(conv.begin(&r, r.src_format(), r.src_channels(), kStreamFrameFormat, kStreamFrameChannels),
+                  "end-to-end: adapter configured from the file's own shape");
+
+            SpscRing ring; std::vector<uint8_t> mem(4096); ring.init(mem.data(), (uint32_t)mem.size());
+            uint8_t scratch[512];
+            PlayStream play; play.init(&ring, scratch, sizeof(scratch));
+            play.start(&conv);
+
+            std::vector<uint8_t> got; uint8_t blk[128];
+            for (uint32_t guard = 0; guard < 10000 && !play.finished(); guard++) {
+                play.pump();
+                got.insert(got.end(), blk, blk + play.consume(blk, sizeof(blk)));
+            }
+            const auto f = as_floats(got);
+            bool silent = f.size() >= N;
+            for (uint32_t i = 0; i < N && silent; i++) if (std::fabs(f[i]) > 1e-5f) silent = false;
+            check(silent, "end-to-end: L/-L stereo downmixes to silence through the whole pump path");
+            check(play.underruns() == 0, "end-to-end: the adapter keeps the ring fed (no underruns)");
         }
     }
 

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import base64
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -182,11 +183,25 @@ def _build_broken_card(root: Path) -> None:
     ca.write_wav(root / "pstretch/CLIP01.WAV",
                  ca.pad_to_bytes(ca.tone(0.5, 220.0, 48000), floor, 2), 48000, 1, ca.INT16)
     ca.write_raw(root / "radio/0/01.raw", ca.pad_to_bytes(ca.tone(0.5, 196.0, 48000), floor, 2))
+    # Not the bank's native format, but decodable - the device converts depth and channel count as it
+    # loads, so these must produce NO finding. They were errors before the unified read path, which is
+    # exactly why they are worth pinning here.
+    ca.write_wav(root / "tapes/tape_a_3.wav", [0.0] * 4096, 48000, 2, ca.F32)     # stereo -> downmixed
+    ca.write_wav(root / "tapes/tape_a_4.wav", [0.0] * 2048, 48000, 1, ca.INT16)   # another depth
 
-    # --- wrong format: right encoding, wrong rate / channels / depth -----------------------------
+    # 44.1 kHz is resampled on load now, so this must produce NO finding either - the case that was
+    # the single most common way to get a card wrong.
     ca.write_wav(root / "tapes/tape_a_2.wav", [0.0] * 2048, 44100, 1, ca.F32)
-    ca.write_wav(root / "tapes/tape_a_3.wav", [0.0] * 4096, 48000, 2, ca.F32)
-    ca.write_wav(root / "tapes/tape_a_4.wav", [0.0] * 2048, 48000, 1, ca.INT16)
+
+    # --- will not load: a rate outside what the resampler will take ------------------------------
+    ca.write_wav(root / "tapes/tape_a_6.wav", [0.0] * 2048, 1000, 1, ca.F32)
+
+    # --- will not load: a legal WAV the firmware has no decoder for (64-bit float) ----------------
+    _body = b"\x00" * 40000
+    (root / "tapes/tape_a_5.wav").write_bytes(
+        b"RIFF" + struct.pack("<I", 36 + len(_body)) + b"WAVE"
+        + b"fmt " + struct.pack("<IHHIIHH", 16, 3, 1, 48000, 48000 * 8, 8, 64)
+        + b"data" + struct.pack("<I", len(_body)) + _body)
 
     # --- scan visibility -------------------------------------------------------------------------
     ca.write_wav(root / "bard/0/The Hobbit Chapter 3.wav",

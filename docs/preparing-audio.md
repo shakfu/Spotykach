@@ -2,9 +2,11 @@
 
 > **Start at [`docs/sd-card.md`](sd-card.md) if you just want a working card.** `make sdcard` builds > one, `sk_card.py convert` puts your audio on it in the right format, and `make check-sdcard` explains > anything wrong with a card you already have. This page is the tape/shuttle format reference behind > those tools — read it when you want to know *why* the format is what it is, or to drive > `convert_tape_audio.py` directly.
 
-The `tape` and `shuttle` engines read audio straight off the SD card into the audio path with **no format conversion on-device**. They accept exactly one format; anything else is rejected (the deck's amber error LED **strobes** for a wrong-format file vs a steady amber for an empty slot). So source files must be converted on a computer first.
+The `tape` and `shuttle` engines now **accept any PCM depth the firmware can decode** (8/16/24/32-bit integer or 32-bit float), mono or stereo, at any rate from 4 kHz to 192 kHz. Depth, channels and rate are all converted on the way to the audio path, so a file that used to strobe the deck's amber error LED now simply plays.
 
-## Supported format
+Converting on a computer anyway is still worth it. The format below is what the deck itself records, so it loads with **zero** conversion on the device — no main-loop work per chunk, and byte-identical to a take recorded on the machine. It is also a better resampler than the linear interpolation the device does in one pass.
+
+## The native format
 
 | Property | Value | ffmpeg | sox |
 |---|---|---|---|
@@ -13,7 +15,7 @@ The `tape` and `shuttle` engines read audio straight off the SD card into the au
 | Channels | **mono** (stereo is down-mixed) | `-ac 1` | `-c 1` |
 | Sample rate | **48000 Hz** | `-ar 48000` | `-r 48000` |
 
-Common mistakes that still play as garbage / get rejected: 16-bit PCM, **32-bit *integer*** PCM (`pcm_s32le` — not the same as float; this is the easy one to get wrong), stereo, and 44.1 kHz (no on-device resampling, so it would otherwise play ~8% flat).
+What used to be the common mistakes here — 16-bit PCM, **32-bit *integer*** PCM (`pcm_s32le`), stereo, 44.1 kHz — now all simply load, converted on the way to the ring. Only a format the device has no decoder for (64-bit float, ADPCM) or a rate outside 4–192 kHz is refused.
 
 ## Card layout
 

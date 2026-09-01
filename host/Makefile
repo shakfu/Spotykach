@@ -310,7 +310,8 @@ $(TEST_SOFTCUT): test_softcut.cpp $(LIB_SRC) $(SOFTCUT_SRC) $(ROOT)/src/engine/s
 
 # Radio engine + the headerless raw-stream codec (raw_stream.h, header pulled by the test).
 $(TEST_RADIO): test_radio.cpp $(LIB_SRC) $(RADIO_SRC) $(ROOT)/src/engine/radio/radio_engine.h \
-               $(ROOT)/src/memory/raw_stream.h | $(BUILD)
+               $(ROOT)/src/memory/raw_stream.h $(ROOT)/src/memory/wav_source.h \
+               $(ROOT)/src/memory/pcm_convert.h $(ROOT)/src/memory/converting_source.h | $(BUILD)
 	$(CXX) $(CXXFLAGS) test_radio.cpp $(LIB_SRC) $(RADIO_SRC) -o $@
 
 # Bard engine + its header-only bookmark/resume model.
@@ -365,10 +366,13 @@ bench-reverb: $(BENCH_REVERB)
 # engine/Daisy/FatFs deps, so its test compiles on its own.
 $(TEST_STREAM): test_stream.cpp $(ROOT)/src/memory/spsc_ring.h $(ROOT)/src/memory/audio_stream.h \
                 $(ROOT)/src/memory/byte_file.h $(ROOT)/src/memory/wav_stream.h $(ROOT)/src/memory/wav.h \
+                $(ROOT)/src/memory/wav_source.h $(ROOT)/src/memory/converting_source.h \
+                $(ROOT)/src/memory/pcm_convert.h $(ROOT)/src/memory/sample16.h \
                 $(ROOT)/src/engine/istreamdeck.h | $(BUILD)
 	$(CXX) $(CXXFLAGS) test_stream.cpp -o $@
 
-$(TEST_WAV_CUES): test_wav_cues.cpp $(ROOT)/src/memory/wav.h $(ROOT)/src/engine/wav_cues.h | $(BUILD)
+$(TEST_WAV_CUES): test_wav_cues.cpp $(ROOT)/src/memory/wav.h $(ROOT)/src/memory/wav_source.h \
+                  $(ROOT)/src/engine/wav_cues.h | $(BUILD)
 	$(CXX) $(CXXFLAGS) test_wav_cues.cpp -o $@
 
 $(BUILD):

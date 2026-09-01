@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """sk-card - build, check, and fill an SD card for the spotykach engines.
 
-Ten engines read the card, using nine different directory layouts and four incompatible audio
-formats (`python3 scripts/sk_card.py layout` prints them). The firmware converts nothing: a file in
-the wrong format is not rejected, it is reinterpreted as garbage, and a file whose name is too long is
-invisible to the directory scan with no error shown. That combination makes a hand-built card hard to
-debug - the device's only feedback is an LED.
+Ten engines read the card, using nine different directory layouts and one shared audio format rule
+(`python3 scripts/sk_card.py layout` prints them). The firmware converts sample depth and channel
+count as it loads, but NOT the sample rate - and a file whose name is too long is invisible to the
+directory scan with no error shown. That combination makes a hand-built card hard to debug: the
+device's only feedback is an LED.
 
     sk_card.py init   CARD     build a complete, correct card (folders, configs, demo audio)
     sk_card.py verify CARD     check an existing card and explain anything that will not work
@@ -91,7 +91,7 @@ def _check_scan_visibility(rel: str, f: Path, bank: cl.Bank, out: list[Finding])
                                f"Convert it: sk_card.py convert --engine {bank.engine} CARD {f.name}"))
         else:
             out.append(Finding("error", rel, f"extension {f.suffix or '(none)'} is not indexed by the scan",
-                               f"Use .raw or .wav ({bank.fmt.describe()})."))
+                               f"Use .raw or .wav ({bank.accepts.describe()})."))
     try:
         size = f.stat().st_size
     except OSError:
@@ -107,9 +107,15 @@ def _check_scan_visibility(rel: str, f: Path, bank: cl.Bank, out: list[Finding])
 
 
 def _check_audio_format(rel: str, f: Path, bank: cl.Bank, out: list[Finding]) -> None:
-    """Does the file's actual encoding match what this bank's engine will read it as?"""
-    fmt = bank.fmt
-    if fmt.container == cl.RAW and f.suffix.lower() == ".raw":
+    """Can the firmware LOAD this file for this bank?
+
+    Checked against `bank.accepts` (what the device will read), not `bank.fmt` (what `convert` writes).
+    Since the unified read path the device converts depth and channel count as it loads, so a 24-bit
+    stereo file is correct here, not a finding - what remains an error is a file it cannot decode at
+    all, too many channels to fold, or the wrong sample rate on a path that does not resample.
+    """
+    acc = bank.accepts
+    if cl.RAW in acc.containers and f.suffix.lower() == ".raw":
         size = f.stat().st_size
         if size % 2:
             out.append(Finding("warn", rel, "odd byte count for a 16-bit format (last frame is partial)",
@@ -126,17 +132,18 @@ def _check_audio_format(rel: str, f: Path, bank: cl.Bank, out: list[Finding]) ->
         return
 
     problems = []
-    if info.encoding not in fmt.encodings:
-        problems.append(f"encoding is {info.describe().split(',')[0]}")
-    if fmt.channels is not None and info.channels != fmt.channels:
-        problems.append(f"{info.channels} channel(s)")
-    if fmt.rate is not None and info.rate != fmt.rate:
-        problems.append(f"{info.rate} Hz")
+    if info.encoding is None or info.encoding not in acc.encodings:
+        problems.append(f"the firmware cannot decode {info.describe().split(',')[0]}")
+    if info.channels > acc.max_channels:
+        problems.append(f"{info.channels} channels is past the {acc.max_channels}-channel downmix bound")
+    if acc.rate is not None and info.rate != acc.rate:
+        problems.append(f"{info.rate} Hz, and nothing on this path resamples")
+    elif not (cl.MIN_RATE <= info.rate <= cl.MAX_RATE):
+        problems.append(f"{info.rate} Hz is outside the {cl.MIN_RATE}..{cl.MAX_RATE} Hz the resampler takes")
     if problems:
         out.append(Finding("error", rel,
-                           f"wrong format ({', '.join(problems)}) - the firmware reads the bytes as-is, "
-                           f"so this plays as noise or not at all",
-                           f"Needs: {fmt.describe()}. "
+                           f"this will not load ({'; '.join(problems)})",
+                           f"Accepts: {acc.describe()}. "
                            f"Fix with: sk_card.py convert --engine {bank.engine} CARD {f.name}"))
         return
 

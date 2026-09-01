@@ -1,6 +1,6 @@
 # The SD card
 
-Ten engines read the SD card, and between them they use **nine different folder layouts and four incompatible audio formats**. The firmware converts nothing on the audio path — it reads file body bytes straight into audio frames — so a file in the wrong format is not rejected, it is **reinterpreted as garbage**. Several rules fail silently in ways a person cannot see from a file manager.
+Ten engines read the SD card, and between them they use **nine different folder layouts**. They now share **one audio format rule**: WAV, any PCM depth the device can decode (8/16/24/32-bit integer or 32-bit float), mono or stereo, at any sample rate from 4 kHz to 192 kHz — depth, channels and rate are all converted to each engine's own frames as it loads. The exception is a headerless `.raw`, which states nothing about itself and so must be exactly what the engine expects. Several rules fail silently in ways a person cannot see from a file manager.
 
 You do not have to learn any of this. One command builds a correct card, and another explains anything wrong with a card you already have.
 
@@ -32,16 +32,17 @@ The device's only feedback is an LED — a steady amber for an empty slot, a str
 
 | What you did | What the device does | Visible? |
 |---|---|---|
-| 16-bit or 32-bit **integer** WAV where 32-bit **float** is required | reads the bytes as float — plays as noise | no |
-| 44.1 kHz instead of 48 kHz | plays ~8% flat, or is rejected | no |
-| stereo where mono is required (or vice versa) | wrong-length frames — noise | no |
+| a depth the device has no decoder for (64-bit float, ADPCM) | **rejected** | amber strobe |
+| a sample rate outside 4–192 kHz | **rejected** | amber strobe |
+| a `.raw` that is not 16-bit mono | read as int16 anyway — plays as noise | no |
+| more than 8 channels | **rejected** — past the downmix bound | amber strobe |
 | filename longer than 12 characters in a scanned folder | file is **skipped entirely** | no |
 | file smaller than 32 KB in a scanned folder | file is **skipped entirely** | no |
 | copied an `.mp3`/`.flac` across unconverted | never opened | no |
 | macOS wrote `._NAME.wav` companions | used to index as garbage "stations" | no |
 | wrote `config.txt` as `key=value` | parses as nothing, silently | no |
 
-`sk_card.py verify` predicts all of these by re-implementing the firmware's own checks — the WAV chunk walk from `src/memory/raw_stream.h` and the directory-scan rules from `src/hw/stream_deck.cpp`.
+`sk_card.py verify` predicts all of these by re-implementing the firmware's own checks — the WAV chunk walk from `src/memory/wav_source.h`, the decodable-format set from `src/memory/pcm_convert.h`, and the directory-scan rules from `src/hw/stream_deck.cpp`.
 
 ```text
 $ make check-sdcard CARD=/media/SK
@@ -65,23 +66,27 @@ It exits non-zero if anything will not work, so it can gate a script.
 
 `python3 scripts/sk_card.py layout` prints this from the same table the tools use, with firmware source citations. In summary:
 
-| Engine | Folder | Format |
-|---|---|---|
-| granular | `SK/{B,G,P,R,T,Y}/{1..6}.WAV` | 48 kHz **stereo**, float *or* 16-bit |
-| tape | `tapes/tape_{a,b}_{1..8}.wav` | 48 kHz **mono 32-bit float** |
-| shuttle | `shuttle/tape_{a,b}_{1..8}.wav` | as tape, but ~30 s max (loaded into RAM) |
-| softcut | `softcut/loop_{a,b}_{1..8}.wav` | as tape, but ~10.9 s max (the loop buffer) |
-| radio | `radio/{0..15}/*.raw` | **headerless** 16-bit mono, 48 kHz |
-| bard | `bard/{0..15}/NAME.WAV` | 16-bit mono; 24 kHz suits speech |
-| pstretch | `pstretch/*.wav` | 16-bit mono, any rate |
-| csound | `csound/{0..7}.csd` | text |
-| chuck | `chuck/{0..7}.ck` | text |
+Every audio folder **accepts** the same thing: WAV, 8/16/24/32-bit integer or 32-bit float, mono or stereo, 4–192 kHz. What differs is only the folder, the filenames, and any length cap. The **best** column is what the engine works in natively, so the file loads with no conversion at all; `sk_card.py convert` writes exactly that.
+
+| Engine | Folder | Best | Cap |
+|---|---|---|---|
+| granular | `SK/{B,G,P,R,T,Y}/{1..6}.WAV` | 48 kHz **stereo** float | the loop buffer |
+| tape | `tapes/tape_{a,b}_{1..8}.wav` | 48 kHz **mono 32-bit float** | none (streams) |
+| shuttle | `shuttle/tape_{a,b}_{1..8}.wav` | as tape | ~30 s (loaded into RAM) |
+| softcut | `softcut/loop_{a,b}_{1..8}.wav` | as tape | ~10.9 s (the loop buffer) |
+| radio | `radio/{0..15}/*.{raw,wav}` | **headerless** 16-bit mono `.raw` | none (streams) |
+| bard | `bard/{0..15}/NAME.WAV` | 16-bit mono; 24 kHz suits speech | none (streams) |
+| pstretch | `pstretch/*.wav` | 16-bit mono | none (streams) |
+| csound | `csound/{0..7}.csd` | text | — |
+| chuck | `chuck/{0..7}.ck` | text | — |
+
+The two paths get to "any rate" differently, which only matters if you are reading the source: granular, tape, shuttle and softcut **resample on the way in**, so their buffers stay in 48 kHz frames and a loop length still means what it meant. radio, bard and pstretch instead **rebase pitch from the header rate** in their own varispeed playheads, which they already had.
 
 Plus `SK/config.txt` (settings) and `SK/MEM` (written by the device).
 
 `SK/{B,G,P,R,T,Y}` is listed under granular above, but it is really the **platform's** tape store — `kRootDir` in `src/memory/storage.cpp`, used by every engine that declares `CapTapeStorage`. Today that is granular *and* graincloud, which read and write the same six folders. That is why the folder is not named after an engine, and why renaming it would reach further than it looks.
 
-Note that **tape, shuttle and softcut share one format** — 48 kHz mono 32-bit float WAV, written and read through the same streaming service. Only the folder and the filename prefix differ, and that separation is the point: it is what stops a softcut loop overwriting a tape take, and it is how `verify` knows which length limit to apply to bytes that are otherwise identical.
+Note that **tape, shuttle and softcut share one native format** — 48 kHz mono 32-bit float WAV, written and read through the same streaming service. Only the folder and the filename prefix differ, and that separation is the point: it is what stops a softcut loop overwriting a tape take, and it is how `verify` knows which length limit to apply to bytes that are otherwise identical.
 
 **Slot folders vs scanned folders** is the distinction worth internalising. Slot folders (granular/tape/shuttle/softcut/csound/chuck) open *exact filenames*: a file named anything else is simply never opened. Scanned folders (radio/bard/pstretch) enumerate the directory and apply extra rules — the 12-character limit, the 32 KB floor, `.raw`/`.wav` only, no leading dots — so a file there can be correctly encoded and still invisible.
 

@@ -3,6 +3,8 @@
 #include "memory/audio_stream.h"  // IChunkSource / IChunkSink
 #include "memory/byte_file.h"
 #include "memory/wav.h"
+#include "memory/wav_source.h"
+#include "memory/pcm_convert.h"
 
 #include <cstdint>
 #include <cstring>
@@ -15,79 +17,72 @@ namespace spotykach {
 // isn't known when recording starts - is handled by writing a placeholder header, streaming the body,
 // then seeking back to 0 and patching the size fields on finalize().
 
+// The frame format the streaming engines (tape / shuttle / softcut) work in: mono samples of the
+// build's storage width. This is what a file is converted TO, and what recordings are still written
+// AS - the read path widened, the write path did not (docs/dev/unified-wav-reader.md).
+inline constexpr PcmFormat kStreamFrameFormat = kNativeSampleFormat;
+inline constexpr uint16_t  kStreamFrameChannels = 1;
+
 // Reads a WAV body as a byte stream: parse the header up front, seek to the data chunk, then hand out
 // body bytes, stopping exactly at DataSize (so trailing chunks past `data` aren't streamed as audio).
+// The bytes come out in the FILE's format; a caller whose file is not already in the engine's frame
+// format wraps this in a ConvertingSource (see StreamDeck::start_play).
 class WavStreamReader : public IChunkSource {
 public:
-    // Device sample rate; the streaming path does no resampling, so a non-48k file would play at the
-    // wrong pitch. Matches the rate wav.h writes into recorded headers.
+    // Device sample rate: what the ring, the engines and every recorded file are in. An off-rate file
+    // is RESAMPLED to it by ConvertingSource (in the main-loop pump), so the engines keep counting
+    // frames at this rate whatever the card holds. Matches the rate wav.h writes into recorded headers.
     static constexpr uint32_t kPlaybackSampleRate = 48000;
-    static constexpr uint32_t kMaxChunks = 64;   // scan bound: refuse a pathological chunk list rather than loop
+    // Downmix bound. The decorator can fold any of these to mono; beyond stereo it is only bandwidth,
+    // since the ring still receives one mono frame per source frame.
+    static constexpr uint16_t kMaxChannels = 8;
+    // Sanity bounds on a header's stated rate; the resampler's ratio is derived from it.
+    static constexpr uint32_t kRateMin = 4000;
+    static constexpr uint32_t kRateMax = 192000;
 
-    // `f` must be an open file positioned at 0. Returns false on a missing/invalid/unsupported header.
+    // Returns false on a missing/invalid/unsupported header. The chunk walk lives in wav_source.h
+    // (shared with wav.h and raw_stream.h); what stays HERE is the engine-capability policy:
     //
-    // Spec-compliant chunk walk. After the 12-byte RIFF/WAVE header, the file is a list of chunks, each
-    // `<4-byte id><LE32 size><body>` plus a single pad byte when `size` is odd. We step that list,
-    // capturing `fmt ` and stopping at `data`, and SKIP every chunk we don't recognise (`fact`, `LIST`,
-    // `JUNK`, `bext`, `cue `, ...) by its size - so `data` is found no matter how much metadata precedes
-    // it, exactly as a conformant reader must. We walk via seek/read instead of a fixed buffer, so there
-    // is no offset ceiling (the old 256-byte window mis-handled externally-authored files whose metadata
-    // pushed `data` further in). The mono/float32/48k checks at `data` are NOT WAV-spec strictness - they
-    // are engine-capability gates: the streaming path hands raw body bytes straight to the engine's float
-    // frames with no conversion, so a non-native file would be reinterpreted as garbage. A reject here
-    // becomes the deck's error flash (via start_play), not a mis-play. kWav* track the build (float32
-    // default, int16 under LOFI_INT16).
+    //   depth/channels - any PCM depth this firmware can convert (u8/i16/i24/i32/f32), 1..8 channels.
+    //                    Anything that is not already `kStreamFrameFormat` mono is adapted on the way
+    //                    to the ring by ConvertingSource, in the main loop.
+    //   sample rate    - any rate in kRateMin..kRateMax. An off-rate file is resampled to the device
+    //                    rate on the way to the ring, so nothing downstream sees the difference: a
+    //                    loop length, a RAM cap and a tempo-synced buffer still count 48 kHz frames.
+    //                    The bound exists to refuse a nonsense header rather than divide by it.
+    //
+    // A reject here becomes the deck's error flash (via start_play), not a mis-play.
     bool begin(IByteFile* f) {
         _f = f; _remaining = 0; _data_start = 0; _data_size = 0;
+        _src_fmt = kStreamFrameFormat; _src_ch = kStreamFrameChannels;
 
-        uint8_t riff[12];
-        if (f->read(riff, sizeof(riff)) != sizeof(riff)) return false;
-        if (std::memcmp(riff, "RIFF", 4) != 0 || std::memcmp(riff + 8, "WAVE", 4) != 0) return false;
+        WavInfo info;
+        if (!parse_wav(f, info)) return false;                       // parse_wav leaves f at the body
 
-        uint16_t audioFormat = 0, channels = 0, bits = 0;
-        uint32_t sampleRate = 0;
-        bool haveFmt = false;
+        PcmFormat fmt;
+        if (!pcm_format_of(info.audio_format, info.bits_per_sample, fmt)) return false;
+        if (info.channels < 1 || info.channels > kMaxChannels)       return false;
+        if (info.sample_rate < kRateMin || info.sample_rate > kRateMax) return false;
 
-        uint32_t pos = 12;                               // first chunk begins right after RIFF/WAVE
-        for (uint32_t guard = 0; guard < kMaxChunks; guard++) {
-            uint8_t ch[8];
-            if (!f->seek(pos)) return false;
-            if (f->read(ch, sizeof(ch)) != sizeof(ch)) return false;  // ran off the end before `data`
-            const uint32_t size = read_val<uint32_t>(ch, 4);
-            const uint32_t body = pos + 8;
-
-            if (std::memcmp(ch, "fmt ", 4) == 0) {
-                if (size < 16) return false;             // malformed: WAVEFORMAT is at least 16 bytes
-                uint8_t fb[16];
-                if (f->read(fb, sizeof(fb)) != sizeof(fb)) return false;
-                audioFormat = read_val<uint16_t>(fb, 0);
-                channels    = read_val<uint16_t>(fb, 2);
-                sampleRate  = read_val<uint32_t>(fb, 4);
-                bits        = read_val<uint16_t>(fb, 14);
-                // WAVE_FORMAT_EXTENSIBLE: the real format tag is the first 2 bytes of the SubFormat GUID
-                // (at body+24, past cbSize(2)+wValidBitsPerSample(2)+dwChannelMask(4)).
-                if (audioFormat == 0xFFFE && size >= 40) {
-                    uint8_t tag[2];
-                    if (!f->seek(body + 24) || f->read(tag, sizeof(tag)) != sizeof(tag)) return false;
-                    audioFormat = read_val<uint16_t>(tag, 0);
-                }
-                haveFmt = true;
-            } else if (std::memcmp(ch, "data", 4) == 0) {
-                if (!haveFmt)                           return false;  // `fmt ` must precede `data`
-                if (audioFormat != kWavAudioFormat)     return false;  // engine-capability gates (below)
-                if (bits        != kWavBitsPerSample)   return false;
-                if (channels    != 1)                   return false;
-                if (sampleRate  != kPlaybackSampleRate) return false;
-                if (!f->seek(body)) return false;
-                _data_start = body;
-                _data_size  = size;
-                _remaining  = size;
-                return true;
-            }
-            pos = body + size + (size & 1u);             // next chunk; chunks are word-aligned
-        }
-        return false;                                    // no `data` within kMaxChunks
+        _src_fmt    = fmt;
+        _src_ch     = info.channels;
+        _rate       = info.sample_rate;
+        _data_start = info.data_start;
+        _data_size  = info.data_size;
+        _remaining  = info.data_size;
+        return true;
     }
+
+    // What the file holds, for the caller deciding whether a ConvertingSource is needed.
+    PcmFormat src_format()      const { return _src_fmt; }
+    uint16_t  src_channels()    const { return _src_ch; }
+    uint32_t  src_rate()        const { return _rate; }
+    uint32_t  src_frame_bytes() const { return static_cast<uint32_t>(pcm_bytes(_src_fmt)) * _src_ch; }
+
+    // Length in SOURCE frames. Depth and channel conversion do not change how many frames there are;
+    // RESAMPLING does, so a caller reporting the length an engine will receive passes this through
+    // ConvertingSource::out_frames (see StreamDeck::loop_frames).
+    uint32_t frames() const { const uint32_t fb = src_frame_bytes(); return fb ? _data_size / fb : 0; }
 
     uint32_t read(uint8_t* dst, uint32_t n) override {
         if (n > _remaining) n = _remaining;
@@ -105,6 +100,9 @@ public:
 
 private:
     IByteFile* _f = nullptr;
+    PcmFormat  _src_fmt = kStreamFrameFormat;   // the FILE's sample format (not the engine's)
+    uint16_t   _src_ch  = kStreamFrameChannels;
+    uint32_t   _rate    = kPlaybackSampleRate;  // the FILE's rate (resampled to the device rate)
     uint32_t   _remaining  = 0;  // body bytes not yet read
     uint32_t   _data_start = 0;  // byte offset of the data-chunk body (rewind target)
     uint32_t   _data_size  = 0;  // total body bytes (DataSize)

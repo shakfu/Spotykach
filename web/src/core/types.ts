@@ -5,8 +5,9 @@
 // checked against it. If a field appears here that the export does not produce, the types are lying -
 // which is why `makeLayout` still validates the schema number at runtime rather than trusting the cast.
 
-export type Encoding = 'f32' | 'int16';
+export type Encoding = 'u8' | 'int16' | 'int24' | 'int32' | 'f32';
 
+/** What `convert` WRITES for a bank: the engine's native frame format. Not an acceptance rule. */
 export interface FormatSpec {
   container: 'wav' | 'raw' | 'text';
   encodings: Encoding[];
@@ -18,12 +19,32 @@ export interface FormatSpec {
   describe: string;
 }
 
+/**
+ * What the FIRMWARE WILL LOAD for a bank - the rule Verify predicts against.
+ *
+ * Since the unified read path the device converts sample depth and channel count as a file loads, so
+ * this is deliberately much wider than `FormatSpec`: what remains an error is a file it cannot decode
+ * at all, too many channels to fold, or the wrong sample rate on a path that does not resample.
+ */
+export interface AcceptSpec {
+  containers: ('wav' | 'raw' | 'text')[];
+  encodings: Encoding[];
+  max_channels: number;
+  /** null where any rate works (the scanned banks resample by the file's own header rate). */
+  rate: number | null;
+  note: string;
+  describe: string;
+}
+
 export interface Bank {
   engine: string;
   kind: 'slots' | 'scanned' | 'config';
   scanned: boolean;
   dirs: string[];
+  /** What `convert` writes here. */
   fmt: FormatSpec;
+  /** What the firmware will load here. */
+  accepts: AcceptSpec;
   slots: string[];
   max_files: number | null;
   max_seconds: number | null;
@@ -44,6 +65,12 @@ export interface ScanRules {
   skip_dot: boolean;
 }
 
+/** What the on-device resampler will take; outside this the firmware refuses the file. */
+export interface RateBounds {
+  min: number;
+  max: number;
+}
+
 export interface RootReadme {
   bare: string;
   [variant: string]: string;
@@ -54,6 +81,7 @@ export interface LayoutData {
   generated_by: string;
   scan: ScanRules;
   encodings: Record<Encoding, { bits: number; wav_format: number; label: string }>;
+  rate_bounds: RateBounds;
   banks: Bank[];
   all_dirs: string[];
   granular_tapes: string[];

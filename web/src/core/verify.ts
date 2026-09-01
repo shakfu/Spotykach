@@ -86,7 +86,7 @@ function checkScanVisibility(layout: Layout, entry: CardEntry, bank: Bank, out: 
         `Convert it on the Convert tab, or: sk_card.py convert --engine ${bank.engine} CARD ${name}`));
     } else {
       out.push(finding('error', rel, `extension ${ext || '(none)'} is not indexed by the scan`,
-        `Use .raw or .wav (${bank.fmt.describe}).`));
+        `Use .raw or .wav (${bank.accepts.describe}).`));
     }
   }
   const floor = layout.scan.min_bytes;
@@ -121,12 +121,12 @@ async function parseHeader(entry: CardEntry): Promise<WavInfo> {
  * disagreeing would be worse than either being strict.
  */
 async function checkAudioFormat(
-  _layout: Layout, entry: CardEntry, bank: Bank, out: Finding[],
+  layout: Layout, entry: CardEntry, bank: Bank, out: Finding[],
 ): Promise<void> {
   const rel = entry.path;
-  const fmt = bank.fmt;
+  const acc = bank.accepts;
   const ext = suffixOf(baseOf(rel)).toLowerCase();
-  if (fmt.container === 'raw' && ext === '.raw') {
+  if (acc.containers.includes('raw') && ext === '.raw') {
     if (entry.size % 2) {
       out.push(finding('warn', rel, 'odd byte count for a 16-bit format (last frame is partial)',
         'Harmless - the firmware floors to a whole frame - but usually means the file was truncated '
@@ -146,16 +146,22 @@ async function checkAudioFormat(
   }
 
   const problems: string[] = [];
-  if (!info.encoding || !fmt.encodings.includes(info.encoding)) {
-    problems.push(`encoding is ${info.describe().split(',')[0]}`);
+  if (!info.encoding || !acc.encodings.includes(info.encoding)) {
+    problems.push(`the firmware cannot decode ${info.describe().split(',')[0]}`);
   }
-  if (fmt.channels != null && info.channels !== fmt.channels) problems.push(`${info.channels} channel(s)`);
-  if (fmt.rate != null && info.rate !== fmt.rate) problems.push(`${info.rate} Hz`);
+  if (info.channels > acc.max_channels) {
+    problems.push(`${info.channels} channels is past the ${acc.max_channels}-channel downmix bound`);
+  }
+  if (acc.rate != null && info.rate !== acc.rate) {
+    problems.push(`${info.rate} Hz, and nothing on this path resamples`);
+  } else if (info.rate < layout.data.rate_bounds.min || info.rate > layout.data.rate_bounds.max) {
+    problems.push(`${info.rate} Hz is outside the ${layout.data.rate_bounds.min}..`
+      + `${layout.data.rate_bounds.max} Hz the resampler takes`);
+  }
   if (problems.length) {
     out.push(finding('error', rel,
-      `wrong format (${problems.join(', ')}) - the firmware reads the bytes as-is, so this plays as `
-      + 'noise or not at all',
-      `Needs: ${fmt.describe}. Fix it on the Convert tab, or: sk_card.py convert --engine `
+      `this will not load (${problems.join('; ')})`,
+      `Accepts: ${acc.describe}. Fix it on the Convert tab, or: sk_card.py convert --engine `
       + `${bank.engine} CARD ${baseOf(rel)}`));
     return;
   }

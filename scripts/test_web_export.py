@@ -182,7 +182,8 @@ def test_the_broken_card_fixture_exercises_every_finding_shape():
         "starts with a dot",               # AppleDouble stub
         "compressed/unsupported source",   # an mp3 dropped on the card
         "WAV parser would reject",         # bytes that are not a WAV at all
-        "wrong format",                    # right container, wrong rate/channels/depth
+        "outside the",                          # a rate outside what the resampler takes
+        "cannot decode",                        # a legal WAV with no decoder on the device
         "odd byte count",                  # truncated headerless raw
         "slot filenames",                  # a name the engine never opens
         "is outside 1..16",                # config value out of range

@@ -23,7 +23,7 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
-from card_layout import F32, INT16
+from card_layout import F32, INT16, INT24, INT32, U8
 
 WAVE_FORMAT_PCM = 1
 WAVE_FORMAT_FLOAT = 3
@@ -45,10 +45,11 @@ class WavInfo:
 
     @property
     def encoding(self) -> str | None:
+        """The firmware's `pcm_format_of` (src/memory/pcm_convert.h): None = it cannot decode this."""
         if self.fmt == WAVE_FORMAT_FLOAT and self.bits == 32:
             return F32
-        if self.fmt == WAVE_FORMAT_PCM and self.bits == 16:
-            return INT16
+        if self.fmt == WAVE_FORMAT_PCM:
+            return {8: U8, 16: INT16, 24: INT24, 32: INT32}.get(self.bits)
         return None
 
     @property

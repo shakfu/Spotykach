@@ -1,5 +1,6 @@
 #include "card.h"
-#include "../memory/wav.h"
+#include "../memory/wav.h"        // kWavBytesPerSample (the buffer's storage width)
+#include "../memory/wav_source.h"  // parse_wav / WavInfo (the shared RIFF chunk walk)
 #include <string.h>
 
 // Size-optimize this whole TU to reclaim SRAM_EXEC. SD-card chunked I/O is main-loop only (never
@@ -8,6 +9,12 @@
 
 using namespace spotykach;
 using namespace daisy;
+
+// The buffer's own rate, and sanity bounds on a header's stated rate (the resample ratio divides by
+// it). Mirrors WavStreamReader::kPlaybackSampleRate / kRateMin / kRateMax on the streaming path.
+static constexpr uint32_t kDeviceRate = 48000;
+static constexpr uint32_t kMinRate    = 4000;
+static constexpr uint32_t kMaxRate    = 192000;
 
 Card::Card():
 _state { State::unmounted }
@@ -37,8 +44,7 @@ void Card::init_read_audio(const AudioData data)
     strcat(audio_path, "/");
     strcat(audio_path, data.file_name);
 
-    WavHeader hdr;
-    size_t hdr_size = 0;
+    WavInfo info;
     size_t bytesread = 0;
     
     if (f_open(&_sdfile, audio_path, FA_OPEN_EXISTING | FA_READ) != FR_OK) {
@@ -46,26 +52,32 @@ void Card::init_read_audio(const AudioData data)
         return;
     }
     
+    // The header is parsed out of the first chunk we already read, through the shared RIFF walk
+    // (memory/wav_source.h) that the streaming readers use. Bound the walk by `bytesread`, not
+    // kChunk: a file shorter than one chunk leaves the rest of _buffer holding the previous read's
+    // bytes, and a walk that stepped into them would be parsing stale data.
     if (f_read(&_sdfile, _buffer, kChunk, &bytesread) != FR_OK
-    || !wav_header(_buffer, kChunk, hdr, hdr_size)) {
+    || !parse_wav(_buffer, (uint32_t)bytesread, info)) {
         _state = State::failed;
         _close_file();
         return;
     }
-    
-    #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-    // Accept both supported depths regardless of build: 32-bit float (AudioFormat 3) and
-    // 16-bit PCM (AudioFormat 1). If the file's depth differs from this build's buffer
-    // storage (kWav*), samples are converted on the fly in read_audio() - so float tapes
-    // load into a 16-bit firmware and vice versa.
-    auto fmt_ok = (hdr.AudioFormat == 3 && hdr.BitsPerSample == 32)
-               || (hdr.AudioFormat == 1 && hdr.BitsPerSample == 16);
-    if (hdr.NbrChannels == 2
-        && hdr.SampleRate == 48000
-        && fmt_ok
-        && hdr.DataSize > 0) {
-            _loader.begin((size_t)hdr.DataSize, hdr.BitsPerSample / 8,
-                          data.body, data.body_size, kWavBytesPerSample);
+
+    // Accept any PCM depth this firmware can decode (u8/i16/i24/i32/f32), 1..8 channels, and any
+    // sane rate: whatever the file holds is converted to the buffer's stereo native frames as it
+    // loads (PcmLoader), so a mono 24-bit 44.1 kHz file loads as correctly as the stereo float one
+    // the engine records. Resampling on LOAD rather than on playback is what keeps the buffer in
+    // device frames, so every frame<->tempo<->tick relationship downstream is untouched.
+    PcmFormat src_fmt;
+    const bool fmt_ok = pcm_format_of(info.audio_format, info.bits_per_sample, src_fmt);
+    const bool rate_ok = info.sample_rate >= kMinRate && info.sample_rate <= kMaxRate;
+    if (fmt_ok
+        && info.channels >= 1 && info.channels <= kPcmMaxChannels
+        && rate_ok
+        && info.data_size > 0) {
+            _loader.begin((size_t)info.data_size, src_fmt, info.channels,
+                          data.body, data.body_size, kNativeSampleFormat, 2,
+                          info.sample_rate, kDeviceRate);
             _offset = 0;
             _size   = _loader.size_bytes();  // keep progress() in sync
             _state  = State::read_audio;
@@ -75,7 +87,7 @@ void Card::init_read_audio(const AudioData data)
         _close_file();
     }
 
-    if (f_lseek(&_sdfile, hdr_size) != FR_OK) {
+    if (f_lseek(&_sdfile, info.data_start) != FR_OK) {
         _state = State::failed;
         _close_file();
     }
@@ -93,9 +105,9 @@ void Card::read_audio()
         return;
     }
 
-    // kChunk is a multiple of both sample widths and WAV data is sample-aligned, so every
-    // chunk holds whole samples - no cross-chunk straddle. The loader converts (when the
-    // file depth differs from the buffer) and tracks the byte/frame accounting.
+    // The loader converts (when the file's format differs from the buffer's) and tracks the
+    // byte/frame accounting, carrying any frame that straddles a chunk boundary - kChunk does not
+    // divide every frame size (a stereo 24-bit frame is 6 bytes).
     bool buffer_full = _loader.feed(_buffer, bytesread);
     _offset = _loader.offset();                  // keep progress() in sync
     _size_read_audio = _loader.frames();

@@ -24,6 +24,13 @@ static bool join_path(const char* dir, const char* name, char* buf, int cap) {
     return true;
 }
 
+// The source PlayStream is bound to: the adapter when the file needs converting, else the reader that
+// matches this deck's mode. One place, so start/seek/restart can never disagree about it.
+IChunkSource* StreamDeck::_play_src(Deck& d) {
+    if (d.conv_on) return &d.conv;
+    return d.raw_src ? static_cast<IChunkSource*>(&d.raw) : static_cast<IChunkSource*>(&d.reader);
+}
+
 void StreamDeck::init(const Mem& m) {
     _d[0].ring.init(m.ring_a, m.ring_a_bytes);
     _d[1].ring.init(m.ring_b, m.ring_b_bytes);
@@ -37,9 +44,23 @@ bool StreamDeck::start_play(DeckRef::Ref deck, const char* path) {
     Deck& d = _d[deck];
     if (d.mode.load(std::memory_order_acquire) != Mode::idle || d.finalizing) return false;
     if (!d.file.open_read(path)) return false;
-    if (!d.reader.begin(&d.file)) { d.file.close(); return false; }   // not a valid WAV
+    if (!d.reader.begin(&d.file)) { d.file.close(); return false; }   // not a valid/loadable WAV
     d.raw_src = false;
-    d.play.start(&d.reader);
+
+    // A file already in the engine's frame format streams straight through (a plain memcpy per chunk,
+    // the format this deck records in). Anything else - another depth, or stereo - goes through the
+    // adapter, which converts in this same main-loop pump; the ring and the ISR see mono frames either
+    // way. A shape the adapter cannot serve is a failed start, i.e. the deck's error flash.
+    const uint32_t rate = WavStreamReader::kPlaybackSampleRate;
+    d.conv_on = !ConvertingSource::is_identity(d.reader.src_format(), d.reader.src_channels(),
+                                               kStreamFrameFormat, kStreamFrameChannels,
+                                               d.reader.src_rate(), rate);
+    if (d.conv_on && !d.conv.begin(&d.reader, d.reader.src_format(), d.reader.src_channels(),
+                                   kStreamFrameFormat, kStreamFrameChannels,
+                                   d.reader.src_rate(), rate)) {
+        d.file.close(); return false;
+    }
+    d.play.start(_play_src(d));
     d.mode.store(Mode::play, std::memory_order_release);             // ISR may now consume
     return true;
 }
@@ -74,7 +95,14 @@ void StreamDeck::set_loop(DeckRef::Ref deck, bool loop) {
 uint32_t StreamDeck::loop_frames(DeckRef::Ref deck) const {
     const Deck& d = _d[deck];
     if (d.mode.load(std::memory_order_acquire) != Mode::play) return 0;
-    return d.reader.data_bytes() / static_cast<uint32_t>(sizeof(float));  // mono float: 4 bytes/frame
+    // Frames, not bytes - and the count the ENGINE will receive, which is what every caller uses it
+    // for (a RAM-load target, a loop-seam length). Depth and channel conversion do not change how many
+    // frames there are, so a stereo 24-bit file reports the same length as the mono float file it
+    // converts to; RESAMPLING does, so an off-rate file reports its length at the device rate. That is
+    // what keeps a 44.1 kHz loop the same number of buffer frames as a take recorded on the device.
+    if (d.raw_src) return d.raw.frames();               // scanned path: pitch is rebased in the engine
+    return ConvertingSource::out_frames(d.reader.frames(), d.reader.src_rate(),
+                                        WavStreamReader::kPlaybackSampleRate);
 }
 
 bool StreamDeck::exists(const char* path) const {
@@ -94,14 +122,17 @@ bool StreamDeck::start_play_raw(DeckRef::Ref deck, const char* path, uint32_t st
     if (!d.raw.begin(&d.file, static_cast<uint32_t>(fno.fsize))) { d.file.close(); return false; }  // empty
     d.raw.seek_to_frame(start_frame);                               // jump to the virtual position
     d.play.set_loop(loop);
-    d.play.start(&d.raw);
+    d.play.start(&d.raw);                                           // headerless int16 mono: never converted
     d.raw_src = true;
+    d.conv_on = false;
     d.mode.store(Mode::play, std::memory_order_release);            // ISR may now consume
     return true;
 }
 
-// As start_play_raw, but the source is a 16-bit-mono PCM .wav: begin_wav parses the header (the file's
-// own rate is captured into the bank index by scan_bank, not here) and the seek lands past it.
+// As start_play_raw, but the source is a PCM .wav: begin_wav parses the header (the file's own rate is
+// captured into the bank index by scan_bank, not here) and the seek lands past it. A body that is not
+// already int16 mono goes through the adapter; `start_frame` and every later seek stay in SOURCE frames,
+// which conversion does not change the count of, so the free-running playhead math is untouched.
 bool StreamDeck::start_play_wav(DeckRef::Ref deck, const char* path, uint32_t start_frame, bool loop) {
     Deck& d = _d[deck];
     if (d.mode.load(std::memory_order_acquire) != Mode::idle || d.finalizing) return false;
@@ -110,10 +141,18 @@ bool StreamDeck::start_play_wav(DeckRef::Ref deck, const char* path, uint32_t st
     if (!d.file.open_read(path)) return false;
     uint32_t rate = 0;
     if (!d.raw.begin_wav(&d.file, static_cast<uint32_t>(fno.fsize), rate)) { d.file.close(); return false; }
+
+    d.conv_on = !ConvertingSource::is_identity(d.raw.src_format(), d.raw.src_channels(),
+                                               kRawFrameFormat, kRawFrameChannels);
+    if (d.conv_on && !d.conv.begin(&d.raw, d.raw.src_format(), d.raw.src_channels(),
+                                   kRawFrameFormat, kRawFrameChannels)) {
+        d.file.close(); d.conv_on = false; return false;
+    }
     d.raw.seek_to_frame(start_frame);
+    d.conv.reset_carry();                                           // no bytes from before the seek
+    d.raw_src = true;                                               // before _play_src: it picks by this
     d.play.set_loop(loop);
-    d.play.start(&d.raw);
-    d.raw_src = true;
+    d.play.start(_play_src(d));
     d.mode.store(Mode::play, std::memory_order_release);
     return true;
 }
@@ -131,7 +170,10 @@ bool StreamDeck::seek_play(DeckRef::Ref deck, uint32_t frame) {
         d.mode.store(Mode::play, std::memory_order_release);  // seek failed: leave the deck as it was
         return false;
     }
-    d.play.start(&d.raw);                                   // flush + re-seed the ring, clear eof
+    // Drop any partial source frame the adapter was holding: it is bytes from BEFORE the seek, and
+    // converting it now would stitch one frame out of both sides of the jump.
+    d.conv.reset_carry();
+    d.play.start(_play_src(d));                             // flush + re-seed the ring, clear eof
     d.mode.store(Mode::play, std::memory_order_release);
     return true;
 }

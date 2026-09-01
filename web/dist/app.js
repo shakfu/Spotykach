@@ -642,6 +642,9 @@ function mountBuild(root, ctx) {
 // src/core/wav.ts
 var F32 = "f32";
 var INT16 = "int16";
+var U8 = "u8";
+var INT24 = "int24";
+var INT32 = "int32";
 var WAVE_FORMAT_PCM = 1;
 var WAVE_FORMAT_FLOAT = 3;
 var WAVE_FORMAT_EXTENSIBLE = 65534;
@@ -683,9 +686,20 @@ class WavInfo {
   get encoding() {
     if (this.fmt === WAVE_FORMAT_FLOAT && this.bits === 32)
       return F32;
-    if (this.fmt === WAVE_FORMAT_PCM && this.bits === 16)
-      return INT16;
-    return null;
+    if (this.fmt !== WAVE_FORMAT_PCM)
+      return null;
+    switch (this.bits) {
+      case 8:
+        return U8;
+      case 16:
+        return INT16;
+      case 24:
+        return INT24;
+      case 32:
+        return INT32;
+      default:
+        return null;
+    }
   }
   get frames() {
     const bytesPerFrame = Math.max(1, Math.floor(this.bits / 8) * Math.max(1, this.channels));
@@ -1127,7 +1141,7 @@ function checkScanVisibility(layout, entry, bank, out) {
     if (layout.isSourceExt(ext)) {
       out.push(finding2("error", rel, `${ext} is a compressed/unsupported source format - the firmware has no decoder, and the scan ` + "only indexes .raw/.wav", `Convert it on the Convert tab, or: sk_card.py convert --engine ${bank.engine} CARD ${name}`));
     } else {
-      out.push(finding2("error", rel, `extension ${ext || "(none)"} is not indexed by the scan`, `Use .raw or .wav (${bank.fmt.describe}).`));
+      out.push(finding2("error", rel, `extension ${ext || "(none)"} is not indexed by the scan`, `Use .raw or .wav (${bank.accepts.describe}).`));
     }
   }
   const floor = layout.scan.min_bytes;
@@ -1147,11 +1161,11 @@ async function parseHeader(entry) {
     return parseWav(await entry.read(), entry.size);
   }
 }
-async function checkAudioFormat(_layout, entry, bank, out) {
+async function checkAudioFormat(layout, entry, bank, out) {
   const rel = entry.path;
-  const fmt = bank.fmt;
+  const acc = bank.accepts;
   const ext = suffixOf(baseOf(rel)).toLowerCase();
-  if (fmt.container === "raw" && ext === ".raw") {
+  if (acc.containers.includes("raw") && ext === ".raw") {
     if (entry.size % 2) {
       out.push(finding2("warn", rel, "odd byte count for a 16-bit format (last frame is partial)", "Harmless - the firmware floors to a whole frame - but usually means the file was truncated " + "or is not actually int16."));
     }
@@ -1167,15 +1181,19 @@ async function checkAudioFormat(_layout, entry, bank, out) {
     return;
   }
   const problems = [];
-  if (!info.encoding || !fmt.encodings.includes(info.encoding)) {
-    problems.push(`encoding is ${info.describe().split(",")[0]}`);
+  if (!info.encoding || !acc.encodings.includes(info.encoding)) {
+    problems.push(`the firmware cannot decode ${info.describe().split(",")[0]}`);
   }
-  if (fmt.channels != null && info.channels !== fmt.channels)
-    problems.push(`${info.channels} channel(s)`);
-  if (fmt.rate != null && info.rate !== fmt.rate)
-    problems.push(`${info.rate} Hz`);
+  if (info.channels > acc.max_channels) {
+    problems.push(`${info.channels} channels is past the ${acc.max_channels}-channel downmix bound`);
+  }
+  if (acc.rate != null && info.rate !== acc.rate) {
+    problems.push(`${info.rate} Hz, and nothing on this path resamples`);
+  } else if (info.rate < layout.data.rate_bounds.min || info.rate > layout.data.rate_bounds.max) {
+    problems.push(`${info.rate} Hz is outside the ${layout.data.rate_bounds.min}..` + `${layout.data.rate_bounds.max} Hz the resampler takes`);
+  }
   if (problems.length) {
-    out.push(finding2("error", rel, `wrong format (${problems.join(", ")}) - the firmware reads the bytes as-is, so this plays as ` + "noise or not at all", `Needs: ${fmt.describe}. Fix it on the Convert tab, or: sk_card.py convert --engine ` + `${bank.engine} CARD ${baseOf(rel)}`));
+    out.push(finding2("error", rel, `this will not load (${problems.join("; ")})`, `Accepts: ${acc.describe}. Fix it on the Convert tab, or: sk_card.py convert --engine ` + `${bank.engine} CARD ${baseOf(rel)}`));
     return;
   }
   if (bank.max_seconds && info.seconds > bank.max_seconds * 1.02) {
@@ -4123,5 +4141,5 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 }
 main();
 
-//# debugId=A2E004CD0719F76664756E2164756E21
+//# debugId=65428D650D8A5BA764756E2164756E21
 //# sourceMappingURL=app.js.map

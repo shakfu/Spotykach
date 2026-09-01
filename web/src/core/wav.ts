@@ -16,12 +16,15 @@ import type { Encoding } from './types.ts';
 
 export const F32: Encoding = 'f32';
 export const INT16: Encoding = 'int16';
+export const U8: Encoding = 'u8';
+export const INT24: Encoding = 'int24';
+export const INT32: Encoding = 'int32';
 
 export const WAVE_FORMAT_PCM = 1;
 export const WAVE_FORMAT_FLOAT = 3;
 export const WAVE_FORMAT_EXTENSIBLE = 0xfffe;
 
-export const MAX_CHUNKS = 64; // raw_stream.h:24 - kMaxChunks, the firmware's chunk-walk bound
+export const MAX_CHUNKS = 64; // wav_source.h - kWavMaxChunks, the firmware's chunk-walk bound
 
 /** The firmware's header parse would fail on this file (so it reads as empty / is skipped). */
 export class WavError extends Error {}
@@ -59,10 +62,17 @@ export class WavInfo {
     readonly dataSize: number,
   ) {}
 
+  /** The firmware's `pcm_format_of` (src/memory/pcm_convert.h): null = it cannot decode this. */
   get encoding(): Encoding | null {
     if (this.fmt === WAVE_FORMAT_FLOAT && this.bits === 32) return F32;
-    if (this.fmt === WAVE_FORMAT_PCM && this.bits === 16) return INT16;
-    return null;
+    if (this.fmt !== WAVE_FORMAT_PCM) return null;
+    switch (this.bits) {
+      case 8: return U8;
+      case 16: return INT16;
+      case 24: return INT24;
+      case 32: return INT32;
+      default: return null;
+    }
   }
 
   get frames(): number {
