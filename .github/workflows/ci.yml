@@ -54,7 +54,7 @@ jobs:
     name: tests (host, unit, python, web)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -161,7 +161,7 @@ jobs:
           # the matrix keeps proving the line build still links after codec changes.
           - ENGINE=delay TERMINAL=1 OSC=1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -219,7 +219,7 @@ jobs:
         # on the command line. That asymmetry is intentional and is itself worth having under test.
         engine: [granular, graincloud, pstretch, reverb, softcut, mosc]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 

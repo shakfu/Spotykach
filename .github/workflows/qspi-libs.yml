@@ -46,7 +46,7 @@ jobs:
             fetch: scripts/fetch_chuck.sh
             target: ENGINE=chuck APP_TYPE=BOOT_QSPI LDSCRIPT=linker/alt_qspi_chuck.lds
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
